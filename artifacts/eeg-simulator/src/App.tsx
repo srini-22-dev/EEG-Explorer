@@ -2,22 +2,24 @@ import React, { useState } from 'react';
 import { ControlPanel } from './components/ControlPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
-import { resetGenerator } from './utils/eegGenerator';
+import { SimSettings, resetGenerator } from './utils/eegGenerator';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 export default function App() {
   const [montageId, setMontageId] = useState<string>('bipolar-ap');
   const [artifacts, setArtifacts] = useState<Set<string>>(new Set());
   const [sleepStructures, setSleepStructures] = useState<Set<string>>(new Set());
-  
-  const [speed, setSpeed] = useState<number>(30);
-  const [gain, setGain] = useState<number>(1);
+  const [speed, setSpeed] = useState<15 | 30 | 60>(30);
+  const [sensitivity, setSensitivity] = useState<5 | 7 | 10 | 15>(7);
 
-  const toggleSet = (set: Set<string>, setFunction: React.Dispatch<React.SetStateAction<Set<string>>>, item: string) => {
-    setFunction(prev => {
+  const toggleSet = (
+    set: Set<string>,
+    setFn: React.Dispatch<React.SetStateAction<Set<string>>>,
+    item: string
+  ) => {
+    setFn(prev => {
       const next = new Set(prev);
-      if (next.has(item)) next.delete(item);
-      else next.add(item);
+      if (next.has(item)) next.delete(item); else next.add(item);
       return next;
     });
   };
@@ -28,38 +30,33 @@ export default function App() {
     resetGenerator();
   };
 
-  const currentMontage = MONTAGES[montageId];
-  
-  const settings = {
-    speed: speed as 15 | 30 | 60,
-    gain: gain as 0.5 | 1 | 2,
+  const settings: SimSettings = {
+    speed,
+    sensitivity,
     artifacts,
-    sleepStructures
+    sleepStructures,
   };
 
-  // Compile active effects for overlay
   const activeEffects = [
-    ...Array.from(artifacts).map(a => {
-      if(a === 'electrode-pop') return 'Electrode Pop';
-      if(a === 'sweat') return 'Sweat Drift';
-      if(a === '50hz') return '50Hz Mains';
-      if(a === 'blink') return 'Eye Blink';
-      if(a === 'eye-movement') return 'Lateral Eye Mvt';
-      return a;
-    }),
-    ...Array.from(sleepStructures).map(s => {
-      if(s === 'posts') return 'POSTS';
-      if(s === 'v-waves') return 'V Waves';
-      if(s === 'k-complex') return 'K Complex';
-      if(s === 'spindles') return 'Spindles';
-      return s;
-    })
+    ...Array.from(artifacts).map(a => ({
+      'electrode-pop': 'Electrode Pop',
+      sweat:           'Sweat Drift',
+      '50hz':          '50 Hz Mains',
+      blink:           'Eye Blink',
+      'eye-movement':  'Lateral Eye Mvt',
+    })[a] ?? a),
+    ...Array.from(sleepStructures).map(s => ({
+      posts:       'POSTS',
+      'v-waves':   'V Waves',
+      'k-complex': 'K Complex',
+      spindles:    'Spindles',
+    })[s] ?? s),
   ];
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen w-full bg-slate-950 overflow-hidden font-sans">
-        <ControlPanel 
+      <div className="flex h-screen w-full overflow-hidden font-sans bg-[#c8e6c0]">
+        <ControlPanel
           montageId={montageId}
           setMontageId={setMontageId}
           artifacts={artifacts}
@@ -68,13 +65,13 @@ export default function App() {
           toggleSleepStructure={(id) => toggleSet(sleepStructures, setSleepStructures, id)}
           speed={speed}
           setSpeed={setSpeed}
-          gain={gain}
-          setGain={setGain}
+          sensitivity={sensitivity}
+          setSensitivity={setSensitivity}
           clearAll={clearAll}
         />
-        <div className="flex-1 flex flex-col h-full bg-black">
-          <EEGCanvas 
-            montage={currentMontage}
+        <div className="flex-1 flex flex-col h-full">
+          <EEGCanvas
+            montage={MONTAGES[montageId]}
             settings={settings}
             activeEffects={activeEffects}
           />
