@@ -1,242 +1,685 @@
 import { Electrode, ALL_ELECTRODES } from './montages';
 
-export type PatientState = 'awake' | 'drowsy' | 'sleep';
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type PatientState = 'awake' | 'drowsy' | 'n1' | 'n2' | 'n3';
 
 export type SimSettings = {
   speed: 15 | 30 | 60;
-  sensitivity: 5 | 7 | 10 | 15; // µV per mm
+  sensitivity: 5 | 7 | 10 | 15;
   patientState: PatientState;
-  artifacts: Set<string>;
-  sleepStructures: Set<string>;
+  activePatterns: Set<string>;
 };
 
-// Persistent per-electrode phase offsets (prevent discontinuities on re-render)
-const electrodePhases = new Map<Electrode, {
+// ─── Persistent per-electrode phase offsets ──────────────────────────────────
+
+type ElPhase = {
   alpha: number; alpha2: number;
   beta: number;
   theta: number; theta2: number;
-  delta: number;
-}>();
+  delta: number; delta2: number;
+  mu: number;
+};
 
-ALL_ELECTRODES.forEach(el => {
-  electrodePhases.set(el, {
+const elPhase = new Map<string, ElPhase>();
+[...ALL_ELECTRODES, 'A1', 'A2'].forEach(el => {
+  elPhase.set(el, {
     alpha:  Math.random() * Math.PI * 2,
     alpha2: Math.random() * Math.PI * 2,
     beta:   Math.random() * Math.PI * 2,
     theta:  Math.random() * Math.PI * 2,
     theta2: Math.random() * Math.PI * 2,
     delta:  Math.random() * Math.PI * 2,
+    delta2: Math.random() * Math.PI * 2,
+    mu:     Math.random() * Math.PI * 2,
   });
 });
-(['A1', 'A2'] as Electrode[]).forEach(el =>
-  electrodePhases.set(el, { alpha: 0, alpha2: 0, beta: 0, theta: 0, theta2: 0, delta: 0 })
-);
 
-// Episodic event timing
-let lastElectrodePopTime = -100;
-let popElectrode: Electrode | null = null;
-let sweatStartTime  = -100;
-let blinkTime       = -100;
-let eyeMovementTime = -100;
-let postsTime       = -100;
-let vWaveTime       = -100;
-let kComplexTime    = -100;
-let spindleTime     = -100;
+// ─── Global pattern timing state ─────────────────────────────────────────────
+const T: Record<string, number> = {};
+const getT = (k: string) => T[k] ?? -1000;
+const setT = (k: string, v: number) => { T[k] = v; };
 
+/** Reset all timing so patterns re-trigger from the current moment */
 export function resetGenerator() {
-  lastElectrodePopTime = -100;
-  sweatStartTime  = -100;
-  blinkTime       = -100;
-  eyeMovementTime = -100;
-  postsTime       = -100;
-  vWaveTime       = -100;
-  kComplexTime    = -100;
-  spindleTime     = -100;
-  popElectrode    = null;
+  Object.keys(T).forEach(k => { T[k] = -1000; });
 }
 
-function gaussian(x: number, center: number, width: number) {
-  return Math.exp(-((x - center) ** 2) / (2 * width * width));
+// ─── Utility functions ───────────────────────────────────────────────────────
+
+function gaussian(x: number, mu: number, sigma: number) {
+  return Math.exp(-((x - mu) ** 2) / (2 * sigma * sigma));
 }
 
-/** Simulated ECG — normal sinus rhythm ~72 bpm, returns µV-scale value */
+/** Simulate a spike + slow-wave complex starting at dt=0 */
+function spikeSlowWave(dt: number, ampSpike: number, ampSlow: number): number {
+  if (dt < 0 || dt > 0.9) return 0;
+  const spike = ampSpike * gaussian(dt, 0.05, 0.022);
+  const slow  = -ampSlow  * gaussian(dt, 0.45, 0.16);
+  return spike + slow;
+}
+
+/** Triphasic complex (−, +, −) starting at dt=0 */
+function triphasicWave(dt: number, amp: number): number {
+  if (dt < 0 || dt > 0.7) return 0;
+  const p1 = -amp * 0.25 * gaussian(dt, 0.06, 0.025);  // initial neg
+  const p2 =  amp * 1.00 * gaussian(dt, 0.22, 0.06);   // large positive
+  const p3 = -amp * 0.50 * gaussian(dt, 0.48, 0.09);   // trailing neg
+  return p1 + p2 + p3;
+}
+
+/** ECG: normal sinus rhythm ~72 bpm */
 export function getECGVoltage(t: number): number {
   const period = 60 / 72;
   const phase  = (t % period) / period;
   let v = 0;
   v += 0.12 * gaussian(phase, 0.18,  0.025);   // P wave
-  v -= 0.06 * gaussian(phase, 0.285, 0.008);   // Q dip
-  v += 1.00 * gaussian(phase, 0.305, 0.012);   // R spike
-  v -= 0.12 * gaussian(phase, 0.330, 0.010);   // S dip
+  v -= 0.06 * gaussian(phase, 0.285, 0.008);   // Q
+  v += 1.00 * gaussian(phase, 0.305, 0.012);   // R
+  v -= 0.12 * gaussian(phase, 0.330, 0.010);   // S
   v += 0.25 * gaussian(phase, 0.520, 0.045);   // T wave
   return v * 500;
 }
 
-/** Generate absolute electrode voltage (µV) for a single electrode at time t */
-export function getElectrodeVoltage(
-  electrode: Electrode,
-  t: number,
-  settings: SimSettings,
-): number {
-  if (electrode === 'A1' || electrode === 'A2') return (Math.random() - 0.5) * 3;
+// ─── Electrode topology helpers ──────────────────────────────────────────────
 
-  const ph = electrodePhases.get(electrode)!;
-  const st = settings.patientState;
+function classify(el: string) {
+  return {
+    isOccipital: ['O1','O2'].includes(el),
+    isParietal:  ['P3','P4','Pz'].includes(el),
+    isPostTmp:   ['T5','T6'].includes(el),
+    isFrontal:   ['Fp1','Fp2','F3','F4','F7','F8','Fz'].includes(el),
+    isCentral:   ['C3','Cz','C4'].includes(el),
+    isTemporal:  ['T3','T4'].includes(el),
+    isLeftTmp:   ['T3','F7','T5'].includes(el),
+    isRightTmp:  ['T4','F8','T6'].includes(el),
+    isLeftFront: ['F3','Fp1'].includes(el),
+    isMidline:   ['Fz','Cz','Pz'].includes(el),
+  };
+}
 
-  const isOccipital = ['O1','O2'].includes(electrode);
-  const isParietal  = ['P3','P4','Pz'].includes(electrode);
-  const isPostTmp   = ['T5','T6'].includes(electrode);
-  const isFrontal   = ['Fp1','Fp2','F3','F4','F7','F8','Fz'].includes(electrode);
-  const isCentral   = ['C3','Cz','C4'].includes(electrode);
-  const isTemporal  = ['T3','T4'].includes(electrode);
-  const isPost      = isOccipital || isParietal || isPostTmp;
+// ─── Background rhythm per patient state ─────────────────────────────────────
+
+function backgroundSignal(el: string, t: number, st: PatientState, ap: Set<string>): number {
+  const ph = elPhase.get(el)!;
+  const c  = classify(el);
+  const isPost = c.isOccipital || c.isParietal || c.isPostTmp;
+
+  // Generalised slowing overrides the background completely
+  if (ap.has('gen-slowing')) {
+    const thetaAmp = isPost ? 20 : c.isCentral ? 16 : 14;
+    const deltaAmp = isPost ? 16 : 12;
+    let v = thetaAmp * Math.sin(2 * Math.PI * 5 * t + ph.theta);
+    v += deltaAmp  * Math.sin(2 * Math.PI * 1.8 * t + ph.delta);
+    v += (Math.random() - 0.5) * 7;
+    return v;
+  }
 
   let v = 0;
 
-  // ── Background rhythms weighted by patient state ───────────────────────────
-
   if (st === 'awake') {
-    // Posterior-predominant alpha (9-11 Hz), sinusoidally modulated amplitude
-    const alphaAmp = isOccipital ? 28 : isParietal ? 22 : isPostTmp ? 14 : isCentral ? 8 : 4;
+    // Strong posterior alpha (PDR 9-11 Hz) with spindle-like AM envelope
+    const alphaAmp = c.isOccipital ? 30 : c.isParietal ? 22 : c.isPostTmp ? 14 : c.isCentral ? 7 : 4;
     v += alphaAmp
       * Math.sin(2 * Math.PI * 10 * t + ph.alpha)
-      * (0.75 + 0.25 * Math.sin(2 * Math.PI * 0.12 * t + ph.alpha2)); // spindle-like AM
+      * (0.75 + 0.25 * Math.sin(2 * Math.PI * 0.12 * t + ph.alpha2));
 
-    // Beta frontal
-    const betaAmp = isFrontal ? 10 : 4;
-    v += betaAmp * Math.sin(2 * Math.PI * 18 * t + ph.beta);
+    // Frontal low-amplitude beta
+    v += (c.isFrontal ? 10 : 4) * Math.sin(2 * Math.PI * 18 * t + ph.beta);
 
-    // Very subtle theta/delta elsewhere
-    v += (isPost ? 3 : 5) * Math.sin(2 * Math.PI * 5   * t + ph.theta);
+    // Minimal theta/delta
+    v += (isPost ? 3 : 5) * Math.sin(2 * Math.PI * 5 * t + ph.theta);
     v += (isPost ? 2 : 4) * Math.sin(2 * Math.PI * 1.5 * t + ph.delta);
     v += (Math.random() - 0.5) * 5;
 
   } else if (st === 'drowsy') {
-    // Theta replaces alpha in posterior channels; diffuse slowing
-    const thetaAmp = isPost ? 22 : isCentral ? 14 : isTemporal ? 12 : isFrontal ? 10 : 8;
-    v += thetaAmp * Math.sin(2 * Math.PI * 5.5 * t + ph.theta)
-                  * (0.7 + 0.3 * Math.sin(2 * Math.PI * 0.08 * t + ph.theta2));
+    // Posterior theta replaces alpha; diffuse slowing; residual occipital alpha
+    const thetaAmp = isPost ? 22 : c.isCentral ? 14 : c.isTemporal ? 12 : c.isFrontal ? 10 : 8;
+    v += thetaAmp
+      * Math.sin(2 * Math.PI * 5.5 * t + ph.theta)
+      * (0.7 + 0.3 * Math.sin(2 * Math.PI * 0.08 * t + ph.theta2));
 
-    // Fading alpha (only in occipital, reduced)
-    const alphaAmp = isOccipital ? 10 : isParietal ? 6 : 0;
-    v += alphaAmp * Math.sin(2 * Math.PI * 9.5 * t + ph.alpha);
-
-    // Slow delta background
+    const alphaRemnant = c.isOccipital ? 10 : c.isParietal ? 6 : 0;
+    v += alphaRemnant * Math.sin(2 * Math.PI * 9.5 * t + ph.alpha);
     v += 8 * Math.sin(2 * Math.PI * 2 * t + ph.delta);
+    v += (c.isFrontal ? 4 : 2) * Math.sin(2 * Math.PI * 18 * t + ph.beta);
+    v += (Math.random() - 0.5) * 6;
 
-    // Beta greatly reduced
-    v += (isFrontal ? 5 : 2) * Math.sin(2 * Math.PI * 18 * t + ph.beta);
+  } else if (st === 'n1') {
+    // Stage 1 NREM: theta background, vertex waves start, POSTS, no spindles/K yet
+    const thetaAmp = isPost ? 20 : c.isCentral ? 16 : c.isTemporal ? 14 : 12;
+    v += thetaAmp * Math.sin(2 * Math.PI * 5 * t + ph.theta)
+                  * (0.65 + 0.35 * Math.sin(2 * Math.PI * 0.07 * t + ph.theta2));
+    v += 10 * Math.sin(2 * Math.PI * 1.5 * t + ph.delta);
+    v += 2  * Math.sin(2 * Math.PI * 10  * t + ph.alpha);
+    v += (Math.random() - 0.5) * 6;
+
+  } else if (st === 'n2') {
+    // Stage 2 NREM: theta/delta background; K-complexes and spindles prominent
+    const thetaAmp = isPost ? 16 : 12;
+    v += thetaAmp * Math.sin(2 * Math.PI * 4.5 * t + ph.theta);
+    v += 14 * Math.sin(2 * Math.PI * 2 * t + ph.delta)
+             * (0.7 + 0.3 * Math.sin(2 * Math.PI * 0.05 * t + ph.delta2));
     v += (Math.random() - 0.5) * 6;
 
   } else {
-    // Sleep: delta/theta dominant everywhere; posterior slowing; sleep structures prominent
-    const deltaAmp = isPost ? 20 : isCentral ? 18 : 15;
-    v += deltaAmp * Math.sin(2 * Math.PI * 1.5 * t + ph.delta);
-
-    const thetaAmp = isPost ? 14 : 10;
-    v += thetaAmp * Math.sin(2 * Math.PI * 4.5 * t + ph.theta);
-
-    // No significant alpha or beta
-    v += 2 * Math.sin(2 * Math.PI * 10 * t + ph.alpha);  // residual
-    v += (Math.random() - 0.5) * 5;
+    // n3 — Slow wave sleep: high-amplitude delta dominant (0.5-2 Hz)
+    const deltaAmp = isPost ? 55 : c.isCentral ? 60 : c.isFrontal ? 50 : 45;
+    v += deltaAmp
+      * Math.sin(2 * Math.PI * 1.0 * t + ph.delta)
+      * (0.6 + 0.4 * Math.sin(2 * Math.PI * 0.04 * t + ph.delta2));
+    v += 18 * Math.sin(2 * Math.PI * 2.5 * t + ph.theta);
+    v += (Math.random() - 0.5) * 8;
   }
 
-  // ── Artifacts ──────────────────────────────────────────────────────────────
+  return v;
+}
 
-  // 1. Electrode pop
-  if (settings.artifacts.has('electrode-pop')) {
-    if (t - lastElectrodePopTime > 4 && Math.random() < 0.02) {
-      lastElectrodePopTime = t;
-      popElectrode = ALL_ELECTRODES[Math.floor(Math.random() * ALL_ELECTRODES.length)];
-    }
-    if (electrode === popElectrode) {
-      const dt = t - lastElectrodePopTime;
-      if (dt > 0 && dt < 1) v += 300 * Math.exp(-dt * 10) * Math.cos(2 * Math.PI * 5 * dt);
-    }
+// ─── Voltage gating (burst suppression) ──────────────────────────────────────
+
+function voltageGate(t: number, ap: Set<string>): number {
+  if (!ap.has('burst-suppression')) return 1.0;
+  const bsPeriod = 3.8;
+  const burstDur = 1.3;
+  const phase = t % bsPeriod;
+  if (phase < burstDur) {
+    return 1.0 + 1.5 * gaussian(phase, burstDur * 0.5, 0.28);
   }
+  return 0.04; // suppression
+}
 
-  // 2. Sweat
-  if (settings.artifacts.has('sweat')) {
-    if (t - sweatStartTime > 8 && Math.random() < 0.01) sweatStartTime = t;
-    if (isFrontal || ['F3','F4'].includes(electrode)) {
-      const dt = t - sweatStartTime;
-      if (dt > 0 && dt < 6)
-        v += 200 * Math.sin(2 * Math.PI * 0.1 * dt) * gaussian(dt, 3, 1.5);
-    }
-  }
+// ─── Ictal seizure patterns ───────────────────────────────────────────────────
 
-  // 3. 50 Hz mains
-  if (settings.artifacts.has('50hz')) v += 40 * Math.sin(2 * Math.PI * 50 * t);
+function ictalVoltage(el: string, t: number, ap: Set<string>): number {
+  const c = classify(el);
+  const isAll = true; // generalized = all electrodes
 
-  // 4. Eye blink
-  if (settings.artifacts.has('blink')) {
-    if (t - blinkTime > 3 && Math.random() < 0.01) blinkTime = t;
-    const dt = t - blinkTime;
-    if (dt > 0 && dt < 1) {
-      if (['Fp1','Fp2'].includes(electrode))           v += 250 * gaussian(dt, 0.2, 0.05);
-      else if (['F3','F4','F7','F8'].includes(electrode)) v += 80 * gaussian(dt, 0.2, 0.05);
-    }
-  }
+  let v = 0;
 
-  // 5. Horizontal eye movement
-  if (settings.artifacts.has('eye-movement')) {
-    if (t - eyeMovementTime > 4 && Math.random() < 0.01) eyeMovementTime = t;
-    const dt = t - eyeMovementTime;
-    if (dt > 0 && dt < 1) {
-      const pulse = 150 * gaussian(dt, 0.3, 0.1);
-      if (['F7','Fp1'].includes(electrode)) v += pulse;
-      if (['F8','Fp2'].includes(electrode)) v -= pulse;
+  // ── Absence seizure: 10 s ictal (3 Hz GSW) + 5 s inter-ictal ──────────────
+  if (ap.has('absence-ictal')) {
+    const k = 'absence-epoch';
+    if (getT(k) < 0) setT(k, t + 4);   // 4-second lead-in
+    const el2 = t - getT(k);
+    if (el2 >= 0) {
+      const cycle = el2 % 28;           // 10s seizure, 18s quiet
+      if (cycle < 10) {
+        const dt = cycle % (1 / 3);     // within each 0.333 s cycle
+        const frontAmp = c.isFrontal || c.isMidline ? 220 : 160;
+        v += spikeSlowWave(dt, frontAmp, frontAmp * 0.7);
+      } else if (cycle < 12) {
+        v *= 0.5;                       // brief post-ictal slowing (handled outside)
+      }
     }
   }
 
-  // ── Sleep Structures ───────────────────────────────────────────────────────
-  // Auto-enable during sleep state with increased probability; manual toggles add them independently
-  const isSleep = st === 'sleep';
-  const sleepBoost = isSleep ? 6 : 1; // frequency multiplier when state=sleep
-
-  // 6. POSTS (occipital sharp transients)
-  const wantsPosts = settings.sleepStructures.has('posts') || isSleep;
-  if (wantsPosts) {
-    if (t - postsTime > 1.2 && Math.random() < 0.025 * sleepBoost) postsTime = t;
-    const dt = t - postsTime;
-    if (isOccipital && dt > 0 && dt < 0.4 && dt < 0.1)
-      v += 70 * Math.sin(dt * 10 * Math.PI);
-  }
-
-  // 7. Vertex sharp waves
-  const wantsV = settings.sleepStructures.has('v-waves') || isSleep;
-  if (wantsV) {
-    if (t - vWaveTime > 4 && Math.random() < 0.008 * sleepBoost) vWaveTime = t;
-    const dt = t - vWaveTime;
-    if (['Cz','C3','C4'].includes(electrode) && dt > 0 && dt < 1) {
-      const amp = electrode === 'Cz' ? 130 : 65;
-      v -= amp * Math.sin(2 * Math.PI * 2 * dt) * gaussian(dt, 0.25, 0.1);
+  // ── GTC seizure ─────────────────────────────────────────────────────────────
+  // Phase 0-4s:  recruiting fast (20 Hz, low amplitude)
+  // Phase 4-18s: polyspike-wave 3→2 Hz evolving
+  // Phase 18-35s: slow wave dominance 1.5 Hz
+  // Phase 35-45s: post-ictal suppression
+  // Cycle: 45s seizure + 60s recovery = 105s
+  if (ap.has('gtc-ictal')) {
+    const k = 'gtc-epoch';
+    if (getT(k) < 0) setT(k, t + 6);
+    const el2 = t - getT(k);
+    if (el2 >= 0) {
+      const cycle = el2 % 105;
+      if (cycle < 4) {
+        // Recruiting fast low-amplitude rhythm
+        const env = cycle / 4;
+        v += env * 30 * Math.sin(2 * Math.PI * 20 * t);
+      } else if (cycle < 18) {
+        // Evolving polyspike-wave (3 Hz at start, slowing to 2 Hz)
+        const pos    = (cycle - 4) / 14;
+        const freq   = 3 - pos * 1;          // 3→2 Hz
+        const phaseF = ((cycle - 4) * freq) % 1;
+        const amp    = 100 + pos * 100;
+        v += amp * gaussian(phaseF, 0.05, 0.02);  // spike
+        v += amp * 0.4 * Math.sin(2 * Math.PI * 2 * t); // added slow
+        if (phaseF < 0.3) v -= amp * 0.5 * gaussian(phaseF, 0.25, 0.06); // poly
+      } else if (cycle < 35) {
+        // Slow post-clonic waves
+        const env = 1 - (cycle - 18) / 17;
+        v += env * 120 * Math.sin(2 * Math.PI * 1.5 * t + 1.2);
+      }
+      // cycle 35-45: handled by voltageGate-like suppression (returned as normal * 0.1 = tiny)
     }
   }
 
-  // 8. K complex
-  const wantsK = settings.sleepStructures.has('k-complex') || isSleep;
-  if (wantsK) {
-    if (t - kComplexTime > 10 && Math.random() < 0.004 * sleepBoost) kComplexTime = t;
-    const dt = t - kComplexTime;
-    if (['Fz','Cz','Pz','F3','F4','C3','C4'].includes(electrode) && dt > 0 && dt < 2) {
-      const amp   = ['Fz','Cz','Pz'].includes(electrode) ? 220 : 110;
+  // ── Focal temporal seizure (left temporal) ───────────────────────────────────
+  // Rhythmic theta at 6 Hz → evolves → spreads; 30s seizure, 60s recovery
+  if (ap.has('focal-temporal-ictal') && (c.isLeftTmp || c.isTemporal || ['F7','T3','T5','Fp1'].includes(el))) {
+    const k = 'ftemp-epoch';
+    if (getT(k) < 0) setT(k, t + 5);
+    const el2 = t - getT(k);
+    if (el2 >= 0) {
+      const cycle = el2 % 90;
+      if (cycle < 30) {
+        const pos    = cycle / 30;                      // 0→1
+        const freq   = 6 - pos * 2.5;                  // 6→3.5 Hz (slowing)
+        const amp    = (c.isLeftTmp ? 120 : 60) * (0.3 + 0.7 * pos);
+        v += amp * Math.sin(2 * Math.PI * freq * t);
+      }
+    }
+  }
+
+  // ── Focal frontal seizure (left frontal) ─────────────────────────────────────
+  // Fast low-voltage onset → rhythmic delta; 20s seizure, 50s recovery
+  if (ap.has('focal-frontal-ictal') && (c.isLeftFront || c.isFrontal)) {
+    const k = 'ffront-epoch';
+    if (getT(k) < 0) setT(k, t + 5);
+    const el2 = t - getT(k);
+    if (el2 >= 0) {
+      const cycle = el2 % 70;
+      if (cycle < 20) {
+        const pos  = cycle / 20;
+        const freq = 18 - pos * 15;                    // 18→3 Hz
+        const amp  = (c.isLeftFront ? 100 : 50) * (0.2 + 0.8 * pos);
+        v += amp * Math.sin(2 * Math.PI * freq * t);
+      }
+    }
+  }
+
+  return v;
+}
+
+// ─── Interictal epileptiform patterns ────────────────────────────────────────
+
+function epileptiformVoltage(el: string, t: number, ap: Set<string>): number {
+  const c = classify(el);
+  let v = 0;
+
+  // ── Left temporal spikes ─────────────────────────────────────────────────────
+  if (ap.has('focal-spikes-lt')) {
+    const k = 'lt-spike';
+    if (t - getT(k) > 4 && Math.random() < 0.006) setT(k, t);
+    const dt = t - getT(k);
+    if (c.isLeftTmp || el === 'F7' || el === 'Fp1') {
+      const attenuation = c.isLeftTmp ? 1.0 : (el === 'F7' ? 0.7 : 0.35);
+      v += attenuation * spikeSlowWave(dt, 180, 130);
+    }
+  }
+
+  // ── Right temporal spikes ────────────────────────────────────────────────────
+  if (ap.has('focal-spikes-rt')) {
+    const k = 'rt-spike';
+    if (t - getT(k) > 4 && Math.random() < 0.006) setT(k, t);
+    const dt = t - getT(k);
+    if (c.isRightTmp || el === 'F8' || el === 'Fp2') {
+      const att = c.isRightTmp ? 1.0 : (el === 'F8' ? 0.7 : 0.35);
+      v += att * spikeSlowWave(dt, 180, 130);
+    }
+  }
+
+  // ── Left frontal spikes ──────────────────────────────────────────────────────
+  if (ap.has('focal-spikes-lf')) {
+    const k = 'lf-spike';
+    if (t - getT(k) > 5 && Math.random() < 0.005) setT(k, t);
+    const dt = t - getT(k);
+    if (c.isLeftFront || el === 'F3') {
+      const att = el === 'Fp1' ? 0.9 : el === 'F3' ? 1.0 : 0.5;
+      v += att * spikeSlowWave(dt, 160, 120);
+    }
+  }
+
+  // ── Generalised 3 Hz spike-wave (interictal bursts) ──────────────────────────
+  if (ap.has('3hz-gsw')) {
+    const k = '3hz-gsw-burst';
+    if (t - getT(k) > 4 && Math.random() < 0.005) setT(k, t);
+    const burstDt = t - getT(k);
+    if (burstDt >= 0 && burstDt < 3) {
+      const dt = burstDt % (1 / 3);
+      const amp = c.isFrontal || c.isMidline ? 200 : 160;
+      v += spikeSlowWave(dt, amp, amp * 0.65);
+    }
+  }
+
+  // ── Polyspike-wave (generalised) ─────────────────────────────────────────────
+  if (ap.has('polyspike-wave')) {
+    const k = 'psw-burst';
+    if (t - getT(k) > 5 && Math.random() < 0.004) setT(k, t);
+    const burstDt = t - getT(k);
+    if (burstDt >= 0 && burstDt < 3) {
+      const cycleLen = 0.4;
+      const dt = burstDt % cycleLen;
+      const amp = c.isFrontal || c.isMidline ? 180 : 140;
+      // Multiple spikes: 3 rapid spikes then slow wave
+      v += amp * 0.7 * gaussian(dt, 0.03, 0.015);
+      v += amp * 0.8 * gaussian(dt, 0.07, 0.015);
+      v += amp * 1.0 * gaussian(dt, 0.11, 0.015);
+      v -= amp * 0.7 * gaussian(dt, 0.28, 0.07);
+    }
+  }
+
+  // ── Hypsarrhythmia ───────────────────────────────────────────────────────────
+  if (ap.has('hypsarrhythmia')) {
+    // Chaotic: random spikes at random electrodes, high-amplitude delta
+    v += 80 * Math.sin(2 * Math.PI * 1.5 * t + Math.random() * 0.2);  // HV delta
+    if (Math.random() < 0.02) {
+      v += 300 * Math.exp(-(Math.random() * 10));   // random spikes
+    }
+    v += (Math.random() - 0.5) * 50;
+  }
+
+  return v;
+}
+
+// ─── Non-epileptiform abnormalities ──────────────────────────────────────────
+
+function abnormalVoltage(el: string, t: number, ap: Set<string>): number {
+  const c = classify(el);
+  let v = 0;
+
+  // ── FIRDA: frontal intermittent rhythmic delta ────────────────────────────────
+  if (ap.has('firda') && (c.isFrontal || c.isMidline)) {
+    const k = 'firda-burst';
+    if (t - getT(k) > 5 && Math.random() < 0.008) setT(k, t);
+    const dt = t - getT(k);
+    if (dt >= 0 && dt < 3) {
+      v += 100 * Math.sin(2 * Math.PI * 2.5 * dt);
+    }
+  }
+
+  // ── Focal polymorphic delta (left temporal) ───────────────────────────────────
+  if (ap.has('focal-delta-temporal') && (c.isLeftTmp || el === 'F7')) {
+    const k = 'fdt-burst';
+    if (t - getT(k) > 4 && Math.random() < 0.01) setT(k, t);
+    const dt = t - getT(k);
+    if (dt >= 0 && dt < 2.5) {
+      const ph2 = elPhase.get(el)!;
+      v += 80 * Math.sin(2 * Math.PI * 2 * dt + ph2.delta);
+      v += 40 * Math.sin(2 * Math.PI * 1.5 * dt + ph2.delta2);
+    }
+  }
+
+  // ── Triphasic waves (generalised, anteriorly predominant) ────────────────────
+  if (ap.has('triphasic')) {
+    const k = 'triphasic';
+    if (t - getT(k) > 0.5 && Math.random() < 0.02) setT(k, t);
+    const dt = t - getT(k);
+    const antAmp = c.isFrontal ? 180 : c.isMidline ? 160 : c.isCentral ? 120 : 80;
+    v += triphasicWave(dt, antAmp);
+  }
+
+  // ── GPEDs: generalised periodic epileptiform discharges ──────────────────────
+  if (ap.has('gpeds')) {
+    const period = 1.4;
+    const phase = t % period;
+    if (phase < 0.12) {
+      const amp = c.isFrontal || c.isMidline ? 200 : 150;
+      v += amp * gaussian(phase, 0.05, 0.02);      // spike
+      v -= amp * 0.5 * gaussian(phase, 0.11, 0.04); // following neg
+    }
+  }
+
+  // ── LPEDs: lateralised periodic epileptiform discharges (left temporal) ───────
+  if (ap.has('lpeds') && (c.isLeftTmp || el === 'F7')) {
+    const period = 1.2;
+    const phase = t % period;
+    if (phase < 0.15) {
+      const amp = c.isLeftTmp ? 220 : 120;
+      v += spikeSlowWave(phase, amp, amp * 0.6);
+    }
+  }
+
+  return v;
+}
+
+// ─── Artifacts ───────────────────────────────────────────────────────────────
+
+function artifactVoltage(el: string, t: number, ap: Set<string>): number {
+  const c = classify(el);
+  let v = 0;
+
+  // ── Eye blink ────────────────────────────────────────────────────────────────
+  if (ap.has('blink')) {
+    if (t - getT('blink') > 3 && Math.random() < 0.008) setT('blink', t);
+    const dt = t - getT('blink');
+    if (dt > 0 && dt < 0.4) {
+      if (['Fp1','Fp2'].includes(el))              v += 280 * gaussian(dt, 0.12, 0.05);
+      else if (['F3','F4','F7','F8'].includes(el)) v +=  90 * gaussian(dt, 0.12, 0.05);
+    }
+  }
+
+  // ── Lateral eye movement ──────────────────────────────────────────────────────
+  if (ap.has('eye-movement')) {
+    if (t - getT('eye-mv') > 4 && Math.random() < 0.008) setT('eye-mv', t);
+    const dt = t - getT('eye-mv');
+    if (dt > 0 && dt < 0.8) {
+      const pulse = 180 * gaussian(dt, 0.25, 0.12);
+      if (['F7','Fp1','T3'].includes(el)) v += pulse;
+      if (['F8','Fp2','T4'].includes(el)) v -= pulse;
+    }
+  }
+
+  // ── Muscle (EMG) ─────────────────────────────────────────────────────────────
+  if (ap.has('muscle')) {
+    // High-frequency random noise (temporal/frontal)
+    if (c.isTemporal || c.isFrontal || c.isPostTmp) {
+      v += (Math.random() - 0.5) * 60;
+      v += 30 * Math.sin(2 * Math.PI * 80 * t + Math.random());
+      v += 20 * Math.sin(2 * Math.PI * 120 * t + Math.random());
+    }
+  }
+
+  // ── Chewing artifact ─────────────────────────────────────────────────────────
+  if (ap.has('chewing') && (c.isTemporal || el === 'T3' || el === 'T4')) {
+    const k = 'chew';
+    if (t - getT(k) > 0.8 && Math.random() < 0.02) setT(k, t);
+    const dt = t - getT(k);
+    if (dt > 0 && dt < 0.25) {
+      v += 300 * gaussian(dt, 0.1, 0.05) * (1 + 0.3 * Math.random());
+    }
+  }
+
+  // ── Electrode pop ────────────────────────────────────────────────────────────
+  if (ap.has('electrode-pop')) {
+    if (t - getT('pop-time') > 4 && Math.random() < 0.02) {
+      setT('pop-time', t);
+      setT('pop-el', ALL_ELECTRODES.indexOf(
+        ALL_ELECTRODES[Math.floor(Math.random() * ALL_ELECTRODES.length)]
+      ));
+    }
+    const popIdx = Math.round(getT('pop-el'));
+    if (ALL_ELECTRODES[popIdx] === el) {
+      const dt = t - getT('pop-time');
+      if (dt > 0 && dt < 1) v += 350 * Math.exp(-dt * 12) * Math.cos(2 * Math.PI * 6 * dt);
+    }
+  }
+
+  // ── Sweat artifact ────────────────────────────────────────────────────────────
+  if (ap.has('sweat') && (c.isFrontal || ['F3','F4'].includes(el))) {
+    if (t - getT('sweat') > 8 && Math.random() < 0.008) setT('sweat', t);
+    const dt = t - getT('sweat');
+    if (dt > 0 && dt < 8) v += 220 * Math.sin(2 * Math.PI * 0.08 * dt) * gaussian(dt, 4, 2);
+  }
+
+  // ── 50 Hz mains ──────────────────────────────────────────────────────────────
+  if (ap.has('50hz')) v += 45 * Math.sin(2 * Math.PI * 50 * t);
+
+  return v;
+}
+
+// ─── Normal variants ──────────────────────────────────────────────────────────
+
+function variantVoltage(el: string, t: number, ap: Set<string>): number {
+  const c  = classify(el);
+  const ph = elPhase.get(el)!;
+  let v = 0;
+
+  // ── Mu rhythm (central arch-shaped 10 Hz) ────────────────────────────────────
+  if (ap.has('mu-rhythm') && (c.isCentral || el === 'Cz')) {
+    const env  = 0.55 + 0.45 * Math.sin(2 * Math.PI * 0.12 * t + ph.mu);
+    const arch = Math.abs(Math.sin(2 * Math.PI * 10 * t + ph.mu));
+    v += 38 * env * arch;
+  }
+
+  // ── Wicket spikes (temporal arch 9 Hz bursts) ────────────────────────────────
+  if (ap.has('wicket') && (c.isTemporal || c.isPostTmp || el === 'F7' || el === 'F8')) {
+    if (t - getT('wicket') > 3 && Math.random() < 0.015) setT('wicket', t);
+    const dt = t - getT('wicket');
+    if (dt > 0 && dt < 0.9) {
+      const env  = gaussian(dt, 0.45, 0.22);
+      const arch = Math.abs(Math.sin(2 * Math.PI * 9 * t + ph.alpha));
+      v += 90 * env * arch;
+    }
+  }
+
+  // ── RMTD (rhythmic mid-temporal theta of drowsiness) ─────────────────────────
+  if (ap.has('rmtd') && (c.isTemporal || el === 'T3' || el === 'T4')) {
+    if (t - getT('rmtd') > 4 && Math.random() < 0.01) setT('rmtd', t);
+    const dt = t - getT('rmtd');
+    if (dt > 0 && dt < 4) {
+      const env = gaussian(dt, 2, 1.2);
+      v += 65 * env * Math.sin(2 * Math.PI * 5.5 * t + ph.theta);
+    }
+  }
+
+  // ── Lambda waves (occipital positive transients) ──────────────────────────────
+  if (ap.has('lambda') && (c.isOccipital || c.isParietal)) {
+    if (t - getT('lambda') > 0.8 && Math.random() < 0.025) setT('lambda', t);
+    const dt = t - getT('lambda');
+    if (dt > 0 && dt < 0.15) {
+      // Lambda is positive (surface positive in occipital)
+      v += 60 * Math.sin(Math.PI * dt / 0.15);
+    }
+  }
+
+  // ── 6 Hz phantom spike-wave ───────────────────────────────────────────────────
+  if (ap.has('6hz-sw')) {
+    if (t - getT('6hz-sw') > 4 && Math.random() < 0.005) setT('6hz-sw', t);
+    const dt = t - getT('6hz-sw');
+    if (dt >= 0 && dt < 1) {
+      const cycleLen = 1 / 6;
+      const dtInCycle = dt % cycleLen;
+      v += 50 * gaussian(dtInCycle, 0.02, 0.008); // tiny spike
+      v -= 30 * gaussian(dtInCycle, 0.1,  0.035); // small slow wave
+    }
+  }
+
+  // ── 14 & 6 Hz positive bursts ─────────────────────────────────────────────────
+  if (ap.has('14-6-pos') && (c.isPostTmp || c.isTemporal)) {
+    if (t - getT('14-6') > 5 && Math.random() < 0.01) setT('14-6', t);
+    const dt = t - getT('14-6');
+    if (dt > 0 && dt < 1.0) {
+      const env = gaussian(dt, 0.5, 0.25);
+      // 14 Hz component (positive)
+      v += 55 * env * Math.abs(Math.sin(2 * Math.PI * 14 * dt));
+      // 6 Hz component
+      v += 35 * env * Math.abs(Math.sin(2 * Math.PI * 6  * dt));
+    }
+  }
+
+  // ── BETS / Small sharp spikes ─────────────────────────────────────────────────
+  if (ap.has('bets') && (c.isTemporal || el === 'F7' || el === 'F8')) {
+    if (t - getT('bets') > 6 && Math.random() < 0.007) setT('bets', t);
+    const dt = t - getT('bets');
+    if (dt > 0 && dt < 0.05) {
+      // Very brief (<50 ms), low amplitude (<50 µV), monophasic
+      v += 40 * Math.exp(-dt * 60);
+    }
+  }
+
+  // ── Sleep-state auto patterns ─────────────────────────────────────────────────
+  // These are always present in N1/N2 sleep regardless of manual toggles
+  return v;
+}
+
+// ─── Sleep-stage structural patterns (N1, N2, N3) ────────────────────────────
+
+function sleepStructureVoltage(el: string, t: number, st: PatientState, ap: Set<string>): number {
+  const c = classify(el);
+  let v = 0;
+
+  const isSleeping = st === 'n1' || st === 'n2' || st === 'n3';
+  const isN2orN3   = st === 'n2' || st === 'n3';
+
+  // ── Vertex sharp waves (N1, N2; Cz maximal) ──────────────────────────────────
+  const wantsV = ap.has('v-waves') || st === 'n1' || st === 'n2';
+  if (wantsV && (c.isCentral || c.isMidline)) {
+    const interval = st === 'n2' ? 8 : 14;
+    if (t - getT('vwave') > interval && Math.random() < 0.005) setT('vwave', t);
+    const dt = t - getT('vwave');
+    if (dt > 0 && dt < 0.9) {
+      const amp = el === 'Cz' ? 140 : (c.isCentral ? 70 : 40);
+      v -= amp * Math.sin(2 * Math.PI * 2 * dt) * gaussian(dt, 0.22, 0.1);
+    }
+  }
+
+  // ── K-complexes (N2; Fz/Cz/Pz maximal) ──────────────────────────────────────
+  const wantsK = ap.has('k-complex') || st === 'n2';
+  if (wantsK && (c.isMidline || c.isCentral || el === 'F3' || el === 'F4')) {
+    const interval = st === 'n2' ? 14 : 22;
+    if (t - getT('kcomplex') > interval && Math.random() < 0.003) setT('kcomplex', t);
+    const dt = t - getT('kcomplex');
+    if (dt > 0 && dt < 2.2) {
+      const amp   = c.isMidline ? 240 : (c.isCentral ? 120 : 80);
       const sharp = -amp       * Math.sin(2 * Math.PI * 3   * dt) * gaussian(dt, 0.20, 0.08);
-      const slow  =  amp * 0.8 * Math.sin(2 * Math.PI * 0.8 * dt) * gaussian(dt, 0.65, 0.22);
+      const slow  =  amp * 0.9 * Math.sin(2 * Math.PI * 0.8 * dt) * gaussian(dt, 0.70, 0.24);
       v += sharp + slow;
     }
   }
 
-  // 9. Sleep spindles
-  const wantsSp = settings.sleepStructures.has('spindles') || isSleep;
-  if (wantsSp) {
-    if (t - spindleTime > 6 && Math.random() < 0.008 * sleepBoost) spindleTime = t;
-    const dt = t - spindleTime;
-    if (['Cz','C3','C4','Fz','Pz'].includes(electrode) && dt > 0 && dt < 1.8) {
-      const amp = electrode === 'Cz' ? 45 : 28;
-      v += amp * gaussian(dt, 0.7, 0.28) * Math.sin(2 * Math.PI * 14 * dt);
+  // ── Sleep spindles (N2; central 12-15 Hz) ────────────────────────────────────
+  const wantsSp = ap.has('spindles') || st === 'n2';
+  if (wantsSp && (c.isCentral || c.isMidline)) {
+    const interval = st === 'n2' ? 6 : 12;
+    if (t - getT('spindle') > interval && Math.random() < 0.008) setT('spindle', t);
+    const dt = t - getT('spindle');
+    if (dt > 0 && dt < 1.8) {
+      const amp = el === 'Cz' ? 48 : (c.isCentral ? 30 : 20);
+      v += amp * gaussian(dt, 0.75, 0.32) * Math.sin(2 * Math.PI * 14 * dt);
     }
   }
+
+  // ── POSTS (occipital sharp transients of sleep, N1/N2) ───────────────────────
+  const wantsPosts = ap.has('posts') || st === 'n1' || st === 'n2';
+  if (wantsPosts && (c.isOccipital || c.isParietal)) {
+    if (t - getT('posts') > 1.5 && Math.random() < 0.02) setT('posts', t);
+    const dt = t - getT('posts');
+    if (dt > 0 && dt < 0.12) v += 75 * Math.sin(Math.PI * dt / 0.1);
+  }
+
+  return v;
+}
+
+// ─── Main exported voltage function ──────────────────────────────────────────
+
+export function getElectrodeVoltage(electrode: Electrode, t: number, settings: SimSettings): number {
+  if (electrode === 'A1' || electrode === 'A2') return (Math.random() - 0.5) * 3;
+
+  const { patientState: st, activePatterns: ap } = settings;
+
+  // 1. Background rhythm
+  let v = backgroundSignal(electrode, t, st, ap);
+
+  // 2. Voltage gate (burst suppression can suppress everything below)
+  const gate = voltageGate(t, ap);
+  v *= gate;
+
+  // Add burst noise during burst phase
+  if (ap.has('burst-suppression') && gate > 1) {
+    v += 80 * (Math.random() - 0.5);
+  }
+
+  // 3. Sleep structural patterns (auto-triggered by state + manual toggles)
+  v += sleepStructureVoltage(electrode, t, st, ap);
+
+  // 4. Normal variants
+  v += variantVoltage(electrode, t, ap);
+
+  // 5. Artifacts
+  v += artifactVoltage(electrode, t, ap);
+
+  // 6. Non-epileptiform abnormalities
+  v += abnormalVoltage(electrode, t, ap);
+
+  // 7. Interictal epileptiform
+  v += epileptiformVoltage(electrode, t, ap);
+
+  // 8. Ictal / seizure (added on top; may dominate)
+  v += ictalVoltage(electrode, t, ap);
 
   return v;
 }
