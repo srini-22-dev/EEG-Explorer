@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "EEG Teaching Simulator"
+version = "1.0.0"
+id = "artifacts/eeg-simulator"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21894
+
+[services.development]
+run = "pnpm --filter @workspace/eeg-simulator run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/eeg-simulator", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/eeg-simulator/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21894"
+BASE_PATH = "/"
