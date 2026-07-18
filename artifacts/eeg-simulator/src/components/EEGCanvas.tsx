@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Montage, ALL_ELECTRODES, ChannelGroup, GROUP_COLORS } from '../utils/montages';
 import { SimSettings } from '../utils/eegGenerator';
 import { computeChannelVoltage } from '../utils/computeChannel';
-import { getElectrodeVoltage } from '../utils/eegGenerator';
+import { getElectrodeVoltage, getECGVoltage } from '../utils/eegGenerator';
 
 type EEGCanvasProps = {
   montage: Montage;
@@ -10,77 +10,67 @@ type EEGCanvasProps = {
   activeEffects: string[];
 };
 
-// EEG paper colours
-const BG_COLOR    = '#c8e6c0';          // classic light green paper
-const GRID_MAJOR  = 'rgba(0,110,0,0.35)';
-const GRID_MINOR  = 'rgba(0,110,0,0.14)';
-const LABEL_BG    = 'rgba(200,230,192,0.92)';
+// ── Colour constants ─────────────────────────────────────────────────────────
+const BG_EVEN  = '#c8e6c0';          // base paper green
+const BG_ODD   = '#bdddb5';          // very subtly darker every other second
+const LABEL_BG = 'rgba(200,230,192,0.93)';
 
-// Horizontal pixels per mm (controls paper speed visual scale)
+// Grid line colours — kept deliberately faint so waveforms read cleanly
+const GRID_1S_COLOR  = 'rgba(0, 100, 0, 0.28)'; // 1-second major
+const GRID_200_COLOR = 'rgba(0, 100, 0, 0.11)'; // 200 ms minor
+const GRID_H_COLOR   = 'rgba(0, 100, 0, 0.09)'; // horizontal amplitude lines
+
+// Pixels per mm — horizontal axis (controls visual paper speed)
 const PX_PER_MM_X = 4;
 
-// How many mm of vertical paper each channel row occupies
+// Each EEG channel row = 10 mm of paper vertically
 const MM_PER_ROW = 10;
 
-// Spacer between groups (expressed in row-units, e.g. 0.5 = half a channel height)
-const GAP_UNITS = 0.45;
+// Fractional channel-height gap between chain groups
+const GAP_UNITS = 0.42;
 
-/** Pre-compute a layout for every channel in the montage */
 type RowLayout = {
-  channelIndex: number;   // index into montage.channels (-1 = spacer)
+  channelIndex: number;   // -1 = spacer
   group: ChannelGroup | null;
-  centerFrac: number;     // 0..1 fraction of total canvas height
-  rowFrac: number;        // fraction of canvas height for this row
+  centerFrac: number;
+  rowFrac: number;
 };
 
 function buildLayout(montage: Montage): RowLayout[] {
-  const channels = montage.channels;
-
-  // Determine where group changes occur
   const rows: Array<{ channelIndex: number; group: ChannelGroup | null }> = [];
   let lastGroup: ChannelGroup | null = null;
 
-  for (let i = 0; i < channels.length; i++) {
-    const g = channels[i].group;
+  for (let i = 0; i < montage.channels.length; i++) {
+    const g = montage.channels[i].group;
+    // Insert spacer when group changes, but not before ECG (we keep ECG snug below last EEG group)
     if (lastGroup !== null && g !== lastGroup && g !== 'ecg') {
-      // Insert a spacer row between groups
       rows.push({ channelIndex: -1, group: null });
     }
     rows.push({ channelIndex: i, group: g });
     lastGroup = g;
   }
 
-  // Total weight units
-  const total = rows.reduce((acc, r) => acc + (r.channelIndex === -1 ? GAP_UNITS : 1), 0);
-
-  // Assign fractions
-  let cumulative = 0;
+  const total = rows.reduce((s, r) => s + (r.channelIndex === -1 ? GAP_UNITS : 1), 0);
+  let cum = 0;
   return rows.map(r => {
-    const frac = r.channelIndex === -1 ? GAP_UNITS / total : 1 / total;
-    const layout: RowLayout = {
-      channelIndex: r.channelIndex,
-      group: r.group,
-      centerFrac: cumulative + frac / 2,
-      rowFrac: frac,
-    };
-    cumulative += frac;
+    const frac: number = r.channelIndex === -1 ? GAP_UNITS / total : 1 / total;
+    const layout: RowLayout = { channelIndex: r.channelIndex, group: r.group, centerFrac: cum + frac / 2, rowFrac: frac };
+    cum += frac;
     return layout;
   });
 }
 
 export function EEGCanvas({ montage, settings, activeEffects }: EEGCanvasProps) {
-  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
   const dataBuffer   = useRef<number[][]>([]);
   const timeBuffer   = useRef<number[]>([]);
   const lastTimeRef  = useRef<number>(performance.now());
   const elapsedRef   = useRef<number>(0);
 
-  // Reset buffers on montage change
   useEffect(() => {
-    dataBuffer.current  = montage.channels.map(() => []);
-    timeBuffer.current  = [];
+    dataBuffer.current = montage.channels.map(() => []);
+    timeBuffer.current = [];
   }, [montage]);
 
   useEffect(() => {
@@ -88,14 +78,11 @@ export function EEGCanvas({ montage, settings, activeEffects }: EEGCanvasProps) 
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    let animationFrameId: number;
+    let rafId: number;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const resize = () => {
-      canvas.width  = container.clientWidth;
-      canvas.height = container.clientHeight;
-    };
+    const resize = () => { canvas.width = container.clientWidth; canvas.height = container.clientHeight; };
     resize();
     window.addEventListener('resize', resize);
 
@@ -108,12 +95,11 @@ export function EEGCanvas({ montage, settings, activeEffects }: EEGCanvasProps) 
       elapsedRef.current += dt;
       const currentT = elapsedRef.current;
 
-      const pixelsPerSec  = settings.speed * PX_PER_MM_X;
-      const windowTimeSec = canvas.width / pixelsPerSec;
+      const pxPerSec      = settings.speed * PX_PER_MM_X;
+      const windowTimeSec = canvas.width / pxPerSec;
 
-      // Sample at 250 Hz
-      const sampleRate = 250;
-      const dtSample   = 1 / sampleRate;
+      // Fill buffer at 250 Hz
+      const dtSample = 1 / 250;
       let lastT = timeBuffer.current.length > 0
         ? timeBuffer.current[timeBuffer.current.length - 1]
         : currentT - dt;
@@ -121,197 +107,185 @@ export function EEGCanvas({ montage, settings, activeEffects }: EEGCanvasProps) 
       while (lastT < currentT) {
         lastT += dtSample;
         const allV: Record<string, number> = {};
-        for (const el of ALL_ELECTRODES) {
-          allV[el] = getElectrodeVoltage(el, lastT, settings);
-        }
+        for (const el of ALL_ELECTRODES) allV[el] = getElectrodeVoltage(el, lastT, settings);
         timeBuffer.current.push(lastT);
         for (let i = 0; i < montage.channels.length; i++) {
-          const v = computeChannelVoltage(montage.channels[i], lastT, settings, allV);
           if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
-          dataBuffer.current[i].push(v);
+          dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, settings, allV));
         }
       }
 
-      // Evict samples outside the visible window
-      const cutoffTime = currentT - windowTimeSec;
+      // Evict old samples
+      const cutoff = currentT - windowTimeSec;
       let evict = 0;
-      while (timeBuffer.current[evict] < cutoffTime && evict < timeBuffer.current.length - 2) evict++;
+      while (timeBuffer.current[evict] < cutoff && evict < timeBuffer.current.length - 2) evict++;
       if (evict > 0) {
         timeBuffer.current.splice(0, evict);
-        for (let i = 0; i < montage.channels.length; i++) {
-          dataBuffer.current[i].splice(0, evict);
-        }
+        for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i].splice(0, evict);
       }
 
-      // ─── RENDER ──────────────────────────────────────────────────────────────
+      // ─── RENDER ─────────────────────────────────────────────────────────────
       const w = canvas.width;
       const h = canvas.height;
 
-      // 1. Paper background
-      ctx.fillStyle = BG_COLOR;
+      // 1. Base background (even seconds)
+      ctx.fillStyle = BG_EVEN;
       ctx.fillRect(0, 0, w, h);
 
-      // 2. Grid
-      // Minor gridlines every 0.2 s (horizontal) and every 1 mm vertically
-      // Major gridlines every 1 s (horizontal) and every 5 mm vertically
+      // 2. Alternating 1-second vertical bands (odd seconds slightly darker)
+      //    We draw bands for every odd 1-second interval visible on screen.
+      {
+        const secWidth    = pxPerSec;                 // px wide per second
+        const timeAtRight = currentT;                 // rightmost time on screen
+        const timeAtLeft  = timeAtRight - windowTimeSec;
+        const firstSec    = Math.floor(timeAtLeft);   // leftmost whole second
 
-      // Vertical time grid  (minor = 0.2s, major = 1s)
-      const minorIntervalX = pixelsPerSec * 0.2;
-      const majorIntervalX = pixelsPerSec * 1.0;
-      const timeOffset     = currentT % 1;
-      const pxOffset       = timeOffset * pixelsPerSec;
-
-      for (let x = w - pxOffset % minorIntervalX; x > 0; x -= minorIntervalX) {
-        const isMajor = Math.abs(Math.round(x) % Math.round(majorIntervalX)) < 2;
-        ctx.beginPath();
-        ctx.strokeStyle = isMajor ? GRID_MAJOR : GRID_MINOR;
-        ctx.lineWidth   = isMajor ? 0.8 : 0.4;
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
+        for (let s = firstSec; s <= Math.ceil(timeAtRight); s++) {
+          if (s % 2 !== 0) continue; // only shade even-numbered seconds (gives alternating look)
+          const xLeft  = w - (timeAtRight - s)         * pxPerSec;
+          const xRight = w - (timeAtRight - (s + 1))   * pxPerSec;
+          ctx.fillStyle = BG_ODD;
+          ctx.fillRect(xLeft, 0, xRight - xLeft, h);
+        }
       }
 
-      // Horizontal amplitude grid  (minor = 1 mm, major = 5 mm)
-      // 1 mm = pxPerMm_vertical pixels.  We derive pxPerMm_vertical from average rowH.
-      // Average channel rowH (non-spacer) is h / (numChannels + numSpackers*GAP_UNITS)
-      const nonSpacerCount = layout.filter(r => r.channelIndex >= 0).length;
-      const spacerCount    = layout.length - nonSpacerCount;
-      const totalUnits     = nonSpacerCount + spacerCount * GAP_UNITS;
-      const avgRowH        = h / totalUnits;
-      const pxPerMm        = avgRowH / MM_PER_ROW;
-      const minorIntervalY = pxPerMm * 1;   // 1 mm
-      const majorIntervalY = pxPerMm * 5;   // 5 mm
+      // 3. Grid lines
+      {
+        const secWidth = pxPerSec;
+        const minorInt = secWidth * 0.2;   // 200 ms
+        const timeOffset = currentT % 1;
+        const pxOff = timeOffset * secWidth;
 
-      for (let y = 0; y < h; y += minorIntervalY) {
-        const isMajor = Math.abs(Math.round(y) % Math.round(majorIntervalY)) < 1;
-        ctx.beginPath();
-        ctx.strokeStyle = isMajor ? GRID_MAJOR : GRID_MINOR;
-        ctx.lineWidth   = isMajor ? 0.8 : 0.4;
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
+        // Vertical: minor (200 ms) then major (1 s) on top
+        for (let x = w - (pxOff % minorInt); x > 0; x -= minorInt) {
+          const isMajor = Math.abs((w - x + pxOff) % secWidth) < 1.5;
+          ctx.beginPath();
+          ctx.strokeStyle = isMajor ? GRID_1S_COLOR : GRID_200_COLOR;
+          ctx.lineWidth   = isMajor ? 0.7 : 0.35;
+          ctx.moveTo(x, 0); ctx.lineTo(x, h);
+          ctx.stroke();
+        }
+
+        // Horizontal: derive pxPerMm from channel layout, draw every 1 mm (major every 5 mm)
+        const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
+        const spacers = layout.length - nonSp;
+        const totalU  = nonSp + spacers * GAP_UNITS;
+        const avgRowH = h / totalU;
+        const pxPerMm = avgRowH / MM_PER_ROW;
+
+        for (let y = 0; y < h; y += pxPerMm) {
+          const isMajor5 = Math.abs(Math.round(y) % Math.round(pxPerMm * 5)) < 1;
+          ctx.beginPath();
+          ctx.strokeStyle = isMajor5 ? 'rgba(0,100,0,0.17)' : GRID_H_COLOR;
+          ctx.lineWidth   = isMajor5 ? 0.5 : 0.3;
+          ctx.moveTo(0, y); ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        // Store pxPerMm for waveform scaling below (we recompute to avoid closure issues)
+        // pxPerUV = pxPerMm / sensitivity
       }
 
-      // 3. Waveforms
-      // pxPerUV: how many pixels corresponds to 1 µV
-      // sensitivity = µV per mm, pxPerMm = pixels per mm  → pxPerUV = pxPerMm / sensitivity
-      const pxPerUV = pxPerMm / settings.sensitivity;
+      // pxPerMm for amplitude (recomputed cleanly)
+      const nonSp2   = layout.filter(r => r.channelIndex >= 0).length;
+      const spacers2 = layout.length - nonSp2;
+      const totalU2  = nonSp2 + spacers2 * GAP_UNITS;
+      const avgRowH2 = h / totalU2;
+      const pxPerMm  = avgRowH2 / MM_PER_ROW;
+      const pxPerUV  = pxPerMm / settings.sensitivity;
 
+      // 4. Waveforms
       for (const row of layout) {
-        if (row.channelIndex < 0) continue; // spacer
-
-        const i = row.channelIndex;
-        const ch    = montage.channels[i];
-        const data  = dataBuffer.current[i] ?? [];
-        const rowH  = row.rowFrac * h;
+        if (row.channelIndex < 0) continue;
+        const i       = row.channelIndex;
+        const ch      = montage.channels[i];
+        const data    = dataBuffer.current[i] ?? [];
+        const rowH    = row.rowFrac * h;
         const centerY = row.centerFrac * h;
+        const isECG   = ch.active === 'ECG';
 
-        // ECG uses a fixed separate gain so QRS is visible
-        const isECG  = ch.active === 'ECG';
-        const scale  = isECG ? (pxPerMm / 50) : pxPerUV;  // ECG: 1 mV = 10 mm (standard ECG)
+        // ECG: fixed scale so 1 mV = 10 mm (standard); scale factor = pxPerMm * 10 / 1000 µV
+        const scale = isECG ? pxPerMm * 10 / 1000 : pxPerUV;
 
-        // Baseline separator (thin dark line at centerY)
+        // Baseline
         ctx.beginPath();
-        ctx.strokeStyle = isECG ? 'rgba(0,80,0,0.25)' : 'rgba(0,80,0,0.18)';
-        ctx.lineWidth = 0.5;
-        ctx.moveTo(0, centerY);
-        ctx.lineTo(w, centerY);
+        ctx.strokeStyle = 'rgba(0,80,0,0.15)';
+        ctx.lineWidth = 0.4;
+        ctx.moveTo(0, centerY); ctx.lineTo(w, centerY);
         ctx.stroke();
 
         // Trace
-        const color = GROUP_COLORS[ch.group];
         ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth   = isECG ? 1.2 : 1.0;
-
+        ctx.strokeStyle = GROUP_COLORS[ch.group];
+        ctx.lineWidth   = isECG ? 1.1 : 0.9;
         let started = false;
         for (let j = 0; j < data.length; j++) {
-          const t        = timeBuffer.current[j];
-          const timeDist = currentT - t;
-          const x        = w - timeDist * pixelsPerSec;
+          const tDist = currentT - timeBuffer.current[j];
+          const x = w - tDist * pxPerSec;
           if (x < 0) continue;
-
-          // EEG convention: negative deflection plots UPWARD
-          const rawVal = data[j];
-          const scaled = rawVal * scale;
-          // Clamp to avoid bleeding more than 1.5 rows
-          const clamped = Math.max(-rowH * 1.4, Math.min(rowH * 1.4, scaled));
-          const y = centerY - clamped; // subtract → negative is up
-
-          if (!started) { ctx.moveTo(x, y); started = true; }
-          else           { ctx.lineTo(x, y); }
+          // EEG convention: negative UP (subtract scaled value from centerY)
+          const y = centerY - Math.max(-rowH * 1.35, Math.min(rowH * 1.35, data[j] * scale));
+          if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
       }
 
-      // 4. Channel labels (left-side overlay)
-      const labelW = 62;
+      // 5. Channel labels — left strip
+      const labelW = 64;
       ctx.fillStyle = LABEL_BG;
       ctx.fillRect(0, 0, labelW, h);
-
-      // Thin separator line
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(0,80,0,0.4)';
-      ctx.lineWidth = 1;
-      ctx.moveTo(labelW, 0);
-      ctx.lineTo(labelW, h);
+      ctx.strokeStyle = 'rgba(0,80,0,0.35)';
+      ctx.lineWidth = 0.8;
+      ctx.moveTo(labelW, 0); ctx.lineTo(labelW, h);
       ctx.stroke();
 
       for (const row of layout) {
         if (row.channelIndex < 0) continue;
-        const ch      = montage.channels[row.channelIndex];
-        const centerY = row.centerFrac * h;
-        const color   = GROUP_COLORS[ch.group];
-
-        ctx.fillStyle = color;
-        ctx.font      = `bold 10px "Courier New", monospace`;
-        ctx.textAlign = 'left';
+        const ch = montage.channels[row.channelIndex];
+        ctx.fillStyle    = GROUP_COLORS[ch.group];
+        ctx.font         = 'bold 10px "Courier New", monospace';
+        ctx.textAlign    = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(ch.label, 5, centerY);
+        ctx.fillText(ch.label, 5, row.centerFrac * h);
       }
 
-      // 5. Calibration bar (bottom-right corner)
-      // Show a 50 µV bar at current sensitivity
-      const calibMm  = 50 / settings.sensitivity; // mm for 50 µV
-      const calibPx  = calibMm * pxPerMm;
-      const cbX      = w - 18;
-      const cbY      = h - 16;
-      ctx.strokeStyle = '#8b5e00';
-      ctx.lineWidth   = 2;
-      ctx.beginPath();
-      ctx.moveTo(cbX, cbY);
-      ctx.lineTo(cbX, cbY - calibPx);
-      ctx.moveTo(cbX - 4, cbY);
-      ctx.lineTo(cbX + 4, cbY);
-      ctx.moveTo(cbX - 4, cbY - calibPx);
-      ctx.lineTo(cbX + 4, cbY - calibPx);
-      ctx.stroke();
-      ctx.fillStyle    = '#8b5e00';
-      ctx.font         = '9px sans-serif';
-      ctx.textAlign    = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('50µV', cbX - 8, cbY - calibPx / 2);
+      // 6. Calibration bar (bottom-right) — shows actual µV/mm scale
+      {
+        const calibUV  = 100;                          // show 100 µV bar
+        const calibPx  = calibUV * pxPerUV;
+        const cbX = w - 18;
+        const cbY = h - 14;
+        ctx.strokeStyle = '#6b4400';
+        ctx.lineWidth   = 2;
+        ctx.beginPath();
+        ctx.moveTo(cbX, cbY);           ctx.lineTo(cbX, cbY - calibPx);
+        ctx.moveTo(cbX - 4, cbY);       ctx.lineTo(cbX + 4, cbY);
+        ctx.moveTo(cbX - 4, cbY - calibPx); ctx.lineTo(cbX + 4, cbY - calibPx);
+        ctx.stroke();
+        ctx.fillStyle    = '#6b4400';
+        ctx.font         = '9px sans-serif';
+        ctx.textAlign    = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('100µV', cbX - 7, cbY - calibPx / 2);
+      }
 
-      // 6. Active effects status bar
+      // 7. Active effects bar
       if (activeEffects.length > 0) {
-        ctx.fillStyle = 'rgba(0,50,0,0.75)';
-        ctx.fillRect(labelW + 2, h - 22, w - labelW - 20, 20);
-        ctx.fillStyle = '#90ee90';
-        ctx.font      = '11px sans-serif';
+        ctx.fillStyle = 'rgba(0,40,0,0.72)';
+        ctx.fillRect(labelW + 2, h - 20, w - labelW - 22, 18);
+        ctx.fillStyle = '#a0e8a0';
+        ctx.font      = '10.5px sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`● ${activeEffects.join('  ·  ')}`, labelW + 8, h - 12);
+        ctx.fillText(`● ${activeEffects.join('  ·  ')}`, labelW + 8, h - 11);
       }
 
-      animationFrameId = requestAnimationFrame(render);
+      rafId = requestAnimationFrame(render);
     };
 
-    animationFrameId = requestAnimationFrame(render);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', resize);
-    };
+    rafId = requestAnimationFrame(render);
+    return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', resize); };
   }, [montage, settings, activeEffects]);
 
   return (
