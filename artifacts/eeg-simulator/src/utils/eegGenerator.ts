@@ -118,19 +118,25 @@ function backgroundSignal(el: string, t: number, st: PatientState, ap: Set<strin
   let v = 0;
 
   if (st === 'awake') {
-    // Strong posterior alpha (PDR 9-11 Hz) with spindle-like AM envelope
-    const alphaAmp = c.isOccipital ? 30 : c.isParietal ? 22 : c.isPostTmp ? 14 : c.isCentral ? 7 : 4;
-    v += alphaAmp
-      * Math.sin(2 * Math.PI * 10 * t + ph.alpha)
-      * (0.75 + 0.25 * Math.sin(2 * Math.PI * 0.12 * t + ph.alpha2));
+    // ── Posterior alpha spindles (PDR, 9-11 Hz) ──────────────────────────────
+    // Waxing-waning envelope: 0→1→0 sinusoidal at ~0.10 Hz (≈10 s full cycle)
+    // → ~5 s alpha run, ~5 s relative quiet, realistic spindle morphology.
+    // Each electrode has its own phase offset (ph.alpha2) so spindles don't
+    // all peak simultaneously across the montage.
+    const spindleEnv = 0.5 + 0.5 * Math.cos(2 * Math.PI * 0.10 * t + ph.alpha2);
+    const alphaAmp   = c.isOccipital ? 42 : c.isParietal ? 28 : c.isPostTmp ? 13 : 0;
+    v += alphaAmp * spindleEnv * Math.sin(2 * Math.PI * 10 * t + ph.alpha);
 
-    // Frontal low-amplitude beta
-    v += (c.isFrontal ? 10 : 4) * Math.sin(2 * Math.PI * 18 * t + ph.beta);
+    // ── Non-posterior channels: deliberately subtle ───────────────────────────
+    // Frontal/central show only low-amplitude beta + trace theta so students
+    // can clearly see the posterior alpha gradient.
+    const betaAmp = c.isFrontal ? 5 : c.isCentral || c.isMidline ? 4 : c.isTemporal ? 3 : 1;
+    v += betaAmp * Math.sin(2 * Math.PI * 18 * t + ph.beta);
 
-    // Minimal theta/delta
-    v += (isPost ? 3 : 5) * Math.sin(2 * Math.PI * 5 * t + ph.theta);
-    v += (isPost ? 2 : 4) * Math.sin(2 * Math.PI * 1.5 * t + ph.delta);
-    v += (Math.random() - 0.5) * 5;
+    // Trace slow activity (physiological but unobtrusive at 7 µV/mm sensitivity)
+    v += 2.0 * Math.sin(2 * Math.PI * 5.0 * t + ph.theta);
+    v += 1.5 * Math.sin(2 * Math.PI * 1.5 * t + ph.delta);
+    v += (Math.random() - 0.5) * (isPost ? 3 : 2);
 
   } else if (st === 'drowsy') {
     // Posterior theta replaces alpha; diffuse slowing; residual occipital alpha
@@ -285,42 +291,86 @@ function ictalVoltage(el: string, t: number, ap: Set<string>): number {
 }
 
 // ─── Interictal epileptiform patterns ────────────────────────────────────────
+//
+// Spatial field maps give each electrode a fraction of the focus amplitude.
+// This is what drives montage-correct behaviour automatically:
+//
+//  BIPOLAR (active − reference):
+//   • Channel whose reference IS the focus: (small − large) → NEGATIVE → DOWN
+//   • Channel whose active IS the focus:    (large − small) → POSITIVE → UP
+//   → Phase REVERSAL at the focus electrode ✓
+//   → Channels at chain ends deflect in the same direction as their nearest
+//     focus-flanking channel but with smaller amplitude (beginning/end of
+//     chain phenomena) ✓
+//
+//  REFERENTIAL (electrode − ear/AVG):
+//   • Focus electrode: largest deflection (maximum amplitude)
+//   • Adjacent electrodes: proportionally smaller deflections ✓
+
+// Left temporal focus at T3
+const LT_FIELD: Record<string, number> = {
+  T3: 1.00,          // focus — maximum
+  F7: 0.50,          // adjacent anterior (same chain)
+  T5: 0.42,          // adjacent posterior (same chain) — MUST differ from T3
+  Fp1: 0.15,         // distant anterior (beginning-of-chain neighbour)
+  O1:  0.07,         // distant posterior (end-of-chain neighbour)
+  C3:  0.10,         // adjacent central — remote spread
+  P3:  0.05,         // parietal — very remote
+};
+
+// Right temporal focus at T4
+const RT_FIELD: Record<string, number> = {
+  T4: 1.00,
+  F8: 0.50,
+  T6: 0.42,
+  Fp2: 0.15,
+  O2:  0.07,
+  C4:  0.10,
+  P4:  0.05,
+};
+
+// Left frontal focus at F3
+// Bipolar paramedian: Fp1-F3 DOWN, F3-C3 UP  (phase reversal at F3)
+// Bipolar temporal:   Fp1-F7 picks up Fp1 field (small, same direction)
+const LF_FIELD: Record<string, number> = {
+  F3:  1.00,         // focus
+  Fp1: 0.58,         // adjacent anterior
+  Fz:  0.32,         // midline spread
+  C3:  0.22,         // posterior spread — MUST differ so F3-C3 shows UP deflection
+  F7:  0.18,         // lateral spread
+  Cz:  0.10,
+  Fp2: 0.08,
+  F4:  0.12,
+};
 
 function epileptiformVoltage(el: string, t: number, ap: Set<string>): number {
-  const c = classify(el);
   let v = 0;
 
-  // ── Left temporal spikes ─────────────────────────────────────────────────────
+  // ── Left temporal spikes (focus T3) ──────────────────────────────────────────
   if (ap.has('focal-spikes-lt')) {
     const k = 'lt-spike';
     if (t - getT(k) > 4 && Math.random() < 0.006) setT(k, t);
-    const dt = t - getT(k);
-    if (c.isLeftTmp || el === 'F7' || el === 'Fp1') {
-      const attenuation = c.isLeftTmp ? 1.0 : (el === 'F7' ? 0.7 : 0.35);
-      v += attenuation * spikeSlowWave(dt, 180, 130);
-    }
+    const dt  = t - getT(k);
+    const att = LT_FIELD[el] ?? 0;
+    if (att > 0) v += att * spikeSlowWave(dt, 185, 130);
   }
 
-  // ── Right temporal spikes ────────────────────────────────────────────────────
+  // ── Right temporal spikes (focus T4) ─────────────────────────────────────────
   if (ap.has('focal-spikes-rt')) {
     const k = 'rt-spike';
     if (t - getT(k) > 4 && Math.random() < 0.006) setT(k, t);
-    const dt = t - getT(k);
-    if (c.isRightTmp || el === 'F8' || el === 'Fp2') {
-      const att = c.isRightTmp ? 1.0 : (el === 'F8' ? 0.7 : 0.35);
-      v += att * spikeSlowWave(dt, 180, 130);
-    }
+    const dt  = t - getT(k);
+    const att = RT_FIELD[el] ?? 0;
+    if (att > 0) v += att * spikeSlowWave(dt, 185, 130);
   }
 
-  // ── Left frontal spikes ──────────────────────────────────────────────────────
+  // ── Left frontal spikes (focus F3) ───────────────────────────────────────────
   if (ap.has('focal-spikes-lf')) {
     const k = 'lf-spike';
     if (t - getT(k) > 5 && Math.random() < 0.005) setT(k, t);
-    const dt = t - getT(k);
-    if (c.isLeftFront || el === 'F3') {
-      const att = el === 'Fp1' ? 0.9 : el === 'F3' ? 1.0 : 0.5;
-      v += att * spikeSlowWave(dt, 160, 120);
-    }
+    const dt  = t - getT(k);
+    const att = LF_FIELD[el] ?? 0;
+    if (att > 0) v += att * spikeSlowWave(dt, 165, 120);
   }
 
   // ── Generalised 3 Hz spike-wave (interictal bursts) ──────────────────────────
