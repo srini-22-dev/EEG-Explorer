@@ -39,6 +39,27 @@ Note the mirrored decay curve (1.00 → 0.67 → 0.31) is intentional and must s
 |---|---|---|
 | All electrodes | 1.00, computed independently per electrode | No shared source to volume-conduct from — see `GeneratorCatalogue.md` for why per-electrode independence is correct here specifically |
 
+### Frontal Beta (`frontalBeta`)
+
+| Electrode | Gain | Basis |
+|---|---|---|
+| F3, F4, Fz | 1.00 | Nearest the maximal frontal cortical sources |
+| Fp1, Fp2 | 0.80 | Anterior pole, slightly attenuated |
+| F7, F8 | 0.60 | Lateral frontal spread |
+| Cz | 0.50 | Midline central spread |
+| C3, C4 | 0.40 | Lateral central spread |
+| Posterior electrodes | 0 | Negligible beyond central regions |
+
+### Anterior Theta (`anteriorTheta`)
+
+| Electrode | Gain | Basis |
+|---|---|---|
+| Fz | 1.00 | Maximal over anterior midline |
+| Cz | 0.80 | Central midline spread |
+| F3, F4 | 0.60 | Bilateral frontal spread |
+| C3, C4 | 0.40 | Bilateral central spread |
+| All others | 0 | Negligible spread |
+
 ### EMG (`emgGenerator`)
 
 | Electrode group | Gain | Basis |

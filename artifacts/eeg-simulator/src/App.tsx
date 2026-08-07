@@ -1,10 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ControlPanel } from './components/ControlPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
 import { SimSettings, PatientState, resetGenerator } from './utils/eegGenerator';
 import { TooltipProvider } from '@/components/ui/tooltip';
-
+import { EEGTheme } from './utils/themes';
+import { QuizMode } from './components/QuizMode';
+import { TutorialMode } from './components/TutorialMode';
+import { SpectrumPanel } from './components/SpectrumPanel';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { HeadModel3D } from './components/HeadModel3D';
 // Patterns that are graphoelements of a specific sleep/drowsiness stage, not
 // independent overlays — they cannot occur outside the state that defines them.
 // `target` is the state selecting the pattern jumps Background State to;
@@ -24,6 +29,20 @@ export default function App() {
   const [sensitivity,  setSensitivity]  = useState<5 | 7 | 10 | 15>(7);
   const [patientState, setPatientState] = useState<PatientState>('awake');
   const [activePatterns, setActivePatterns] = useState<Set<string>>(new Set());
+
+  const [theme, setTheme] = useState<EEGTheme>('green-paper');
+  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [showSpectrum, setShowSpectrum] = useState(false);
+  const [quizMode, setQuizMode] = useState(false);
+  const [tutorialMode, setTutorialMode] = useState(false);
+  const [isFrozen, setIsFrozen] = useState(false);
+
+  const dataBuffer = useRef<number[][]>([]);
+  const timeBuffer = useRef<number[]>([]);
+
+  const [show3DPanel, setShow3DPanel] = useState(false);
+  const [headOpacity, setHeadOpacity] = useState(0.3);
+  const [brainOpacity, setBrainOpacity] = useState(0.8);
 
   const togglePattern = (id: string) =>
     setActivePatterns(prev => {
@@ -70,7 +89,7 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen w-full overflow-hidden font-sans bg-[#c8e6c0]">
+      <div className={`flex h-screen w-full overflow-hidden font-sans ${theme === 'dark-mode' ? 'bg-[#121212]' : theme === 'white-paper' ? 'bg-white' : 'bg-[#c8e6c0]'}`}>
         <ControlPanel
           montageId={montageId}         setMontageId={setMontageId}
           activePatterns={activePatterns} togglePattern={togglePattern}
@@ -78,14 +97,81 @@ export default function App() {
           sensitivity={sensitivity}     setSensitivity={setSensitivity}
           patientState={patientState}   setPatientState={setPatientState}
           clearAll={clearAll}
+          theme={theme} setTheme={setTheme}
+          showAnnotations={showAnnotations} setShowAnnotations={setShowAnnotations}
+          showSpectrum={showSpectrum} setShowSpectrum={setShowSpectrum}
+          setQuizMode={setQuizMode} setTutorialMode={setTutorialMode}
+          dataBuffer={dataBuffer} timeBuffer={timeBuffer}
+          show3DPanel={show3DPanel} setShow3DPanel={setShow3DPanel}
+          headOpacity={headOpacity} setHeadOpacity={setHeadOpacity}
+          brainOpacity={brainOpacity} setBrainOpacity={setBrainOpacity}
         />
-        <div className="flex-1 flex flex-col h-full">
-          <EEGCanvas
-            montage={MONTAGES[montageId]}
-            settings={settings}
-            activeEffectsLabel={activeEffects}
-          />
+        <div className="flex-1 flex flex-col h-full relative">
+          {show3DPanel ? (
+            <PanelGroup direction="horizontal">
+              <Panel defaultSize={70} minSize={30}>
+                <EEGCanvas
+                  montage={MONTAGES[montageId]}
+                  settings={settings}
+                  activeEffectsLabel={activeEffects}
+                  theme={theme}
+                  showAnnotations={showAnnotations}
+                  isFrozen={isFrozen}
+                  setIsFrozen={setIsFrozen}
+                  dataBuffer={dataBuffer}
+                  timeBuffer={timeBuffer}
+                />
+              </Panel>
+              <PanelResizeHandle className="w-2 bg-[#2e4a2e] hover:bg-[#3e5a3e] cursor-col-resize transition-colors flex items-center justify-center">
+                <div className="w-1 h-8 bg-slate-500 rounded-full" />
+              </PanelResizeHandle>
+              <Panel defaultSize={30} minSize={20}>
+                <HeadModel3D 
+                  montage={MONTAGES[montageId]} 
+                  headOpacity={headOpacity} 
+                  brainOpacity={brainOpacity} 
+                />
+              </Panel>
+            </PanelGroup>
+          ) : (
+            <EEGCanvas
+              montage={MONTAGES[montageId]}
+              settings={settings}
+              activeEffectsLabel={activeEffects}
+              theme={theme}
+              showAnnotations={showAnnotations}
+              isFrozen={isFrozen}
+              setIsFrozen={setIsFrozen}
+              dataBuffer={dataBuffer}
+              timeBuffer={timeBuffer}
+            />
+          )}
+          {showSpectrum && (
+            <SpectrumPanel 
+              dataBuffer={dataBuffer} 
+              montage={MONTAGES[montageId]} 
+              settings={settings} 
+            />
+          )}
         </div>
+        
+        {quizMode && (
+          <QuizMode 
+            onClose={() => setQuizMode(false)}
+            setPatientState={setPatientState}
+            setActivePatterns={setActivePatterns}
+            setFreeze={setIsFrozen}
+          />
+        )}
+        
+        {tutorialMode && (
+          <TutorialMode 
+            onClose={() => setTutorialMode(false)}
+            setPatientState={setPatientState}
+            setActivePatterns={setActivePatterns}
+            setMontageId={setMontageId}
+          />
+        )}
       </div>
     </TooltipProvider>
   );

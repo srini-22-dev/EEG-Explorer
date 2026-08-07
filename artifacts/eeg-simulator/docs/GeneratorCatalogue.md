@@ -10,6 +10,8 @@ Every entry in this catalogue must be a **sum-of-generators** contributor to `ge
 |---|---|---|---|---|---|---|
 | Posterior Dominant Rhythm (Left) | `pdrLeft` | Left occipital cortex / thalamocortical loop | 8–12 Hz | See `FieldMaps.md`: PDR-Left | Relaxed wakefulness | The single most important normal awake finding |
 | Posterior Dominant Rhythm (Right) | `pdrRight` | Right occipital cortex / thalamocortical loop | 8–12 Hz | See `FieldMaps.md`: PDR-Right | Relaxed wakefulness | Normal symmetry range; independent hemispheres, not mirror images |
+| Frontal Beta | `frontalBeta` | Frontal cortex / thalamocortical loop | 13–25 Hz | See `FieldMaps.md`: Frontal Beta | Awake, alert, anxious | Distinguishing normal fast activity from muscle artifact |
+| Anterior Theta | `anteriorTheta` | Anterior midline/frontal cortex | 4–7 Hz | See `FieldMaps.md`: Anterior Theta | Awake (concentration/drowsy) | Normal variant theta activity in adults |
 | Diffuse Cortical Background | `diffuseBackground` | Ongoing, unsynchronized firing under every electrode | Broadband, low amplitude | See `FieldMaps.md`: Diffuse Background (uniform, independent per electrode) | Always | No channel is ever truly flat |
 | Myogenic (EMG) | `emgGenerator` | Frontalis / temporalis muscle tone | 20–70+ Hz | See `FieldMaps.md`: EMG | Awake, not fully relaxed | Distinguishing real cortical signal from muscle contamination |
 | Posterior Slow Waves of Youth | `pswy` (toggleable pattern) | Same posterior generator region as PDR — thought to reflect immature/less-differentiated thalamocortical circuitry | 2.5–4.5 Hz | See `FieldMaps.md`: PSWY (same as PDR) | Awake, admixed with PDR — most common in children/young adults | Recognizing a benign, intermittent high-amplitude posterior slow-wave admixture as normal, not pathological slowing |
@@ -35,6 +37,16 @@ Each generator's definition has three required parts:
 - **Source**: the right hemisphere's thalamocortical loop, independent of `pdrLeft`. Same sub-/supra-harmonic characteristic as `pdrLeft`.
 - **Propagation**: mirror of `pdrLeft` — strongest at O2, attenuating through P4, weaker at T6, negligible frontally.
 - **Modifiers**: same categories as `pdrLeft`, with its own independent vigilance-modulation trajectories (both timescales) and its own fixed frequency/gain offset — the two hemispheres must never share a single underlying generator instance.
+
+### Frontal Beta — `frontalBeta`
+- **Source**: bilateral frontal cortex and thalamocortical loops, often enhanced by certain medications or anxiety.
+- **Propagation**: symmetrical frontal distribution, strongest at F3, F4, Fz, Fp1, Fp2, and attenuating towards central regions. Negligible posteriorly.
+- **Modifiers**: state-dependent amplitude modulation (OU envelope), enhanced in alert states. Modeled using a multi-tone carrier to prevent artificial pure-sine appearance.
+
+### Anterior Theta — `anteriorTheta`
+- **Source**: midline anterior and frontal cortex. Can reflect concentration, mental task engagement, or transition to drowsiness.
+- **Propagation**: maximal at Fz and Cz, spreading symmetrically to F3, F4, and central regions.
+- **Modifiers**: varies with vigilance, modeled with stochastic amplitude modulation via OU envelope and a multi-tone carrier.
 
 ### Diffuse Cortical Background — `diffuseBackground`
 - **Source**: many small, spatially unsynchronized cortical populations — not one shared generator.

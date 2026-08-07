@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, RefObject } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Info, ChevronDown } from 'lucide-react';
-import { MONTAGES } from '../utils/montages';
+import { Info, ChevronDown, Download, MonitorPlay, Brain } from 'lucide-react';
+import { MONTAGES, Montage } from '../utils/montages';
 import { PatientState } from '../utils/eegGenerator';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
+import { EEGTheme } from '../utils/themes';
+import { exportCSV, exportScreenshot } from '../utils/exportUtils';
 
 type Props = {
   montageId: string;
@@ -21,6 +23,22 @@ type Props = {
   patientState: PatientState;
   setPatientState: (s: PatientState) => void;
   clearAll: () => void;
+  show3DPanel?: boolean;
+  setShow3DPanel?: (v: boolean) => void;
+  headOpacity?: number;
+  setHeadOpacity?: (v: number) => void;
+  brainOpacity?: number;
+  setBrainOpacity?: (v: number) => void;
+  theme: EEGTheme;
+  setTheme: (t: EEGTheme) => void;
+  showAnnotations: boolean;
+  setShowAnnotations: (b: boolean) => void;
+  showSpectrum: boolean;
+  setShowSpectrum: (b: boolean) => void;
+  setQuizMode: (b: boolean) => void;
+  setTutorialMode: (b: boolean) => void;
+  dataBuffer: React.MutableRefObject<number[][]>;
+  timeBuffer: React.MutableRefObject<number[]>;
 };
 
 const PATIENT_STATES: { value: PatientState; label: string; desc: string }[] = [
@@ -38,6 +56,14 @@ export function ControlPanel({
   sensitivity, setSensitivity,
   patientState, setPatientState,
   clearAll,
+  show3DPanel = false, setShow3DPanel,
+  headOpacity = 0.3, setHeadOpacity,
+  brainOpacity = 0.8, setBrainOpacity,
+  theme, setTheme,
+  showAnnotations, setShowAnnotations,
+  showSpectrum, setShowSpectrum,
+  setQuizMode, setTutorialMode,
+  dataBuffer, timeBuffer
 }: Props) {
   // Track which pattern categories are expanded
   const [openCats, setOpenCats] = useState<Set<string>>(new Set(['artifacts']));
@@ -180,6 +206,102 @@ export function ControlPanel({
               </div>
             );
           })}
+        </div>
+
+        {/* ── 3D Head Model ── */}
+        <div className="border-b border-[#2e4a2e]">
+          <div className="px-4 py-3 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
+                3D Head
+              </h2>
+              {setShow3DPanel && (
+                <Switch
+                  checked={show3DPanel}
+                  onCheckedChange={setShow3DPanel}
+                  className="data-[state=checked]:bg-emerald-600 scale-90"
+                />
+              )}
+            </div>
+            
+            {show3DPanel && setHeadOpacity && setBrainOpacity && (
+              <div className="space-y-3 mt-2 bg-[#192219] p-2 rounded">
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <Label className="text-[10px] text-slate-400">Skin Opacity</Label>
+                    <span className="text-[10px] text-slate-500">{Math.round(headOpacity * 100)}%</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="1" step="0.05" 
+                    value={headOpacity} 
+                    onChange={e => setHeadOpacity(parseFloat(e.target.value))}
+                    className="w-full accent-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <Label className="text-[10px] text-slate-400">Brain Opacity</Label>
+                    <span className="text-[10px] text-slate-500">{Math.round(brainOpacity * 100)}%</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="1" step="0.05" 
+                    value={brainOpacity} 
+                    onChange={e => setBrainOpacity(parseFloat(e.target.value))}
+                    className="w-full accent-emerald-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Tools & Export ── */}
+        <div className="px-4 py-3 space-y-3 border-b border-[#2e4a2e]">
+          <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Tools & Export</h2>
+          
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Theme</Label>
+            <select 
+              value={theme} 
+              onChange={(e) => setTheme(e.target.value as EEGTheme)}
+              className="bg-slate-800 text-xs border border-slate-700 rounded p-1 text-slate-200"
+            >
+              <option value="green-paper">Green Paper</option>
+              <option value="white-paper">White Paper</option>
+              <option value="dark-mode">Dark Mode</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Show Annotations</Label>
+            <Switch checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">FFT Spectrum</Label>
+            <Switch checked={showSpectrum} onCheckedChange={setShowSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 hover:bg-slate-800" onClick={() => exportCSV(dataBuffer.current, timeBuffer.current, MONTAGES[montageId])}>
+              <Download className="w-3 h-3 mr-1" /> CSV
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 hover:bg-slate-800" onClick={() => {
+              const canvas = document.querySelector('canvas');
+              exportScreenshot(canvas);
+            }}>
+              <Download className="w-3 h-3 mr-1" /> Image
+            </Button>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/40" onClick={() => setTutorialMode(true)}>
+              <MonitorPlay className="w-3 h-3 mr-1" /> Tutorial
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 bg-purple-900/30 text-purple-300 hover:bg-purple-800/40" onClick={() => setQuizMode(true)}>
+              <Brain className="w-3 h-3 mr-1" /> Quiz
+            </Button>
+          </div>
         </div>
 
         {/* ── Display Settings ── */}
