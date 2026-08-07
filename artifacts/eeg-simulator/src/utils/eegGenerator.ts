@@ -43,6 +43,16 @@ const setT = (k: string, v: number) => { T[k] = v; };
 /** Reset all timing so patterns re-trigger from the current moment */
 export function resetGenerator() {
   Object.keys(T).forEach(k => { T[k] = -1000; });
+  // Reset time-varying generator state, but not the fixed per-hemisphere
+  // traits (freqOffset/gain) — those represent stable individual anatomy for
+  // the session and must survive a "clear all patterns" reset.
+  (['L', 'R'] as const).forEach(side => {
+    pdrState[side].lastT = -Infinity;
+    pdrState[side].slowNoise = 0;
+    pdrState[side].fastNoise = 0;
+    pdrState[side].freqWander = 0;
+  });
+  diffuseNoise.forEach((_, el) => diffuseNoise.set(el, 0));
 }
 
 // ─── Utility functions ───────────────────────────────────────────────────────
@@ -98,6 +108,204 @@ function classify(el: string) {
   };
 }
 
+// ─── Generic incommensurate multi-tone synthesis ─────────────────────────────
+//
+// Shared building block for every background band below (alpha, beta, theta,
+// delta, fine texture): summing several close, mutually-irrational
+// frequencies gives the same qualitative effect as band-limited noise (they
+// drift in and out of phase with each other) while staying deterministic and
+// stateless, instead of a single Math.sin(...) that repeats exactly every
+// cycle and reads as an animation.
+function multiToneSignal(t: number, tones: { f: number; a: number }[], norm: number, freqOffset = 0, freqScale = 1): number {
+  let s = 0;
+  for (const { f, a } of tones) {
+    s += a * Math.sin(2 * Math.PI * (f + freqOffset) * freqScale * t);
+  }
+  return s / norm;
+}
+
+// ─── Posterior dominant (alpha) rhythm — narrowband synthesis ────────────────
+//
+// A real occipital alpha rhythm is not one clean 10 Hz oscillator: it's the
+// summed, only loosely-synchronized output of a population of thalamocortical
+// generators, so it behaves like band-limited noise centred near 10 Hz rather
+// than a pure tone — instantaneous "frequency" wanders, and consecutive waves
+// differ in height with no fixed envelope. Summing several close tones across
+// 8-11.5 Hz gives that effect (see multiToneSignal above).
+const ALPHA_TONES: { f: number; a: number }[] = [
+  { f: 8.4,  a: 0.5  },
+  { f: 9.1,  a: 0.8  },
+  { f: 9.7,  a: 1.0  },
+  { f: 10.3, a: 0.9  },
+  { f: 10.9, a: 0.6  },
+  { f: 8.8,  a: 0.35 },
+  { f: 11.3, a: 0.3  },
+];
+const ALPHA_TONE_NORM = 2.4; // empirical: keeps combined peak comparable to a unit-amplitude sine
+
+// Real posterior alpha frequently carries weak sub-/supra-harmonic content —
+// clinically recognized "alpha variants" (slow alpha variant, ~half the
+// fundamental frequency; fast alpha variant, ~double) produced by the same
+// nonlinear thalamocortical generator, not a separate rhythm. Modelled as
+// low-amplitude overtones of the same tone set, scaled in frequency, riding
+// the same envelope as the fundamental (TeachingConcepts.md: a generator
+// characteristic of PDR, not a separate generator).
+const SUBHARMONIC_SCALE = 0.5;
+const SUBHARMONIC_AMP   = 0.15; // fraction of the fundamental's amplitude
+const SUPRAHARMONIC_SCALE = 2.0;
+const SUPRAHARMONIC_AMP   = 0.08;
+
+/** freqOffset: fixed + slowly-drifting per-hemisphere frequency (see pdrState below) */
+function alphaCarrier(t: number, freqOffset: number): number {
+  const fundamental   = multiToneSignal(t, ALPHA_TONES, ALPHA_TONE_NORM, freqOffset, 1);
+  const subharmonic   = multiToneSignal(t, ALPHA_TONES, ALPHA_TONE_NORM, freqOffset, SUBHARMONIC_SCALE);
+  const supraharmonic = multiToneSignal(t, ALPHA_TONES, ALPHA_TONE_NORM, freqOffset, SUPRAHARMONIC_SCALE);
+  return fundamental + SUBHARMONIC_AMP * subharmonic + SUPRAHARMONIC_AMP * supraharmonic;
+}
+
+// ─── Generator layer ──────────────────────────────────────────────────────────
+//
+// See artifacts/eeg-simulator/docs/EEG_ARCHITECTURE.md, GeneratorCatalogue.md
+// and FieldMaps.md — the governing document set. Every awake-state
+// contribution below is a named generator, spread to electrodes via a
+// spatial field, and summed in backgroundSignal() (Principle 2: electrodes
+// record mixtures of generators, never a per-electrode-class formula).
+// Implemented so far: pdrLeft, pdrRight, diffuseBackground, emgGenerator.
+
+// The render loop (EEGCanvas.tsx) fills its sample buffer at a fixed 250 Hz,
+// always in increasing t, one call per electrode per sample — used below to
+// step per-electrode noise processes by a known, fixed time step.
+const SAMPLE_DT = 1 / 250;
+
+/** One-line leaky-integrator (discrete Ornstein-Uhlenbeck) step. A convex
+ *  combination of the previous value and fresh noise, so it always stays in
+ *  [-1, 1] with no clamping needed — the shared mechanism behind every
+ *  stochastic generator in this file. */
+function stepOU(prev: number, dt: number, tau: number): number {
+  const decay = Math.exp(-dt / tau);
+  return decay * prev + (1 - decay) * (Math.random() * 2 - 1);
+}
+
+// ── Posterior Dominant Rhythm — pdrLeft / pdrRight ───────────────────────────
+//
+// Two independent thalamocortical loops (GeneratorCatalogue.md), spread to
+// electrodes via FieldMaps.md's PDR-Left/PDR-Right tables. Each carries:
+//  - a fixed, session-persistent frequency/gain offset — individual
+//    anatomical asymmetry, drawn once and never re-rolled;
+//  - vigilance/arousal modulation — an explicit simplification
+//    (TeachingConcepts.md) of several interacting real processes (attention,
+//    arousal, subcortical gating), represented as stochastic random walks
+//    rather than a literal switch. Three timescales of the SAME idea, not
+//    three mechanisms: a slow walk sets the macro run/pause structure
+//    (waxing, dropout, return), a faster walk adds the "slightly weaken,
+//    recover" ripple within a run, and a third slow walk lets the
+//    instantaneous frequency drift a little during fragmentation — real PDR
+//    frequency is not perfectly fixed moment to moment.
+const PDR_FIELD: Record<'L' | 'R', Record<string, number>> = {
+  L: { O1: 1.00, P3: 0.67, T5: 0.31 },
+  R: { O2: 1.00, P4: 0.67, T6: 0.31 },
+};
+// Posterior Slow Waves of Youth (FieldMaps.md) reuse the PDR decay curve —
+// same posterior source region, per GeneratorCatalogue.md — for occipital
+// and parietal electrodes only (PSWY does not extend to posterior-temporal).
+const PSWY_FIELD: Record<string, number> = { O1: 1.00, O2: 1.00, P3: 0.67, P4: 0.67 };
+const PDR_CEILING = 42;            // µV at the source electrode — existing occipital amplitude convention
+const PDR_SLOW_TAU = 5;            // seconds — macro run/pause structure
+const PDR_FAST_TAU = 1.2;          // seconds — micro weaken/recover ripple within a run
+const PDR_FREQ_TAU  = 6;           // seconds — instantaneous-frequency drift during fragmentation
+const PDR_FREQ_WANDER_HZ = 0.35;   // max drift on top of the fixed anatomical offset
+
+type PdrHemisphereState = {
+  freqOffset: number; gain: number; // fixed for the session: individual anatomical variation
+  lastT: number;
+  slowNoise: number; fastNoise: number; freqWander: number; // all in [-1, 1]
+};
+function makePdrHemisphereState(): PdrHemisphereState {
+  return {
+    freqOffset: (Math.random() - 0.5) * 0.4, // ±0.2 Hz
+    gain: 0.85 + Math.random() * 0.3,          // 0.85-1.15x
+    lastT: -Infinity,
+    slowNoise: 0, fastNoise: 0, freqWander: 0,
+  };
+}
+const pdrState: Record<'L' | 'R', PdrHemisphereState> = { L: makePdrHemisphereState(), R: makePdrHemisphereState() };
+
+/** Advances (or returns the cached) state for one hemisphere. Safe to call
+ *  more than once at the same t — the electrodes reached by a hemisphere's
+ *  field (O1/P3/T5, say) all query the same generator at the same sample
+ *  time, and each random walk must step exactly once per sample, not once
+ *  per electrode. */
+function pdrAdvance(side: 'L' | 'R', t: number): PdrHemisphereState {
+  const s = pdrState[side];
+  if (t > s.lastT) {
+    const dt = s.lastT === -Infinity ? 0 : Math.min(t - s.lastT, 0.25);
+    s.slowNoise  = stepOU(s.slowNoise,  dt, PDR_SLOW_TAU);
+    s.fastNoise  = stepOU(s.fastNoise,  dt, PDR_FAST_TAU);
+    s.freqWander = stepOU(s.freqWander, dt, PDR_FREQ_TAU);
+    s.lastT = t;
+  }
+  return s;
+}
+
+function pdrContribution(side: 'L' | 'R', el: string, t: number): number {
+  const gain = PDR_FIELD[side][el];
+  if (!gain) return 0;
+  const s = pdrAdvance(side, t);
+  // Slow walk dominates (run/pause structure), fast walk adds the "slightly
+  // weaken, recover" texture within a run — a weighted sum of two [-1, 1]
+  // walks stays in [-1, 1], so no clamping is needed.
+  const combinedNoise = 0.65 * s.slowNoise + 0.35 * s.fastNoise;
+  const envelope = 0.5 + 0.5 * combinedNoise;
+  const freq = s.freqOffset + s.freqWander * PDR_FREQ_WANDER_HZ;
+  return PDR_CEILING * gain * s.gain * envelope * alphaCarrier(t, freq);
+}
+
+// ── Myogenic (EMG) — emgGenerator ────────────────────────────────────────────
+//
+// Frontalis/temporalis muscle tone (GeneratorCatalogue.md), spread via
+// FieldMaps.md's EMG table. Real EMG is genuinely broadband/high-frequency
+// interference from many overlapping motor units — visually fast and jagged,
+// not a smooth wiggle — so unlike diffuseBackground this needs NO smoothing:
+// raw per-sample noise already has flat spectral content up to the Nyquist
+// frequency, which is the simplest model that's actually correct here, not a
+// simplification of one (EEG_ARCHITECTURE.md: prefer the simplest model with
+// the same educational value).
+const EMG_FIELD: Record<string, number> = {
+  Fp1: 1, Fp2: 1, F3: 1, F4: 1, F7: 1, F8: 1, Fz: 1,
+  T3: 0.75, T4: 0.75, T5: 0.75, T6: 0.75,
+  C3: 0.5, C4: 0.5, Cz: 0.5, Pz: 0.5,
+};
+const EMG_AMP = 6; // µV at gain 1.0 (frontal)
+
+function emgContribution(el: string): number {
+  const gain = EMG_FIELD[el] ?? 0;
+  if (!gain) return 0;
+  return EMG_AMP * gain * (Math.random() * 2 - 1);
+}
+
+// ── Diffuse Cortical Background — diffuseBackground ──────────────────────────
+//
+// Many small, spatially-unsynchronized cortical populations — not one shared
+// generator, so unlike PDR this is modelled independently per electrode
+// (FieldMaps.md: uniform gain, independent per electrode) — the one
+// generator where that independence is physiologically correct, not a
+// shortcut. A single leaky integrator per electrode is enough to keep this
+// "ongoing but unstructured", per EEG_ARCHITECTURE.md's instruction to
+// prefer the simplest model with the same educational value: it stops a
+// channel from ever being flat without needing a multi-timescale cascade.
+const DIFFUSE_AMP = 2.5;   // µV — same order as the prior flat noise-floor term
+const DIFFUSE_TAU = 0.09;  // seconds — fast enough to read as continuous texture, not a repeating tone
+const diffuseNoise = new Map<string, number>();
+[...ALL_ELECTRODES, 'A1', 'A2'].forEach(el => diffuseNoise.set(el, 0));
+
+function diffuseBackgroundContribution(el: string): number {
+  const decay = Math.exp(-SAMPLE_DT / DIFFUSE_TAU);
+  const prev = diffuseNoise.get(el)!;
+  const next = decay * prev + (1 - decay) * (Math.random() * 2 - 1); // stays in [-1, 1]
+  diffuseNoise.set(el, next);
+  return DIFFUSE_AMP * next;
+}
+
 // ─── Background rhythm per patient state ─────────────────────────────────────
 
 function backgroundSignal(el: string, t: number, st: PatientState, ap: Set<string>): number {
@@ -118,25 +326,13 @@ function backgroundSignal(el: string, t: number, st: PatientState, ap: Set<strin
   let v = 0;
 
   if (st === 'awake') {
-    // ── Posterior alpha spindles (PDR, 9-11 Hz) ──────────────────────────────
-    // Waxing-waning envelope: 0→1→0 sinusoidal at ~0.10 Hz (≈10 s full cycle)
-    // → ~5 s alpha run, ~5 s relative quiet, realistic spindle morphology.
-    // Each electrode has its own phase offset (ph.alpha2) so spindles don't
-    // all peak simultaneously across the montage.
-    const spindleEnv = 0.5 + 0.5 * Math.cos(2 * Math.PI * 0.10 * t + ph.alpha2);
-    const alphaAmp   = c.isOccipital ? 42 : c.isParietal ? 28 : c.isPostTmp ? 13 : 0;
-    v += alphaAmp * spindleEnv * Math.sin(2 * Math.PI * 10 * t + ph.alpha);
-
-    // ── Non-posterior channels: deliberately subtle ───────────────────────────
-    // Frontal/central show only low-amplitude beta + trace theta so students
-    // can clearly see the posterior alpha gradient.
-    const betaAmp = c.isFrontal ? 5 : c.isCentral || c.isMidline ? 4 : c.isTemporal ? 3 : 1;
-    v += betaAmp * Math.sin(2 * Math.PI * 18 * t + ph.beta);
-
-    // Trace slow activity (physiological but unobtrusive at 7 µV/mm sensitivity)
-    v += 2.0 * Math.sin(2 * Math.PI * 5.0 * t + ph.theta);
-    v += 1.5 * Math.sin(2 * Math.PI * 1.5 * t + ph.delta);
-    v += (Math.random() - 0.5) * (isPost ? 3 : 2);
+    // Generator catalogue (see GeneratorCatalogue.md): electrode potential
+    // is the sum of whichever named generators reach this electrode — never
+    // a per-electrode-class formula (Principle 2).
+    v += pdrContribution('L', el, t);
+    v += pdrContribution('R', el, t);
+    v += diffuseBackgroundContribution(el);
+    v += emgContribution(el);
 
   } else if (st === 'drowsy') {
     // Posterior theta replaces alpha; diffuse slowing; residual occipital alpha
@@ -344,6 +540,7 @@ const LF_FIELD: Record<string, number> = {
 };
 
 function epileptiformVoltage(el: string, t: number, ap: Set<string>): number {
+  const c = classify(el);
   let v = 0;
 
   // ── Left temporal spikes (focus T3) ──────────────────────────────────────────
@@ -483,12 +680,22 @@ function artifactVoltage(el: string, t: number, ap: Set<string>): number {
   let v = 0;
 
   // ── Eye blink ────────────────────────────────────────────────────────────────
+  // Corneoretinal dipole (cornea +, retina −) reoriented by Bell's phenomenon:
+  // the globe rolls up as the lid closes (small early deflection, cornea swinging
+  // away from the frontal electrodes) then returns to primary position as the lid
+  // reopens (large late deflection, cornea swinging back toward the electrodes).
+  // Diphasic, not a single monophasic hump — small-then-large, opposite polarity.
   if (ap.has('blink')) {
     if (t - getT('blink') > 3 && Math.random() < 0.008) setT('blink', t);
     const dt = t - getT('blink');
-    if (dt > 0 && dt < 0.4) {
-      if (['Fp1','Fp2'].includes(el))              v += 280 * gaussian(dt, 0.12, 0.05);
-      else if (['F3','F4','F7','F8'].includes(el)) v +=  90 * gaussian(dt, 0.12, 0.05);
+    if (dt > 0 && dt < 0.3) {
+      if (['Fp1','Fp2'].includes(el)) {
+        v +=  60  * gaussian(dt, 0.05, 0.025);   // small early lobe
+        v -= 280  * gaussian(dt, 0.16, 0.06);    // large late lobe, opposite polarity
+      } else if (['F3','F4','F7','F8'].includes(el)) {
+        v +=  20  * gaussian(dt, 0.05, 0.025);
+        v -=  90  * gaussian(dt, 0.16, 0.06);
+      }
     }
   }
 
@@ -553,7 +760,7 @@ function artifactVoltage(el: string, t: number, ap: Set<string>): number {
 
 // ─── Normal variants ──────────────────────────────────────────────────────────
 
-function variantVoltage(el: string, t: number, ap: Set<string>): number {
+function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>): number {
   const c  = classify(el);
   const ph = elPhase.get(el)!;
   let v = 0;
@@ -566,7 +773,8 @@ function variantVoltage(el: string, t: number, ap: Set<string>): number {
   }
 
   // ── Wicket spikes (temporal arch 9 Hz bursts) ────────────────────────────────
-  if (ap.has('wicket') && (c.isTemporal || c.isPostTmp || el === 'F7' || el === 'F8')) {
+  // Drowsiness/light-sleep variant — not seen in the fully awake, alert background.
+  if (ap.has('wicket') && st === 'drowsy' && (c.isTemporal || c.isPostTmp || el === 'F7' || el === 'F8')) {
     if (t - getT('wicket') > 3 && Math.random() < 0.015) setT('wicket', t);
     const dt = t - getT('wicket');
     if (dt > 0 && dt < 0.9) {
@@ -577,7 +785,8 @@ function variantVoltage(el: string, t: number, ap: Set<string>): number {
   }
 
   // ── RMTD (rhythmic mid-temporal theta of drowsiness) ─────────────────────────
-  if (ap.has('rmtd') && (c.isTemporal || el === 'T3' || el === 'T4')) {
+  // Named for, and confined to, the drowsy transitional state — not awake, not deeper sleep.
+  if (ap.has('rmtd') && st === 'drowsy' && (c.isTemporal || el === 'T3' || el === 'T4')) {
     if (t - getT('rmtd') > 4 && Math.random() < 0.01) setT('rmtd', t);
     const dt = t - getT('rmtd');
     if (dt > 0 && dt < 4) {
@@ -593,6 +802,22 @@ function variantVoltage(el: string, t: number, ap: Set<string>): number {
     if (dt > 0 && dt < 0.15) {
       // Lambda is positive (surface positive in occipital)
       v += 60 * Math.sin(Math.PI * dt / 0.15);
+    }
+  }
+
+  // ── Posterior Slow Waves of Youth (PSWY) ──────────────────────────────────────
+  // Intermittent, high-amplitude polymorphic slow waves (2.5-4.5 Hz) admixed
+  // with the posterior alpha rhythm — a benign normal variant, most common in
+  // children/young adults. Occurs specifically alongside PDR (awake,
+  // posterior), not as an independent rhythm of its own.
+  if (ap.has('pswy') && st === 'awake' && PSWY_FIELD[el]) {
+    if (t - getT('pswy') > 3.5 && Math.random() < 0.01) setT('pswy', t);
+    const dt = t - getT('pswy');
+    const cycleHz = 3.2;
+    const runLen = (1 / cycleHz) * 2; // one to two slow waves per burst
+    if (dt > 0 && dt < runLen) {
+      const env = gaussian(dt, runLen / 2, runLen * 0.35);
+      v += 95 * PSWY_FIELD[el] * env * Math.sin(2 * Math.PI * cycleHz * dt);
     }
   }
 
@@ -717,7 +942,7 @@ export function getElectrodeVoltage(electrode: Electrode, t: number, settings: S
   v += sleepStructureVoltage(electrode, t, st, ap);
 
   // 4. Normal variants
-  v += variantVoltage(electrode, t, ap);
+  v += variantVoltage(electrode, t, st, ap);
 
   // 5. Artifacts
   v += artifactVoltage(electrode, t, ap);

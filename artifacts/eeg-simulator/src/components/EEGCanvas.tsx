@@ -61,6 +61,15 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
   const lastTimeRef  = useRef<number>(performance.now());
   const elapsedRef   = useRef<number>(0);
 
+  // Settings/label change on every pattern toggle, sensitivity tweak, etc. — but
+  // the render loop below must NOT tear down and restart for that. It reads the
+  // latest values through these refs each frame instead, so the sweep never
+  // resets; only an actual montage change (different channel set) clears the buffer.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const labelRef = useRef(activeEffectsLabel);
+  labelRef.current = activeEffectsLabel;
+
   useEffect(() => {
     dataBuffer.current = montage.channels.map(() => []);
     timeBuffer.current = [];
@@ -85,6 +94,8 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
     const layout = buildLayout(montage);
 
     const render = (now: number) => {
+      const settings = settingsRef.current;
+
       const dtMs = now - lastTimeRef.current;
       lastTimeRef.current = now;
       const dt = Math.min(dtMs / 1000, 0.1);
@@ -266,14 +277,15 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
       }
 
       // 9. Active patterns overlay bar
-      if (activeEffectsLabel) {
+      const activeLabel = labelRef.current;
+      if (activeLabel) {
         ctx.fillStyle = 'rgba(0,40,0,0.68)';
         ctx.fillRect(lblW + 2, h - 20, w - lblW - 20, 18);
         ctx.fillStyle    = '#a0e8a0';
         ctx.font         = '10px sans-serif';
         ctx.textAlign    = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`● ${activeEffectsLabel}`, lblW + 8, h - 11);
+        ctx.fillText(`● ${activeLabel}`, lblW + 8, h - 11);
       }
 
       rafId = requestAnimationFrame(render);
@@ -281,7 +293,12 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
 
     rafId = requestAnimationFrame(render);
     return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', resize); };
-  }, [montage, settings, activeEffectsLabel]);
+    // Intentionally scoped to `montage` only — a montage switch is the one case
+    // that legitimately needs a fresh loop (different channel set, buffer reset
+    // above). Everything else (patterns, state, speed, sensitivity) flows in via
+    // settingsRef/labelRef each frame so the sweep is never interrupted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [montage]);
 
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>

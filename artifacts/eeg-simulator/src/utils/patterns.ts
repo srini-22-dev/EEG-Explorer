@@ -15,14 +15,26 @@ export type PatternCategory = {
 
 export const PATTERN_CATEGORIES: PatternCategory[] = [
   {
+    id: 'sleep-architecture',
+    name: 'Sleep Architecture',
+    color: '#38bdf8',     // sky blue
+    patterns: [
+      { id: 'posts',      name: 'POSTS',            desc: 'Positive occipital sharp transients of sleep; drowsiness/N1 sleep only — selecting this switches Background State to N1.' },
+      { id: 'v-waves',    name: 'Vertex Waves',      desc: 'Sharp, Cz-maximal transients of NREM sleep; shown here in N2 — selecting this switches Background State to N2.' },
+      { id: 'k-complex',  name: 'K-Complex',         desc: 'Defining graphoelement of N2 sleep: sharp component + slow after-wave, Fz/Cz/Pz maximal — selecting this switches Background State to N2.' },
+      { id: 'spindles',   name: 'Sleep Spindles',    desc: '12-15 Hz waxing-waning bursts, central-maximal, defining N2 sleep — selecting this switches Background State to N2.' },
+    ],
+  },
+  {
     id: 'variants',
     name: 'Normal Variants',
     color: '#4ade80',     // green
     patterns: [
       { id: 'mu-rhythm',    name: 'Mu Rhythm',            desc: 'Arch-shaped 8-12 Hz rhythm over central (C3/C4); normal; attenuated by contralateral hand movement.' },
-      { id: 'wicket',       name: 'Wicket Spikes',         desc: 'Temporal 6-11 Hz arch-shaped bursts; benign; NO following slow wave — key distinguishing feature.' },
-      { id: 'rmtd',         name: 'RMTD',                  desc: 'Rhythmic mid-temporal theta of drowsiness (4-7 Hz); normal variant in T3/T4 during drowsiness.' },
+      { id: 'wicket',       name: 'Wicket Spikes',         desc: 'Temporal 6-11 Hz arch-shaped bursts; benign; NO following slow wave — drowsiness only; selecting this switches Background State to Drowsy.' },
+      { id: 'rmtd',         name: 'RMTD',                  desc: 'Rhythmic mid-temporal theta of drowsiness (4-7 Hz); normal variant in T3/T4 — selecting this switches Background State to Drowsy.' },
       { id: 'lambda',       name: 'Lambda Waves',           desc: 'Positive occipital sharp transients occurring during visual scanning of a patterned field.' },
+      { id: 'pswy',         name: 'Posterior Slow Waves of Youth', desc: 'Intermittent high-amplitude 2.5-4.5 Hz waves admixed with the posterior alpha rhythm; benign normal variant, most common in children/young adults — awake state only.' },
       { id: '6hz-sw',       name: '6 Hz Phantom Spike-Wave', desc: 'Brief, low-amplitude generalised 6 Hz spike-wave during drowsiness/light sleep; benign.' },
       { id: '14-6-pos',     name: '14 & 6 Hz Pos. Bursts',  desc: 'Arch-shaped positive bursts at 14 Hz and/or 6 Hz in posterior temporal leads during light sleep; benign.' },
       { id: 'bets',         name: 'BETS / Small Sharp Spikes', desc: 'Benign epileptiform transients of sleep; very brief (<50 ms), low-amplitude (<50 µV) temporal spikes without slow wave.' },

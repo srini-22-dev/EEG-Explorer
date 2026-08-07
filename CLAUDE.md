@@ -6,6 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A pnpm workspace scaffolded by Replit's "PNPM_WORKSPACE" agent stack. The real, actively-developed product is **`artifacts/eeg-simulator`** — a browser-based clinical EEG teaching simulator that renders a real-time, scrolling polysomnograph-style waveform display (green paper, mm/s and µV/mm calibration, standard 10-20 montages) with toggleable clinical patterns (seizures, artifacts, sleep stages, epileptiform discharges) for teaching EEG interpretation. Everything else in the repo (`api-server`, `lib/db`, `lib/api-spec`, `lib/api-zod`, `lib/api-client-react`, `mockup-sandbox`) is boilerplate scaffolding that has not yet been built out beyond a health check — treat it as available infrastructure, not as existing product surface.
 
+## Working principle: clinical accuracy over code elegance
+
+**Before touching any signal-generation code (`eegGenerator.ts`, `computeChannel.ts`, any montage/field/generator logic), read the governing document set in `artifacts/eeg-simulator/docs/`: `EEG_ARCHITECTURE.md`, `GeneratorCatalogue.md`, `FieldMaps.md`, and `TeachingConcepts.md`.** These are the most important documents in this repository — together they are the architectural constitution for how the simulator must model EEG generation (generator → volume conduction → electrode potentials → montage → displayed trace), and every code change must follow them. No exceptions.
+
+This is an educational neuroscience project for teaching EEG interpretation to medical students and neurology residents. Clinical and physiological accuracy take priority over code elegance, cleverness, or brevity — an elegant implementation of an incorrect concept is a worse outcome than an inelegant implementation of a correct one.
+
+When implementing a new feature (a new pattern, montage, artifact, waveform behavior, etc.):
+
+1. Explain the underlying neurological/EEG concept first, before writing any code.
+2. Explain how the code will model that concept — which numbers, timings, frequencies, or amplitudes represent which physiological fact.
+3. Prefer simple, maintainable code over clever code, even when a cleverer approach would be shorter.
+4. If uncertain about the EEG physiology (frequency bands, amplitude conventions, montage/phase-reversal behavior, timing of a pattern, etc.), ask rather than assume.
+5. Never simplify a neurological concept in a way that makes it factually incorrect — a simplification that misleads a learner defeats the purpose of this tool.
+
 ## Commands
 
 Run from the repo root unless noted. Packages are pnpm workspace members under `artifacts/*`, `lib/*`, `lib/integrations/*`, and `scripts`.
