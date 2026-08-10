@@ -29,6 +29,26 @@ const SPINDLE_TONES = [
 const MU_TONES = [
   { f: 9.2, a: 0.9 }, { f: 10.1, a: 1.0 }, { f: 11.1, a: 0.8 }
 ];
+// RMTD's defining diagnostic feature is that it is *monomorphic* — a near-constant
+// frequency, unlike the polymorphic spread of ordinary background theta. Its tones
+// are therefore deliberately clustered tightly around 6 Hz rather than spanning the
+// whole theta band the way THETA_TONES does.
+const RMTD_TONES = [
+  { f: 5.7, a: 1.0 }, { f: 6.0, a: 0.45 }, { f: 6.3, a: 0.3 }
+];
+// Posterior slow waves of youth are a 2.5-4.5 Hz phenomenon — above the delta band.
+// Borrowing DELTA_TONES (0.8-2.1 Hz) rendered them at roughly half their true
+// frequency, which would teach a learner to call genuine delta "normal for age".
+const PSWY_TONES = [
+  { f: 2.7, a: 1.0 }, { f: 3.2, a: 0.9 }, { f: 3.8, a: 0.8 }, { f: 4.3, a: 0.6 }
+];
+// 14 & 6 positive bursts carry two independent arciform components.
+const POS14_TONES = [
+  { f: 13.3, a: 0.8 }, { f: 14.1, a: 1.0 }, { f: 14.9, a: 0.7 }
+];
+const POS6_TONES = [
+  { f: 5.7, a: 0.8 }, { f: 6.2, a: 1.0 }, { f: 6.7, a: 0.7 }
+];
 
 const ALPHA_TONES = [
   { f: 8.4,  a: 0.5  }, { f: 9.1,  a: 0.8  }, { f: 9.7,  a: 1.0  },
@@ -50,6 +70,50 @@ const DELTA_TONE_NORM = 2.0;
 const BETA_TONE_NORM = 2.0;
 const SPINDLE_TONE_NORM = 1.6;
 const MU_TONE_NORM = 1.7;
+const RMTD_TONE_NORM = 1.3;
+const POS_BURST_TONE_NORM = 1.6;
+const PSWY_TONE_NORM = 1.9;
+
+// Mu, wicket spikes, and 14 & 6 positive bursts are all "arciform" (arch- or
+// comb-shaped): one phase of each cycle is sharp and pointed, the other rounded.
+// The obvious way to draw that — Math.abs() of a sine, which this file used
+// previously — is wrong twice over. Rectifying a sine turns every half-cycle into
+// its own hump, so a 10 Hz mu carrier renders as a 20 Hz train; and because the
+// result never goes negative, the rhythm sits off-baseline on a DC offset instead
+// of oscillating about it. Summing a second harmonic onto the fundamental gives
+// the genuine asymmetry (sharp one way, rounded the other) while preserving both
+// the stated frequency and a zero mean.
+function arciformSignal(t: number, tones: { f: number; a: number }[], norm: number, freqOffset = 0): number {
+  const fundamental = multiToneSignal(t, tones, norm, freqOffset, 1);
+  const harmonic    = multiToneSignal(t, tones, norm, freqOffset, 2);
+  return fundamental + 0.35 * harmonic;
+}
+
+// Evolving frequency is the single most important feature of an ictal rhythm, and
+// it has to be produced by integrating frequency into phase. Writing
+// sin(2π·f(t)·t) with a time-varying f — which is what passing a drifting
+// freqOffset to multiToneSignal() amounts to — yields an instantaneous frequency
+// of f + t·df/dt, so the error grows without bound as the seizure runs. In the
+// frontal seizure below that put the trace tens of Hz away from its intended
+// value by end of sweep. This returns a phase, in "equivalent seconds" of a
+// carrier whose nominal centre is fRef, so an existing tone set evaluated at this
+// warped time has every tone scale together.
+function sweepPhase(tau: number, f0: number, f1: number, T: number, fRef: number): number {
+  return (f0 * tau + (f1 - f0) * tau * tau / (2 * T)) / fRef;
+}
+
+// Amplitude-weighted centre frequencies of the tone sets used by sweeps.
+const THETA_TONE_CENTER = 5.7;
+const BETA_TONE_CENTER = 17.9;
+
+// Deterministic pseudo-random in [0,1) keyed off an integer. Lets repeated events
+// inside a single burst (individual polyspikes, individual chews) differ from one
+// another without re-rolling Math.random() on every sample — which would turn a
+// smooth waveform into noise rather than varying the event's amplitude.
+function hashUnit(n: number): number {
+  const s = Math.sin(n * 12.9898) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 function alphaCarrier(t: number, freqOffset: number): number {
   const fundamental   = multiToneSignal(t, ALPHA_TONES, ALPHA_TONE_NORM, freqOffset, 1);
@@ -130,6 +194,20 @@ function spikeSlowWave(dt: number, ampSpike: number, ampSlow: number): number {
   if (dt < 0 || dt > 0.9) return 0;
   const spike = ampSpike * gaussian(dt, 0.05, 0.022);
   const slow  = -ampSlow  * gaussian(dt, 0.45, 0.16);
+  return spike + slow;
+}
+
+// spikeSlowWave() places its slow-wave trough at 450 ms and runs for 900 ms, which
+// is right for an isolated interictal discharge but far too slow for a rhythmic
+// run: at 3 Hz the whole spike + slow-wave complex has to fit inside one ~333 ms
+// cycle, so the isolated morphology gets truncated mid-slow-wave and the classic
+// spike-and-wave shape never appears. Scaling the morphology to the cycle length
+// keeps the correct shape at whatever frequency the burst is currently running.
+function rhythmicSpikeWave(dt: number, cycleLen: number, ampSpike: number, ampSlow: number): number {
+  if (dt < 0 || dt > cycleLen) return 0;
+  const k = cycleLen / 0.333;
+  const spike = ampSpike * gaussian(dt, 0.055 * k, 0.020 * k);
+  const slow  = -ampSlow * gaussian(dt, 0.190 * k, 0.075 * k);
   return spike + slow;
 }
 
@@ -432,9 +510,11 @@ function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>
 
   if (ap.has('mu-rhythm') && (c.isCentral || el === 'Cz')) {
     const env = getEnvelope('mu', t, 3.0, 1.0);
-    const carrier = multiToneSignal(t, MU_TONES, MU_TONE_NORM);
-    // fragmentation / arch shape
-    v += 38 * env * Math.abs(carrier);
+    // Arciform, not rectified — see arciformSignal(). Amplitude is roughly halved
+    // relative to the old Math.abs() form because the wave now swings both sides of
+    // baseline instead of sitting entirely above it, so the same peak-to-peak
+    // excursion needs half the coefficient.
+    v += 22 * env * arciformSignal(t, MU_TONES, MU_TONE_NORM);
   }
 
   if (ap.has('wicket') && st === 'drowsy' && (c.isTemporal || c.isPostTmp || el === 'F7' || el === 'F8')) {
@@ -446,8 +526,7 @@ function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>
     const dur = getT('wicket-dur');
     if (dt > 0 && dt < dur) {
       const env = gaussian(dt, dur/2, dur/4);
-      const carrier = multiToneSignal(t, ALPHA_TONES, ALPHA_TONE_NORM);
-      v += 90 * getT('wicket-amp') * env * Math.abs(carrier);
+      v += 50 * getT('wicket-amp') * env * arciformSignal(t, ALPHA_TONES, ALPHA_TONE_NORM);
     }
   }
 
@@ -458,7 +537,9 @@ function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>
     const dt = t - getT('rmtd');
     if (dt > 0 && dt < 4) {
       const env = gaussian(dt, 2, 1.2);
-      v += 65 * getT('rmtd-amp') * env * multiToneSignal(dt, THETA_TONES, THETA_TONE_NORM);
+      // Monomorphic by design — RMTD_TONES is a tight cluster, because a constant
+      // frequency is the diagnostic feature separating RMTD from background theta.
+      v += 65 * getT('rmtd-amp') * env * multiToneSignal(dt, RMTD_TONES, RMTD_TONE_NORM);
     }
   }
 
@@ -482,7 +563,7 @@ function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>
     const dur = getT('pswy-dur');
     if (dt > 0 && dt < dur) {
       const env = gaussian(dt, dur/2, dur/3);
-      v += 95 * PSWY_FIELD[el] * env * multiToneSignal(dt, DELTA_TONES, DELTA_TONE_NORM);
+      v += 95 * PSWY_FIELD[el] * env * multiToneSignal(dt, PSWY_TONES, PSWY_TONE_NORM);
     }
   }
 
@@ -507,8 +588,8 @@ function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>
     if (dt > 0 && dt < 1.0) {
       const env = gaussian(dt, 0.5, 0.25);
       const r = getT('14-6-ratio');
-      v += 55 * env * r * Math.abs(multiToneSignal(dt, [{f:14, a:1}], 1));
-      v += 35 * env * (1-r) * Math.abs(multiToneSignal(dt, [{f:6, a:1}], 1));
+      v += 28 * env * r * arciformSignal(dt, POS14_TONES, POS_BURST_TONE_NORM);
+      v += 18 * env * (1-r) * arciformSignal(dt, POS6_TONES, POS_BURST_TONE_NORM);
     }
   }
 
@@ -582,15 +663,28 @@ function artifactVoltage(el: string, t: number, ap: Set<string>): number {
   }
 
   if (ap.has('chewing') && (c.isTemporal || el === 'T3' || el === 'T4')) {
-    if (nextEventTime('chew', t, 0.5, 0.8)) {
-      setT('chew-amp', jitter(1, 0.3));
-      // cluster logic
+    // Real mastication comes in discrete episodes — a run of a few chews at roughly
+    // 1.5 Hz, then a pause — not an endless metronomic chew. Each episode picks its
+    // own chew count and rate; individual chews within it vary by hashUnit(index)
+    // so their amplitudes differ from each other but stay constant across the
+    // samples that make up one chew.
+    if (nextEventTime('chew-episode', t, 6, 14)) {
+      setT('chew-count', Math.floor(3 + Math.random() * 3)); // 3-5 chews
+      setT('chew-rate', jitter(1.5, 0.2));
+      setT('chew-seed', Math.floor(Math.random() * 1000));
     }
-    const dt = t - getT('chew');
-    if (dt > 0 && dt < 0.25) {
-      v += 300 * getT('chew-amp') * gaussian(dt, 0.1, 0.05) * (1 + 0.3 * Math.random());
-      // simultaneous EMG
-      v += 50 * getT('chew-amp') * (Math.random() - 0.5);
+    const epDt = t - getT('chew-episode');
+    const period = 1 / getT('chew-rate');
+    const count = getT('chew-count');
+    if (epDt >= 0 && epDt < count * period) {
+      const idx = Math.floor(epDt / period);
+      const dt = epDt - idx * period;
+      const amp = 0.8 + 0.5 * hashUnit(getT('chew-seed') + idx);
+      if (dt < 0.25) {
+        v += 300 * amp * gaussian(dt, 0.1, 0.05);
+        // masseter EMG rises with each chew
+        v += 50 * amp * (Math.random() - 0.5);
+      }
     }
   }
 
@@ -756,12 +850,12 @@ function epileptiformVoltage(el: string, t: number, ap: Set<string>): number {
     const burstDt = t - getT('3hz-gsw-burst');
     const dur = getT('3hz-dur');
     if (burstDt >= 0 && burstDt < dur) {
-      const cycle = 1 / getT('3hz-freq');
-      const dt = burstDt % cycle;
+      const cycleLen = 1 / getT('3hz-freq');
+      const dt = burstDt % cycleLen;
       // gradual burst ending (decrement)
       const env = burstDt > dur - 1.0 ? 1.0 - (burstDt - (dur - 1.0)) : 1.0;
       const amp = (c.isFrontal || c.isMidline ? 200 : 160) * env;
-      v += spikeSlowWave(dt, amp, amp * 0.65);
+      v += rhythmicSpikeWave(dt, cycleLen, amp, amp * 0.65);
     }
   }
 
@@ -778,7 +872,10 @@ function epileptiformVoltage(el: string, t: number, ap: Set<string>): number {
       const amp = (c.isFrontal || c.isMidline ? 180 : 140) * getT('psw-amp');
       const count = getT('psw-count');
       for (let i=0; i<count; i++) {
-        v += amp * jitter(0.8, 0.2) * gaussian(dt, 0.03 + i*0.04, 0.015);
+        // hashUnit, not jitter(): jitter() re-rolls Math.random() on every sample,
+        // which would scribble noise across each spike instead of giving that spike
+        // one consistent amplitude that differs from its neighbours'.
+        v += amp * (0.65 + 0.35 * hashUnit(i + 1)) * gaussian(dt, 0.03 + i*0.04, 0.015);
       }
       v -= amp * 0.7 * gaussian(dt, 0.03 + count*0.04 + 0.1, 0.07);
     }
@@ -851,20 +948,26 @@ function ictalVoltage(el: string, t: number, ap: Set<string>): number {
       setT(k, t + 4);
       setT('abs-dur', 5 + Math.random() * 10); // 5-15s
     }
-    const el2 = t - getT(k);
+    const elapsed = t - getT(k);
     const dur = getT('abs-dur');
-    if (el2 >= 0) {
-      const cycle = el2 % (dur + 15);
+    if (elapsed >= 0) {
+      const cycle = elapsed % (dur + 15);
       if (cycle < dur) {
-        const freq = 3.2 - (cycle / dur) * 0.7; // 3->slowing
+        const freq = 3.2 - (cycle / dur) * 0.7; // 3 Hz, slowing slightly toward offset
         const cycleLen = 1 / freq;
-        const dt = cycle % cycleLen;
+        // Phase is the integral of a changing frequency. `cycle % cycleLen` with a
+        // cycleLen that moves every sample is not a phase accumulator — it makes the
+        // discharge interval jump around instead of slowing smoothly.
+        const cycles = 3.2 * cycle - 0.7 * cycle * cycle / (2 * dur);
+        const dt = (cycles % 1) * cycleLen;
+        // Frontal predominance is a defining feature of the absence discharge.
         const frontAmp = c.isFrontal || c.isMidline ? 220 : 160;
-        // abrupt offset, handled by cycle check
-        v += spikeSlowWave(dt, frontAmp, frontAmp * 0.7);
-      } else if (cycle < dur + 5) {
-        // post-ictal slowing
-        v += 40 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM);
+        // Offset is abrupt — the cycle check simply stops the discharge dead.
+        v += rhythmicSpikeWave(dt, cycleLen, frontAmp, frontAmp * 0.7);
+      } else if (cycle < dur + 2) {
+        // Brief post-ictal slowing, fading out over ~2 s.
+        const fade = 1 - (cycle - dur) / 2;
+        v += 40 * fade * multiToneSignal(elapsed, DELTA_TONES, DELTA_TONE_NORM);
       }
     }
   }
@@ -880,13 +983,17 @@ function ictalVoltage(el: string, t: number, ap: Set<string>): number {
         const env = Math.pow(cycle / 4, 2);
         v += env * 30 * multiToneSignal(el2, BETA_TONES, BETA_TONE_NORM, 0, 1.2);
       } else if (cycle < 18) {
-        const pos = (cycle - 4) / 14;
-        const freq = 3 - pos * 1.5; // progressive slowing
-        const phaseF = ((cycle - 4) * freq) % 1;
+        // Clonic phase: rhythmic high-amplitude spike-wave slowing 3 Hz → 1.5 Hz.
+        // Cycle count is the integral of frequency, not frequency × time — the
+        // latter drove the discharge rate to a standstill before the phase ended.
+        const tau = cycle - 4;
+        const pos = tau / 14;
+        const freqNow = 3 - pos * 1.5;
+        const cycles = 3 * tau - 1.5 * tau * tau / 28;
+        const cycleLen = 1 / freqNow;
         const amp = 100 + pos * 100;
-        v += amp * gaussian(phaseF, 0.05, 0.02);
-        v += amp * 0.4 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM);
-        if (phaseF < 0.3) v -= amp * 0.5 * gaussian(phaseF, 0.25, 0.06);
+        v += rhythmicSpikeWave((cycles % 1) * cycleLen, cycleLen, amp, amp * 0.6);
+        v += amp * 0.3 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM);
       } else if (cycle < 35) {
         const env = 1 - (cycle - 18) / 17;
         v += env * 120 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM, -0.5);
@@ -917,13 +1024,14 @@ function ictalVoltage(el: string, t: number, ap: Set<string>): number {
       const cycle = el2 % 90;
       if (cycle < 30) {
         const pos = cycle / 30;
-        const freq = 6 - pos * 2.5;
         // contralateral spread: starts late
         const isContra = c.isRightTmp || el === 'F8' || el === 'T4' || el === 'T6' || el === 'Fp2';
         const spreadFactor = isContra ? Math.max(0, (pos - 0.5) * 2) : 1.0;
+        // Subtle onset — barely above background — building to full amplitude, which
+        // is what makes a temporal seizure onset hard to spot and worth teaching.
         const amp = (c.isLeftTmp ? 120 : 60) * (0.1 + 0.9 * pos) * spreadFactor;
-        // evolving theta
-        v += amp * multiToneSignal(el2, THETA_TONES, THETA_TONE_NORM, freq - 5);
+        const phase = sweepPhase(cycle, 6, 3.5, 30, THETA_TONE_CENTER);
+        v += amp * multiToneSignal(phase, THETA_TONES, THETA_TONE_NORM);
       }
     }
   }
@@ -937,16 +1045,50 @@ function ictalVoltage(el: string, t: number, ap: Set<string>): number {
       // shorter 10-20s
       if (cycle < 15) {
         const pos = cycle / 15;
-        const freq = 18 - pos * 15;
+        // Low-voltage fast onset is the diagnostic hallmark: starts near-invisible
+        // at ~18 Hz, then builds in amplitude as it evolves down to ~3 Hz.
         const amp = (c.isLeftFront ? 100 : 50) * (0.1 + 0.9 * pos);
-        v += amp * multiToneSignal(el2, BETA_TONES, BETA_TONE_NORM, freq - 15);
-        // movement artifact
+        const phase = sweepPhase(cycle, 18, 3, 15, BETA_TONE_CENTER);
+        v += amp * multiToneSignal(phase, BETA_TONES, BETA_TONE_NORM);
+        // frontal seizures often cause movement — muscle/movement contamination
         v += 30 * pos * (Math.random() - 0.5);
       }
     }
   }
 
   return v;
+}
+
+/**
+ * Pattern-only voltage: every toggleable clinical graphoelement, with the
+ * background rhythm layer omitted.
+ *
+ * The background is now produced by the streaming engine in `src/engine`, which
+ * models it as noise-driven sources projected through a leadfield rather than as
+ * a sum of sinusoids. The discrete graphoelements here — spikes, K-complexes,
+ * seizure evolutions — are event-triggered waveforms rather than sustained
+ * rhythms, so they are not affected by that change and ride on top of the new
+ * background additively.
+ */
+export function getPatternVoltage(electrode: Electrode, t: number, settings: SimSettings): number {
+  if (electrode === 'A1' || electrode === 'A2') return 0;
+  const { patientState: st, activePatterns: ap } = settings;
+  let v = 0;
+  v += sleepStructureVoltage(electrode, t, st, ap);
+  v += variantVoltage(electrode, t, st, ap);
+  v += artifactVoltage(electrode, t, ap);
+  v += abnormalVoltage(electrode, t, ap);
+  v += epileptiformVoltage(electrode, t, ap);
+  v += ictalVoltage(electrode, t, ap);
+  return v;
+}
+
+/**
+ * Multiplier the background should be scaled by, for patterns that suppress
+ * ongoing activity rather than adding to it (burst suppression, post-ictal).
+ */
+export function getBackgroundGate(t: number, settings: SimSettings): number {
+  return voltageGate(t, settings.activePatterns);
 }
 
 export function getElectrodeVoltage(electrode: Electrode, t: number, settings: SimSettings): number {

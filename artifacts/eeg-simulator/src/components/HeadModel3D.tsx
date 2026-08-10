@@ -87,6 +87,14 @@ function ElectrodeMarkers({ montage }: { montage: Montage }) {
 
   const activeElectrodes = getActiveElectrodes();
 
+  // Channel-side highlights (e.g. hovering a trace on the EEG canvas) don't touch
+  // hoveredElectrodes/clickedElectrodes directly, so also light up the electrodes
+  // belonging to any active channel.
+  const channelElectrodes = new Set<string>();
+  getActiveChannels().forEach(idx => {
+    getElectrodesForChannel(idx, montage).forEach(el => channelElectrodes.add(el));
+  });
+
   // Find electrodes in montage, and the montage-group color each one should render
   // with (an electrode used by more than one channel just takes the first group it
   // appears in — good enough for a reference/orientation color, not a data encoding).
@@ -107,7 +115,7 @@ function ElectrodeMarkers({ montage }: { montage: Montage }) {
       {Object.entries(electrodePositions3D).map(([name, pos]) => {
         const groupColor = electrodeGroupColor.get(name);
         const inMontage = groupColor !== undefined;
-        const isActive = activeElectrodes.has(name);
+        const isActive = activeElectrodes.has(name) || channelElectrodes.has(name);
         const color = inMontage ? (isActive ? '#ffffff' : groupColor!) : '#555555';
         const scale = isActive ? 1.5 : 1.0;
         

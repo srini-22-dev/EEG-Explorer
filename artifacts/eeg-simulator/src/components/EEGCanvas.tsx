@@ -2,10 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Montage, ALL_ELECTRODES } from '../utils/montages';
 import { SimSettings } from '../utils/eegGenerator';
 import { computeChannelVoltage } from '../utils/computeChannel';
-import { getElectrodeVoltage } from '../utils/eegGenerator';
+import { SimulationSource } from '../engine/adapter';
 import { THEMES, EEGTheme } from '../utils/themes';
 import { EDUCATIONAL_ANNOTATIONS } from '../utils/annotations';
 import { Pause, Play } from 'lucide-react';
+import {
+  subscribe,
+  getHighlightState,
+  HighlightState,
+  setHoverChannels,
+  toggleClickChannel,
+  getChannelsUsingElectrode,
+} from '../utils/highlightStore';
 
 type EEGCanvasProps = {
   montage: Montage;
@@ -52,6 +60,18 @@ function buildLayout(montage: Montage): RowLayout[] {
   });
 }
 
+// Hit-test a pointer y-coordinate against row bands. x is intentionally ignored so
+// the label strip and the trace body behave identically for hover/click.
+function getChannelAtY(layout: RowLayout[], y: number, h: number): number | null {
+  for (const row of layout) {
+    if (row.channelIndex < 0) continue;
+    const top    = (row.centerFrac - row.rowFrac / 2) * h;
+    const bottom = (row.centerFrac + row.rowFrac / 2) * h;
+    if (y >= top && y < bottom) return row.channelIndex;
+  }
+  return null;
+}
+
 type Point = { x: number, y: number, t: number, v: number };
 
 export function EEGCanvas({ 
@@ -74,6 +94,13 @@ export function EEGCanvas({
   annotationsRef.current = showAnnotations;
   const frozenRef = useRef(isFrozen);
   frozenRef.current = isFrozen;
+
+  // Highlight store state, mirrored into a ref (not React state) so the rAF
+  // render loop can read it every frame without triggering re-renders.
+  const highlightRef = useRef<HighlightState>(getHighlightState());
+  useEffect(() => {
+    return subscribe(() => { highlightRef.current = getHighlightState(); });
+  }, []);
 
   // Measurement tool state
   const measurePointsRef = useRef<{ a: Point | null, b: Point | null }>({ a: null, b: null });
@@ -103,6 +130,7 @@ export function EEGCanvas({
     window.addEventListener('resize', resize);
 
     const layout = buildLayout(montage);
+    const simSource = new SimulationSource();
 
     const render = (now: number) => {
       const currentSettings = settingsRef.current;
@@ -130,8 +158,9 @@ export function EEGCanvas({
 
         while (lastT < currentT) {
           lastT += dtS;
-          const allV: Record<string, number> = {};
-          for (const el of ALL_ELECTRODES) allV[el] = getElectrodeVoltage(el, lastT, currentSettings);
+          // The engine is a stateful stream, so it must be advanced exactly once
+          // per sample and in order — it cannot be evaluated at an arbitrary t.
+          const allV = simSource.next(currentSettings);
           timeBuffer.current.push(lastT);
           for (let i = 0; i < montage.channels.length; i++) {
             if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
@@ -204,7 +233,20 @@ export function EEGCanvas({
 
       // 5. Waveform traces
       const pxPerUV = pxPerMm / currentSettings.sensitivity;
-      
+
+      // Cross-highlight: a channel is highlighted if it's directly hovered/clicked
+      // (from the canvas side) or if either of its electrodes is highlighted from
+      // the 3D head side.
+      const hl = highlightRef.current;
+      const highlightedChannels = new Set<number>(hl.hoveredChannels);
+      hl.clickedChannels.forEach(c => highlightedChannels.add(c));
+      const highlightedElectrodes = new Set<string>(hl.hoveredElectrodes);
+      hl.clickedElectrodes.forEach(e => highlightedElectrodes.add(e));
+      highlightedElectrodes.forEach(el => {
+        getChannelsUsingElectrode(el, montage).forEach(idx => highlightedChannels.add(idx));
+      });
+      const anyHighlight = highlightedChannels.size > 0;
+
       for (const row of layout) {
         if (row.channelIndex < 0) continue;
         const i       = row.channelIndex;
@@ -213,8 +255,13 @@ export function EEGCanvas({
         const rowH    = row.rowFrac * h;
         const centerY = row.centerFrac * h;
         const isECG   = ch.active === 'ECG';
+        const isHighlighted = highlightedChannels.has(i);
+        const dimmed  = anyHighlight && !isHighlighted;
 
         const scale = isECG ? pxPerMm * 10 / 1000 : pxPerUV;
+
+        ctx.save();
+        if (dimmed) ctx.globalAlpha = 0.4;
 
         ctx.beginPath();
         ctx.strokeStyle = currentTheme.baselineColor;
@@ -224,7 +271,7 @@ export function EEGCanvas({
 
         ctx.beginPath();
         ctx.strokeStyle = currentTheme.traceColors[ch.group];
-        ctx.lineWidth   = isECG ? 1.1 : 0.9;
+        ctx.lineWidth   = isHighlighted ? 2.2 : (isECG ? 1.1 : 0.9);
         let started = false;
 
         for (let j = 0; j < data.length; j++) {
@@ -235,8 +282,9 @@ export function EEGCanvas({
           if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
+        ctx.restore();
       }
-      
+
       // 5b. Annotations
       if (annotationsRef.current) {
         for (const pattern of currentSettings.activePatterns) {
@@ -294,11 +342,21 @@ export function EEGCanvas({
       for (const row of layout) {
         if (row.channelIndex < 0) continue;
         const ch = montage.channels[row.channelIndex];
+        const isHighlighted = highlightedChannels.has(row.channelIndex);
+        const dimmed = anyHighlight && !isHighlighted;
+
+        ctx.save();
+        if (dimmed) ctx.globalAlpha = 0.4;
+        if (isHighlighted) {
+          ctx.fillStyle = 'rgba(255, 215, 0, 0.25)';
+          ctx.fillRect(0, row.centerFrac * h - 7, lblW, 14);
+        }
         ctx.fillStyle    = currentTheme.traceColors[ch.group];
-        ctx.font         = 'bold 9.5px "Courier New", monospace';
+        ctx.font         = isHighlighted ? 'bold 10.5px "Courier New", monospace' : 'bold 9.5px "Courier New", monospace';
         ctx.textAlign    = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(ch.label, 4, row.centerFrac * h);
+        ctx.restore();
       }
 
       // 7. State + sensitivity label (top-right)
@@ -391,15 +449,22 @@ export function EEGCanvas({
   }, [montage]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!frozenRef.current) return;
-    
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
+    if (!frozenRef.current) {
+      // Not frozen: clicks toggle a persistent channel highlight instead of measuring.
+      const rect = canvas.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
+      if (idx !== null) toggleClickChannel(idx);
+      return;
+    }
+
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
     const currentSettings = settingsRef.current;
     const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
     const currentT = elapsedRef.current;
@@ -443,12 +508,27 @@ export function EEGCanvas({
     setHasMeasurePoints(!hasMeasurePoints);
   };
 
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
+    setHoverChannels(idx !== null ? new Set([idx]) : new Set());
+  };
+
+  const handleCanvasMouseLeave = () => {
+    setHoverChannels(new Set());
+  };
+
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>
-      <canvas 
-        ref={canvasRef} 
+      <canvas
+        ref={canvasRef}
         className={`block w-full h-full ${isFrozen ? 'cursor-crosshair' : ''}`}
         onClick={handleCanvasClick}
+        onMouseMove={handleCanvasMouseMove}
+        onMouseLeave={handleCanvasMouseLeave}
       />
       <div className="absolute top-2 left-[70px] z-10 flex gap-2">
         <button 

@@ -1,77 +1,68 @@
 # Generator Catalogue
 
-Part of the governing document set — see [`EEG_ARCHITECTURE.md`](./EEG_ARCHITECTURE.md) for the principles this catalogue implements. **No signal-generation code may exist without a corresponding entry here.** Spatial field numbers are not duplicated in this file — see [`FieldMaps.md`](./FieldMaps.md) for the authoritative gain values referenced below. Whether a listed concept is a true generator, a modifier, a montage-math effect, or a technical artifact is defined in [`TeachingConcepts.md`](./TeachingConcepts.md); this file only lists entries already classified as generators.
+Part of the governing document set — see [`EEG_ARCHITECTURE.md`](./EEG_ARCHITECTURE.md) for the principles this catalogue implements. **No signal-generation code may exist without a corresponding entry here.** Spatial field details are not duplicated in this file — see [`FieldMaps.md`](./FieldMaps.md) for how each generator's field is produced. Whether a listed concept is a true generator, a modifier, a montage-math effect, or a technical artifact is defined in [`TeachingConcepts.md`](./TeachingConcepts.md); this file only lists entries already classified as generators.
 
-Every entry in this catalogue must be a **sum-of-generators** contributor to `getElectrodeVoltage()` (Principle 2) — never a per-electrode-class special case.
+As of the engine rewrite (see `EEG_ARCHITECTURE.md`, "Two generator layers"), entries below are split into the **streaming engine** (`src/engine/`) — the sustained background and rhythms — and the **legacy pattern layer** (`eegGenerator.ts`) — event-based toggleable graphoelements. Every entry in both layers must still be a **sum-of-generators** contributor to the electrode potential (Principle 2), never a per-electrode-class special case.
 
-## Awake-state generators (current scope)
+## Streaming engine generators (current scope)
 
-| Clinical name | Internal code name | Anatomical source | Frequency | Spatial field | Active state | Educational relevance |
+These generators supersede the old sinusoid-based awake-state background entries further below. Frequencies quoted are centre frequencies of noise-driven processes, not fixed tones — see `EEG_ARCHITECTURE.md` Principle 1 and the source files for the underlying stochastic model.
+
+| Clinical name | Internal code / file | Anatomical source | Frequency | Spatial field | Active state | Educational relevance |
 |---|---|---|---|---|---|---|
-| Posterior Dominant Rhythm (Left) | `pdrLeft` | Left occipital cortex / thalamocortical loop | 8–12 Hz | See `FieldMaps.md`: PDR-Left | Relaxed wakefulness | The single most important normal awake finding |
-| Posterior Dominant Rhythm (Right) | `pdrRight` | Right occipital cortex / thalamocortical loop | 8–12 Hz | See `FieldMaps.md`: PDR-Right | Relaxed wakefulness | Normal symmetry range; independent hemispheres, not mirror images |
-| Frontal Beta | `frontalBeta` | Frontal cortex / thalamocortical loop | 13–25 Hz | See `FieldMaps.md`: Frontal Beta | Awake, alert, anxious | Distinguishing normal fast activity from muscle artifact |
-| Anterior Theta | `anteriorTheta` | Anterior midline/frontal cortex | 4–7 Hz | See `FieldMaps.md`: Anterior Theta | Awake (concentration/drowsy) | Normal variant theta activity in adults |
-| Diffuse Cortical Background | `diffuseBackground` | Ongoing, unsynchronized firing under every electrode | Broadband, low amplitude | See `FieldMaps.md`: Diffuse Background (uniform, independent per electrode) | Always | No channel is ever truly flat |
-| Myogenic (EMG) | `emgGenerator` | Frontalis / temporalis muscle tone | 20–70+ Hz | See `FieldMaps.md`: EMG | Awake, not fully relaxed | Distinguishing real cortical signal from muscle contamination |
-| Posterior Slow Waves of Youth | `pswy` (toggleable pattern) | Same posterior generator region as PDR — thought to reflect immature/less-differentiated thalamocortical circuitry | 2.5–4.5 Hz | See `FieldMaps.md`: PSWY (same as PDR) | Awake, admixed with PDR — most common in children/young adults | Recognizing a benign, intermittent high-amplitude posterior slow-wave admixture as normal, not pathological slowing |
-| *(existing)* Corneo-retinal / Eye Blink | `blinkArtifact` | Corneal(+)–retinal(−) dipole | Transient | Frontal-dominant | On blink (toggle) | Artifact recognition |
-| *(existing)* Electrode/technical artifacts | `electrodeArtifact`, `muscleArtifact`, `powerlineArtifact`, etc. | None — recording/hardware phenomena | Varies | Localized, spatially discontinuous (Principle 6) | Toggled | "Not everything on the screen is the brain" |
+| Aperiodic (1/f) Background | `AperiodicSource`, `aperiodic.ts`, ~16 patches via `backgroundPatches()` | Distributed cortical patches (superposed OU processes), not one shared generator | Broadband, 1/f^χ, χ ≈1.0–1.8 awake, 2–3 NREM/anaesthesia | See `FieldMaps.md`: geometric, forward model | Always | The dominant component of scalp EEG variance — not filler under the rhythms |
+| Posterior Dominant Rhythm (Left/Right) | `HopfOscillator` seeded `pdrL`/`pdrR`, `oscillator.ts` | Left/right occipito-parietal cortex, independent hemispheres | ~8–12 Hz (subject's IAF ± hemisphere offset) | See `FieldMaps.md`: geometric, radial dipole under O1/P3 (O2/P4) | Relaxed wakefulness (vigilance-gated) | The single most important normal awake finding; noise-sustained damped oscillator, not a metronome |
+| Mu Rhythm (Left/Right) | `HopfOscillator` seeded `muL`/`muR`, `MU_WARP` | Sensorimotor cortex, sulcal (tangential dipole) | ~IAF + 0.4 Hz | See `FieldMaps.md`: geometric, tangential dipole under C3/C4 | Relaxed wakefulness | Arciform shape from phase-warping; distinguishing mu from posterior alpha |
+| Sensorimotor / Frontal Beta | `BurstyOscillator` seeded `betaL`/`betaR`/`betaF`, `bursts.ts` | Bilateral sensorimotor and frontal cortex | ~20 Hz centre, burst process | See `FieldMaps.md`: geometric, radial dipole under C3/C4/Fz+F3+F4 | Always (burst renewal, not sustained) | Beta is a train of transients, not a continuous rhythm — averaging bursts is what makes "sustained beta power" an analysis artifact |
+| Frontal Midline Theta | `BurstyOscillator` seeded `thetaFm`, `bursts.ts` | Anterior midline/frontal cortex | ~6 Hz centre, burst process | See `FieldMaps.md`: geometric, radial dipole under Fz | Task-locked, bursty | Same burst-process reasoning as beta; frontal theta is not a sustained rhythm either |
+| Diffuse Theta | `HopfOscillator` seeded `thetaDiffuse`, `oscillator.ts` | Broad central/parietal cortex | ~5.4 Hz | See `FieldMaps.md`: geometric, radial dipole under Cz/Pz | Drowsy and sleep states (state-gated) | Background theta contribution distinct from the bursty frontal-midline generator |
+| Delta (Frontal / Central) | `HopfOscillator` seeded `deltaF`/`deltaC`, `SLOW_WAVE_WARP` | Frontal pole and central cortex — UP/DOWN state alternation, not a sinusoidal oscillation | ~1.1 Hz | See `FieldMaps.md`: geometric, radial dipole under Fz+Fp1+Fp2 / Cz+C3+C4 | N2/N3 sleep (state-gated; near-zero awake) | Non-sinusoidal shape (steep descent into DOWN state) via phase warping is deliberate, not a simplification left for later |
+| Ocular (blink, saccade) | `BlinkGenerator`, `SaccadeGenerator`, `artifacts.ts` | Corneo-retinal dipole (blink), lateral gaze dipole (saccade) — own topography, not cortical | Transient (~0.2–0.4 s blink), broadband spike at saccade onset | See `FieldMaps.md`: geometric, own artifact source position | Vigilance-gated rate | Artifact recognition; the saccade's ~20 ms onset spike is a major contaminant of apparent scalp gamma |
+| Myogenic (EMG) | `EmgGenerator`, `artifacts.ts` | Frontalis / temporalis muscle tone — own topography | Shot noise, broadband, heavy-tailed | See `FieldMaps.md`: geometric, own artifact source position | Vigilance-gated | Distinguishing real cortical signal from muscle contamination; modeled as summed motor-unit action potentials (non-Gaussian), not scaled noise |
+| Cardiac (ECG) | `EcgGenerator`, `artifacts.ts` | Heart, far outside the head — own broad, shallow topography | ~68 bpm, heart-rate-variable | See `FieldMaps.md`: geometric, own artifact source position | Always | ECG contamination recognition |
+| Electrode pop | `ElectrodePopGenerator`, `artifacts.ts` | None — hardware phenomenon | Step + exponential decay | Confined to one channel; leadfield bypassed entirely (Principle 6) | Occasional (renewal process) | "Not everything on the screen is the brain" |
+| Sweat | `SweatGenerator`, `artifacts.ts` | Frontal sweat gland activity — own topography | <0.5 Hz random walk | See `FieldMaps.md`: geometric, own artifact source position | Always | Very-low-frequency drift recognition |
+| Mains (line noise) | `LineNoiseGenerator`, `artifacts.ts` | None — environmental/hardware | ~50/60 Hz, wandering, harmonic | Uniform per channel via recording chain gain (`chain.ts`) | Toggled / subject-sampled | Not a perfect sinusoid — wandering frequency and amplitude are the realistic tell |
+| Movement | `MovementGenerator`, `artifacts.ts` | None — mechanical | Broadband transient | Applied at eye-region sources; large, rare | Occasional (renewal process) | Rare, very large, multi-channel transients |
+| Instrument (sensor) noise | `RecordingChain`, `chain.ts` | None — amplifier/electrode-interface noise floor | Broadband, white | **Independent per channel** — the one place per-electrode independence is correct (see "A note on `diffuseBackground`" below) | Always | The noise floor every real recording has, that the neural background is not |
 
-`emgGenerator` and `pswy` are now implemented (as of the EMG/fragmentation-refinement stage). Rows for eye blink/technical artifacts already exist in the pattern library; listed here only so the catalogue is complete — no changes proposed to them by this document.
+## A note on `diffuseBackground` (superseded — read before touching background code)
 
-## Full definitions
+Earlier versions of this catalogue modeled the background as `diffuseBackground`: a single low-amplitude generator computed **independently per electrode**, and this document called that "physiologically correct rather than a modeling shortcut." **That claim is rejected and reversed.** Neural background is cortical activity seen through volume conduction like every other generator in this catalogue — it is not exempt from Principle 2. Generating it independently per electrode destroys the near-zero-lag correlation volume conduction creates between neighbouring electrodes, and makes downstream analyses that rely on that correlation (ICA, source localisation) look implausibly good, which is a teaching liability, not a simplification.
 
-Each generator's definition has three required parts:
+The background is now generated as **~16 broad, independent cortical patches** (`backgroundPatches()` in `forward.ts`) spread over the upper hemisphere, each driven by its own `AperiodicSource` instance, and projected through the shared leadfield with every other source. Neighbouring electrodes see genuinely overlapping mixtures of the same patches, exactly as real volume conduction produces — the correlation structure is now a *consequence* of shared geometry, not asserted away.
 
-- **Source** — where it is generated anatomically.
-- **Propagation** — how it spreads by volume conduction; which electrodes receive the strongest signal; how amplitude decays spatially (exact numbers live in `FieldMaps.md`).
-- **Modifiers** — what changes it physiologically (vigilance, sleep stage, muscle tension, eye movement, etc.). Modifiers are never generators themselves — see `TeachingConcepts.md`.
+**Per-electrode independence is correct for exactly one thing in this catalogue: instrument (sensor) noise**, listed in the table above. Sensor/amplifier noise genuinely originates at each electrode's own hardware interface, with no shared anatomical source and no volume conduction between channels — that is precisely why it is generated as `nChannels` independent `Gaussian` instances in `RecordingChain` (`chain.ts`), *after* the leadfield projection, not as a cortical source going through it. The two are easy to conflate because both are broadband and low-amplitude; the test for which category something belongs in is whether it has a shared anatomical source that volume conduction would smear across neighbours (neural → correlated) or not (instrument → independent).
 
-### Posterior Dominant Rhythm (Left) — `pdrLeft`
-- **Source**: the left hemisphere's thalamocortical loop — anatomically distinct from the right hemisphere's loop, weakly coupled via the corpus callosum. Carries weak sub-/supra-harmonic overtones (the "slow alpha variant" ~half frequency and "fast alpha variant" ~double frequency described in `TeachingConcepts.md`) — a characteristic of this one generator, not a separate rhythm.
-- **Propagation**: volume-conducted with distance-dependent attenuation along the parieto-occipital scalp — strongest at O1, attenuating through P3, weaker still at T5, negligible frontally. Exact gains: `FieldMaps.md`.
-- **Modifiers**: vigilance/arousal modulation (see "Vigilance/Arousal Modulation" in `TeachingConcepts.md`) — implemented as two stochastic timescales of the same idea (a slow walk for the macro run/pause/dropout structure, a faster walk for "slightly weaken, recover" texture within a run) plus a slow instantaneous-frequency drift, not three separate mechanisms; a small **fixed**, session-persistent resonant-frequency and gain offset (stable individual/anatomical asymmetry, assigned once, not re-rolled moment to moment).
+## Legacy pattern-layer generators (event-based, unaffected by the rewrite)
 
-### Posterior Dominant Rhythm (Right) — `pdrRight`
-- **Source**: the right hemisphere's thalamocortical loop, independent of `pdrLeft`. Same sub-/supra-harmonic characteristic as `pdrLeft`.
-- **Propagation**: mirror of `pdrLeft` — strongest at O2, attenuating through P4, weaker at T6, negligible frontally.
-- **Modifiers**: same categories as `pdrLeft`, with its own independent vigilance-modulation trajectories (both timescales) and its own fixed frequency/gain offset — the two hemispheres must never share a single underlying generator instance.
+These live in `eegGenerator.ts`, are exposed via `getPatternVoltage()`, and are toggled through the `activePatterns` set defined in `patterns.ts`. They are event-triggered graphoelements — spikes, complexes, bursts, transients — not sustained rhythms, so the background rewrite does not touch their reasoning; they simply now ride on top of the engine's output additively (`engine/adapter.ts`) instead of on top of the old sinusoidal background.
 
-### Frontal Beta — `frontalBeta`
-- **Source**: bilateral frontal cortex and thalamocortical loops, often enhanced by certain medications or anxiety.
-- **Propagation**: symmetrical frontal distribution, strongest at F3, F4, Fz, Fp1, Fp2, and attenuating towards central regions. Negligible posteriorly.
-- **Modifiers**: state-dependent amplitude modulation (OU envelope), enhanced in alert states. Modeled using a multi-tone carrier to prevent artificial pure-sine appearance.
+| Category (`patterns.ts`) | Examples | Notes |
+|---|---|---|
+| Sleep Architecture | POSTS, Vertex Waves, K-Complex, Spindles | Event-triggered graphoelements, state-gated |
+| Normal Variants | Mu Rhythm (legacy toggle), Wicket Spikes, RMTD, Lambda Waves, PSWY, 6 Hz Phantom Spike-Wave, 14 & 6 Hz Positive Bursts, BETS | `pswy` retains its own hand-authored field map, `PSWY_FIELD` — see `FieldMaps.md` |
+| Artifacts (legacy toggles) | Eye Blink, Lateral Eye Movement, Muscle (EMG), Chewing, Electrode Pop, Sweat, 50 Hz Mains | Distinct from, and layered on top of, the engine's own continuous artifact generators in the table above — these are the discrete, user-toggleable versions used for teaching artifact recognition on demand |
+| Non-Epileptiform Abnormalities | Generalised Slowing, Focal Delta, FIRDA, Triphasic Waves, GPEDs, LPEDs | Unaffected |
+| Interictal Epileptiform | L/R Temporal Spikes, L Frontal Spikes, 3 Hz Gen. Spike-Wave, Polyspike-Wave, Burst Suppression, Hypsarrhythmia | Use the hand-authored `LT_FIELD`/`RT_FIELD`/`LF_FIELD` spike field maps — see `FieldMaps.md` |
+| Ictal / Seizures | Absence, GTC, Focal Temporal, Focal Frontal | Unaffected |
 
-### Anterior Theta — `anteriorTheta`
-- **Source**: midline anterior and frontal cortex. Can reflect concentration, mental task engagement, or transition to drowsiness.
-- **Propagation**: maximal at Fz and Cz, spreading symmetrically to F3, F4, and central regions.
-- **Modifiers**: varies with vigilance, modeled with stochastic amplitude modulation via OU envelope and a multi-tone carrier.
+**Note:** the mu rhythm, PDR, and beta *toggle patterns* in the legacy layer are distinct from the engine's own sustained mu/alpha/beta generators in the table above — the legacy toggles exist for on-demand teaching emphasis (e.g. "show mu rhythm attenuation on command"), layered additively on top of the engine's always-on stochastic version of the same rhythm, not a replacement for it.
 
-### Diffuse Cortical Background — `diffuseBackground`
-- **Source**: many small, spatially unsynchronized cortical populations — not one shared generator.
-- **Propagation**: negligible spread between electrodes; modeled independently per electrode. This is the one generator in the catalogue where per-electrode independence is physiologically correct rather than a modeling shortcut, because there is no single shared source to volume-conduct from.
-- **Modifiers**: none significant at the awake-background level — patient-state changes (drowsy, N1, N2, N3) are handled by their own existing branches in `eegGenerator.ts`, untouched by this catalogue entry.
+## Full definitions — streaming engine
 
-### Myogenic (EMG) — `emgGenerator`
-- **Source**: frontalis and temporalis muscle tone.
-- **Propagation**: falls off sharply with distance from those muscles — strong frontal/temporal, weaker central, negligible occipital (muscle-to-electrode distance governs this, not cortical distance).
-- **Modifiers**: degree of relaxation/tension — currently represented as a fixed low-level baseline (an awake-but-resting patient), not a separate user-facing control. Deliberately modeled as unsmoothed per-sample noise rather than a leaky-integrator process, because real EMG's genuinely broadband, high-frequency character is the simpler and more correct match — smoothing it would make it *less* physiologically accurate, not more.
+- **Source** — where the generator sits: a dipole position, orientation, and extent on the cortical shell (`forward.ts`), or an artifact source position (`artifacts.ts`).
+- **Propagation** — the Gaussian scalp-falloff projection through the shared leadfield (`FieldMaps.md`).
+- **Modifiers** — vigilance state (`state.ts`) and clinical/patient state (`STATE_GAINS` in `engine.ts`), which jointly gate each band's amplitude; per-subject sampled parameters (`sampleSubject` in `engine.ts`) set individual alpha frequency, aperiodic exponent, RMS levels, smearing, and artifact burden once per simulated subject.
 
-### Posterior Slow Waves of Youth — `pswy` (toggleable pattern)
-- **Source**: the same posterior region as PDR; the mechanism is thought to relate to less mature thalamocortical circuitry rather than a distinct generator.
-- **Propagation**: same posterior field as PDR (`FieldMaps.md`) — occipital/parietal, bilateral.
-- **Modifiers**: only appears intermixed with PDR in the awake state, as intermittent brief high-amplitude bursts, not as its own sustained rhythm — implemented as a normal-variant toggle (like mu rhythm, wicket spikes) rather than an always-on background generator, since real PSWY is occasional, not continuous.
+See `aperiodic.ts`, `oscillator.ts`, `bursts.ts`, `forward.ts`, `artifacts.ts`, `state.ts`, `chain.ts`, and `engine.ts` for the full implementation — each file's header comment is the authoritative explanation of its generator's physiological rationale.
+
+## Full definitions — legacy pattern layer
+
+Unchanged from before the rewrite: each pattern's definition still has **Source**, **Propagation** (via its hand-authored field map, `FieldMaps.md`), and **Modifiers** (patient state, active-pattern toggles). See `eegGenerator.ts` for the per-pattern implementation.
 
 ## Minimum physiology model
 
-The goal is not mathematical realism for its own sake — it's the smallest set of generators and mechanisms that produces a trace an experienced EEG reader immediately recognizes as physiologically believable, while remaining maintainable and explainable. For the awake background, that minimum is the **five generators above plus PDR's vigilance/arousal modifier** (defined in `TeachingConcepts.md`).
+The goal is not mathematical realism for its own sake — it's the smallest set of generators and mechanisms that produces a trace an experienced EEG reader immediately recognizes as physiologically believable, while remaining maintainable and explainable. That minimum is now the streaming engine's source set (aperiodic background, alpha/mu/beta/theta/delta rhythms, vigilance gating, artifacts with their own topographies, and the recording chain) plus the legacy event-based graphoelements layered on top for clinical teaching scenarios.
 
-Candidates considered and deliberately excluded from the minimum model:
-
-- **Ocular microtremor / microsaccade micro-transients** — physiologically real, but too subtle to justify inclusion in a *minimum* teaching model; the closest candidate to "inventing a mechanism to justify randomness," so left out.
-- **Cascaded multi-timescale noise for `diffuseBackground`** — collapsed into a single leaky-integrator process. One noise process is enough to stop a channel from looking flat; multiple noise timescales there was solving a spectral-realism problem nobody asked to see modeled. (This is distinct from PDR's two-timescale vigilance modifier below — that addition targets a specific, named, requested refinement of an already-approved modifier, not a reintroduction of the excluded cascade idea.)
-- **Eyes-open/closed reactivity toggle** — a genuinely important teaching concept (PDR attenuation on eye opening), but requires a new UI control/patient-state concept that is out of scope for the current catalogue. A good candidate for its own future catalogue entry, not bundled in here.
-- **Persistent asymmetry as its own generator** — folded into `pdrLeft`/`pdrRight`'s fixed parameters rather than kept as a separate mechanism, since it isn't a source of voltage by itself, just a property of an existing one.
-
-New generators may be proposed later, but each addition must justify itself against this minimum-model discipline, not just against "would this look more realistic."
+New engine-layer generators must justify their source geometry (position, orientation, extent) against `forward.ts`'s model rather than hand-authoring a field map; new legacy-layer patterns must still justify themselves against this minimum-model discipline, not just against "would this look more realistic."
