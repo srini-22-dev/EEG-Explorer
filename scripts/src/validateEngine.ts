@@ -320,6 +320,46 @@ console.log('\nArtifacts:');
   check('frontal / occipital low-frequency power (blink)', (lf('Fp1') + lf('Fp2')) / (lf('O1') + lf('O2')), 1.5, 400);
 }
 
+// --- 7b. Artifact gating: a UI checkbox left off must leave the corresponding
+// engine generator's contribution at zero, or "no artifacts selected" would be
+// a lie (this is the bug this gating mechanism exists to fix). Blink is the
+// discriminating case: it is the only artifact large enough at Fp1/Fp2 to be
+// visible against the aperiodic/alpha background there, ~180-220 uV p2p over
+// 60 s when enabled (see the "ON" figures probed during development) vs.
+// background-only. `setArtifactGates` must silence it while leaving the
+// neural background (O1's own p2p) untouched, proving the gate acts on the
+// artifact generator specifically and not on the engine as a whole.
+console.log('\nArtifact gating (checkbox off => generator silent):');
+{
+  const eng = new EegEngine({ seed: 9, subject: { artifactBurden: 1.6, alphaRms: 12 } });
+  eng.setArtifactGates({
+    blink: false, saccade: false, emg: false, pop: false,
+    sweat: false, line: false, ecgScalp: false, movement: false,
+  });
+  const secs = 60;
+  const n = Math.floor(secs * FS);
+  const nCh = eng.electrodes.length;
+  const buf = new Float64Array(nCh);
+  const iFp1 = eng.indexOf('Fp1'), iFp2 = eng.indexOf('Fp2'), iO1 = eng.indexOf('O1');
+  const fp1 = new Float64Array(n), fp2 = new Float64Array(n), o1 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    eng.next(buf);
+    fp1[i] = buf[iFp1]; fp2[i] = buf[iFp2]; o1[i] = buf[iO1];
+  }
+  const p2p = (x: Float64Array) => {
+    const sorted = Array.from(x).sort((a, b) => a - b);
+    return sorted[Math.floor(0.99 * sorted.length)] - sorted[Math.floor(0.01 * sorted.length)];
+  };
+  const fp1P2p = p2p(fp1), fp2P2p = p2p(fp2), o1P2p = p2p(o1);
+  // Bounded relative to this same run's own O1 (background+PDR) p2p rather than
+  // a hand-picked microvolt constant, so the check tracks whatever background
+  // amplitude this subject happened to sample rather than an arbitrary number.
+  check('Fp1 p2p vs O1 p2p, artifacts off, 60s', fp1P2p / o1P2p, 0, 1.3);
+  check('Fp2 p2p vs O1 p2p, artifacts off, 60s', fp2P2p / o1P2p, 0, 1.3);
+  check('Fp1 p2p, artifacts off, 60s (sanity floor)', fp1P2p, 3, 110, ' uV');
+  check('Fp2 p2p, artifacts off, 60s (sanity floor)', fp2P2p, 3, 110, ' uV');
+}
+
 // --- 8. Recording chain: the line-noise peak must be present but imperfect, and
 // a channel-independent sensor floor must exist.
 console.log('\nRecording chain:');

@@ -9,6 +9,22 @@ type SpectrumPanelProps = {
   settings: SimSettings;
 };
 
+/**
+ * Analysis epoch, in samples — 8 s at 250 Hz.
+ *
+ * Band power used to be computed over the whole buffer. That was wrong twice over.
+ * Clinically, it made the analysed span a function of canvas width and paper speed,
+ * so the displayed powers shifted when the window was resized or the sweep changed —
+ * nothing about the signal had changed. Computationally, the buffer now retains a
+ * minute of signal, and this runs ~104 O(N) Goertzel passes every 250 ms, so an
+ * uncapped N would have cost roughly 1.6M iterations a tick on the main thread.
+ *
+ * 2000 samples puts the Goertzel bin width at 0.125 Hz, so the 0.5 Hz sweep below
+ * lands on exact bins instead of being rounded onto a neighbour, and gives the
+ * 0.5 Hz bottom of the delta band four full cycles to sit in.
+ */
+const EPOCH_SAMPLES = 2000;
+
 function goertzelMag(data: number[], sampleRate: number, targetFreq: number) {
   const k = Math.floor(0.5 + (data.length * targetFreq) / sampleRate);
   const omega = (2 * Math.PI * k) / data.length;
@@ -42,12 +58,18 @@ export function SpectrumPanel({ dataBuffer, montage, settings }: SpectrumPanelPr
       const channelData = dataBuffer.current[selectedChannel];
       if (!channelData || channelData.length === 0) return;
 
+      // Most recent EPOCH_SAMPLES, so the analysed span is fixed rather than
+      // whatever the canvas happens to be showing.
+      const epoch = channelData.length > EPOCH_SAMPLES
+        ? channelData.slice(channelData.length - EPOCH_SAMPLES)
+        : channelData;
+
       const data = [
-        { name: 'Delta (0.5-4 Hz)', value: calculateBandPower(channelData, 250, 0.5, 4) },
-        { name: 'Theta (4-8 Hz)', value: calculateBandPower(channelData, 250, 4, 8) },
-        { name: 'Alpha (8-13 Hz)', value: calculateBandPower(channelData, 250, 8, 13) },
-        { name: 'Beta (13-30 Hz)', value: calculateBandPower(channelData, 250, 13, 30) },
-        { name: 'Gamma (30-50 Hz)', value: calculateBandPower(channelData, 250, 30, 50) },
+        { name: 'Delta (0.5-4 Hz)', value: calculateBandPower(epoch, 250, 0.5, 4) },
+        { name: 'Theta (4-8 Hz)', value: calculateBandPower(epoch, 250, 4, 8) },
+        { name: 'Alpha (8-13 Hz)', value: calculateBandPower(epoch, 250, 8, 13) },
+        { name: 'Beta (13-30 Hz)', value: calculateBandPower(epoch, 250, 13, 30) },
+        { name: 'Gamma (30-50 Hz)', value: calculateBandPower(epoch, 250, 30, 50) },
       ];
       setPowerData(data);
     }, 250);

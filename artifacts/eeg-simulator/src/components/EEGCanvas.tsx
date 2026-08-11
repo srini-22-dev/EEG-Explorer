@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Montage, ALL_ELECTRODES } from '../utils/montages';
 import { SimSettings } from '../utils/eegGenerator';
-import { computeChannelVoltage } from '../utils/computeChannel';
+import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
 import { SimulationSource } from '../engine/adapter';
 import { THEMES, EEGTheme } from '../utils/themes';
 import { EDUCATIONAL_ANNOTATIONS } from '../utils/annotations';
@@ -30,6 +30,37 @@ type EEGCanvasProps = {
 const PX_PER_MM_X = 4;   // horizontal: pixels per mm
 const MM_PER_ROW  = 10;  // each EEG channel = 10 mm vertically
 const GAP_UNITS   = 0.40; // fractional row-height gap between chain groups
+/**
+ * Seconds of signal kept behind the sweep.
+ *
+ * The buffers used to be trimmed to whatever was currently on screen, which made
+ * the retained history a function of canvas width and paper speed. Widening the
+ * window, dropping to 15 mm/s, or opening the 3D panel then asked for samples
+ * that had already been thrown away, and the trace restarted from the right-hand
+ * edge on blank paper. Storage is now decoupled from display: this is a floor,
+ * and the eviction below also never discards anything still visible, so the
+ * behaviour holds on any canvas at any speed.
+ */
+const HISTORY_SEC = 60;
+
+/**
+ * Samples of expired history tolerated before compacting the buffers.
+ *
+ * splice(0, n) costs O(buffer length) however small n is, so trimming every
+ * frame would rewrite a 15,000-sample buffer 60 times a second per channel.
+ * Draining a second at a time pays that cost once a second instead.
+ */
+const EVICT_CHUNK = 250;
+
+/** Index of the first element >= value in a sorted array. */
+function lowerBound(arr: number[], value: number): number {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < value) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
 
 type RowLayout = {
   channelIndex: number;  // -1 = spacer
@@ -122,14 +153,28 @@ export function EEGCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Observe the container, not the window. The 3D panel's splitter changes this
+    // element's width without the window changing size at all, so a window-only
+    // listener left the backing store stale and the canvas CSS-stretched — which
+    // silently falsifies the mm/s and µV/mm calibration the display is built on.
+    // The equality guard matters: assigning canvas.width clears the canvas even
+    // when the value is unchanged, and a ResizeObserver fires on layout passes
+    // that did not actually change the size.
     const resize = () => {
-      canvas.width  = container.clientWidth;
-      canvas.height = container.clientHeight;
+      const cw = Math.max(1, Math.round(container.clientWidth));
+      const chh = Math.max(1, Math.round(container.clientHeight));
+      if (canvas.width === cw && canvas.height === chh) return;
+      canvas.width  = cw;
+      canvas.height = chh;
     };
     resize();
-    window.addEventListener('resize', resize);
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
 
     const layout = buildLayout(montage);
+    // Row units are fixed by the montage, so the total is summed once here rather
+    // than re-filtering the layout array on every frame.
+    const totalRowUnits = layout.reduce((s, r) => s + (r.channelIndex < 0 ? GAP_UNITS : 1), 0);
     const simSource = new SimulationSource();
 
     const render = (now: number) => {
@@ -161,19 +206,25 @@ export function EEGCanvas({
           // The engine is a stateful stream, so it must be advanced exactly once
           // per sample and in order — it cannot be evaluated at an arbitrary t.
           const allV = simSource.next(currentSettings);
+          const avgRef = commonAverage(allV);
           timeBuffer.current.push(lastT);
           for (let i = 0; i < montage.channels.length; i++) {
             if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
-            dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, currentSettings, allV));
+            dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, allV, avgRef));
           }
         }
 
-        // Evict old samples
-        const cutoff = currentT - winSec;
+        // Drop only what has aged out of the retention span — not what has merely
+        // scrolled off the canvas. `winSec` is in the max so a window wider than
+        // HISTORY_SEC (a 4K display at 15 mm/s) can never evict a sample it is
+        // still drawing. Carrying the surplus costs nothing to render: the draw
+        // loop binary-searches to the left edge rather than scanning past it.
+        const cutoff = currentT - Math.max(HISTORY_SEC, winSec);
+        const tb = timeBuffer.current;
         let evict = 0;
-        while (timeBuffer.current[evict] < cutoff && evict < timeBuffer.current.length - 2) evict++;
-        if (evict > 0) {
-          timeBuffer.current.splice(0, evict);
+        while (evict < tb.length - 2 && tb[evict] < cutoff) evict++;
+        if (evict >= EVICT_CHUNK) {
+          tb.splice(0, evict);
           for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i]?.splice(0, evict);
         }
       }
@@ -200,39 +251,58 @@ export function EEGCanvas({
       }
 
       // 3. Amplitude grid (px per mm vertical)
-      const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
-      const nSp     = layout.length - nonSp;
-      const totalU  = nonSp + nSp * GAP_UNITS;
-      const avgRowH = h / totalU;
-      const pxPerMm = avgRowH / MM_PER_ROW;
+      const pxPerMm = h / totalRowUnits / MM_PER_ROW;
 
-      for (let y = 0; y < h; y += pxPerMm) {
-        const is5mm = Math.abs(Math.round(y) % Math.round(pxPerMm * 5)) < 1;
-        ctx.beginPath();
-        ctx.strokeStyle = is5mm ? currentTheme.gridH5mm : currentTheme.gridH1mm;
-        ctx.lineWidth   = is5mm ? 0.55 : 0.3;
-        ctx.moveTo(0, y); ctx.lineTo(w, y);
-        ctx.stroke();
-      }
+      // Grid lines are batched by style — one path for the 1 mm lines and one for
+      // the 5 mm lines — instead of a beginPath/stroke pair per line. At this
+      // canvas size that turns ~260 path submissions a frame into 4. stroke()
+      // carries fixed per-call overhead that dwarfs a two-point path, and the
+      // output is identical: the two sets never share a y, so drawing all of one
+      // before the other cannot change which line lands on top.
+      const step5 = Math.max(1, Math.round(pxPerMm * 5));
+      const is5mm = (y: number) => Math.abs(Math.round(y) % step5) < 1;
+
+      ctx.beginPath();
+      for (let y = 0; y < h; y += pxPerMm) if (!is5mm(y)) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.strokeStyle = currentTheme.gridH1mm;
+      ctx.lineWidth   = 0.3;
+      ctx.stroke();
+
+      ctx.beginPath();
+      for (let y = 0; y < h; y += pxPerMm) if (is5mm(y)) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.strokeStyle = currentTheme.gridH5mm;
+      ctx.lineWidth   = 0.55;
+      ctx.stroke();
 
       // 4. Vertical time grid: minor 200 ms, major 1 s
       {
         const secW   = pxPerSec;
         const minorW = secW * 0.2;
         const pxOff  = (currentT % 1) * secW;
+        const isMajor = (x: number) => Math.abs((w - x + pxOff) % secW) < 1.8;
 
-        for (let x = w - (pxOff % minorW); x > 0; x -= minorW) {
-          const isMajor = Math.abs((w - x + pxOff) % secW) < 1.8;
-          ctx.beginPath();
-          ctx.strokeStyle = isMajor ? currentTheme.grid1s : currentTheme.grid200;
-          ctx.lineWidth   = isMajor ? 0.7 : 0.35;
-          ctx.moveTo(x, 0); ctx.lineTo(x, h);
-          ctx.stroke();
-        }
+        ctx.beginPath();
+        for (let x = w - (pxOff % minorW); x > 0; x -= minorW) if (!isMajor(x)) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+        ctx.strokeStyle = currentTheme.grid200;
+        ctx.lineWidth   = 0.35;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let x = w - (pxOff % minorW); x > 0; x -= minorW) if (isMajor(x)) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+        ctx.strokeStyle = currentTheme.grid1s;
+        ctx.lineWidth   = 0.7;
+        ctx.stroke();
       }
 
       // 5. Waveform traces
       const pxPerUV = pxPerMm / currentSettings.sensitivity;
+
+      // Index of the leftmost sample still on screen. The buffers now hold up to
+      // HISTORY_SEC of signal but only winSec of it is visible, so starting every
+      // channel at 0 and discarding the misses would walk several times more
+      // samples than it draws. Sample times are monotonic, so one binary search
+      // finds the left edge and all channels share it.
+      const firstVisible = lowerBound(timeBuffer.current, currentT - winSec);
 
       // Cross-highlight: a channel is highlighted if it's directly hovered/clicked
       // (from the canvas side) or if either of its electrodes is highlighted from
@@ -252,7 +322,6 @@ export function EEGCanvas({
         const i       = row.channelIndex;
         const ch      = montage.channels[i];
         const data    = dataBuffer.current[i] ?? [];
-        const rowH    = row.rowFrac * h;
         const centerY = row.centerFrac * h;
         const isECG   = ch.active === 'ECG';
         const isHighlighted = highlightedChannels.has(i);
@@ -274,11 +343,17 @@ export function EEGCanvas({
         ctx.lineWidth   = isHighlighted ? 2.2 : (isECG ? 1.1 : 0.9);
         let started = false;
 
-        for (let j = 0; j < data.length; j++) {
+        for (let j = firstVisible; j < data.length; j++) {
           const tDist = currentT - timeBuffer.current[j];
           const x = w - tDist * pxPerSec;
-          if (x < 0) continue;
-          const y = centerY - Math.max(-rowH * 1.35, Math.min(rowH * 1.35, data[j] * scale));
+          const v = data[j] * scale;
+          // Real EEG paper and clinical review systems never clip: a
+          // high-amplitude event is drawn at its true height and simply
+          // overruns into neighbouring channels, which is how reviewers judge
+          // amplitude at a glance. Only guard against non-finite values —
+          // that protects canvas rendering, it does not limit amplitude.
+          if (!Number.isFinite(v)) continue;
+          const y = centerY - v;
           if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
@@ -296,15 +371,22 @@ export function EEGCanvas({
             if (targetRow) {
               const y = targetRow.centerFrac * h - 30;
               const x = w / 2;
-              
-              ctx.fillStyle = currentTheme.overlayBg;
-              ctx.fillRect(x - 10, y - 10, ctx.measureText(ann.text).width + 20, 20);
-              ctx.fillStyle = currentTheme.overlayText;
+
+              // Set the font before measuring — measureText uses the *current*
+              // font, so measuring first sized the backing box with whatever font
+              // the previous drawing step happened to leave set. One measurement
+              // then serves the box and the right-hand arrow, which re-measured
+              // the same string four more times.
               ctx.font = '11px sans-serif';
+              const textW = ctx.measureText(ann.text).width;
+
+              ctx.fillStyle = currentTheme.overlayBg;
+              ctx.fillRect(x - 10, y - 10, textW + 20, 20);
+              ctx.fillStyle = currentTheme.overlayText;
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
               ctx.fillText(ann.text, x, y);
-              
+
               ctx.strokeStyle = currentTheme.overlayText;
               ctx.beginPath();
               if (ann.arrowDirection === 'down') {
@@ -314,11 +396,11 @@ export function EEGCanvas({
                 ctx.moveTo(x, y - 10); ctx.lineTo(x, y - 25);
                 ctx.lineTo(x - 3, y - 22); ctx.moveTo(x, y - 25); ctx.lineTo(x + 3, y - 22);
               } else if (ann.arrowDirection === 'right') {
-                ctx.moveTo(x + ctx.measureText(ann.text).width + 10, y); 
-                ctx.lineTo(x + ctx.measureText(ann.text).width + 25, y);
-                ctx.lineTo(x + ctx.measureText(ann.text).width + 22, y - 3); 
-                ctx.moveTo(x + ctx.measureText(ann.text).width + 25, y); 
-                ctx.lineTo(x + ctx.measureText(ann.text).width + 22, y + 3);
+                ctx.moveTo(x + textW + 10, y);
+                ctx.lineTo(x + textW + 25, y);
+                ctx.lineTo(x + textW + 22, y - 3);
+                ctx.moveTo(x + textW + 25, y);
+                ctx.lineTo(x + textW + 22, y + 3);
               } else {
                 ctx.moveTo(x - 10, y); ctx.lineTo(x - 25, y);
                 ctx.lineTo(x - 22, y - 3); ctx.moveTo(x - 25, y); ctx.lineTo(x - 22, y + 3);
@@ -445,7 +527,7 @@ export function EEGCanvas({
     };
 
     rafId = requestAnimationFrame(render);
-    return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', resize); };
+    return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, [montage]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {

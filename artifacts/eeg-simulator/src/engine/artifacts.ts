@@ -28,19 +28,25 @@ import type { SourceSpec, Vec3 } from './forward';
  * Artifact generator positions. These sit outside the cortical shell — the eyes
  * in front and below, temporalis muscle laterally, the heart far below — which is
  * what makes their scalp patterns unlike any neural source's.
+ *
+ * These are the only sources with literal coordinates; every neural source is placed
+ * under named electrodes by `sourceUnder()` and so follows the electrode frame
+ * automatically. That makes this block the one place a frame change has to be applied
+ * by hand — so state the frame: **+x is anatomically LEFT**, +y up, +z anterior
+ * (scripts/src/processColinMesh.ts). Hence the L entries carry positive x.
  */
 export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
-  eyeL:        { id: 'eyeL',        pos: [-0.30, 0.28, 0.86], orientation: { kind: 'radial' }, extent: 0.40 },
-  eyeR:        { id: 'eyeR',        pos: [ 0.30, 0.28, 0.86], orientation: { kind: 'radial' }, extent: 0.40 },
+  eyeL:        { id: 'eyeL',        pos: [ 0.30, 0.28, 0.86], orientation: { kind: 'radial' }, extent: 0.40 },
+  eyeR:        { id: 'eyeR',        pos: [-0.30, 0.28, 0.86], orientation: { kind: 'radial' }, extent: 0.40 },
   // Horizontal gaze is a left-right dipole: tangential, so F7 and F8 move in
   // opposite directions, which is the diagnostic feature of a lateral eye movement.
-  gaze:        { id: 'gaze',        pos: [ 0.00, 0.26, 0.82], orientation: { kind: 'tangential', dir: [1, 0, 0] }, extent: 0.55 },
-  temporalisL: { id: 'temporalisL', pos: [-0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
-  temporalisR: { id: 'temporalisR', pos: [ 0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
+  gaze:        { id: 'gaze',        pos: [ 0.00, 0.26, 0.82], orientation: { kind: 'tangential', dir: [-1, 0, 0] }, extent: 0.55 },
+  temporalisL: { id: 'temporalisL', pos: [ 0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
+  temporalisR: { id: 'temporalisR', pos: [-0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
   frontalis:   { id: 'frontalis',   pos: [ 0.00, 0.50, 0.78], orientation: { kind: 'radial' }, extent: 0.45 },
   // The heart is far enough away that its field across the scalp is broad and
-  // shallow, with the mild lateralisation §8 notes.
-  heart:       { id: 'heart',       pos: [-0.55, -2.60, 0.20], orientation: { kind: 'radial' }, extent: 3.2 },
+  // shallow, with the mild lateralisation §8 notes. It sits left of midline.
+  heart:       { id: 'heart',       pos: [ 0.55, -2.60, 0.20], orientation: { kind: 'radial' }, extent: 3.2 },
   sweatFrontal:{ id: 'sweatFrontal',pos: [ 0.00, 0.45, 0.62], orientation: { kind: 'radial' }, extent: 0.55 },
 };
 

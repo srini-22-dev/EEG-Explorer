@@ -613,54 +613,20 @@ function variantVoltage(el: string, t: number, st: PatientState, ap: Set<string>
 
 // ─── Artifacts ───────────────────────────────────────────────────────────────
 
+/**
+ * Chewing is the only artifact left in this function. Blink, lateral eye
+ * movement, muscle (EMG), electrode pop, sweat, and 50 Hz mains now all come
+ * from the streaming engine's own artifact generators — own topographies,
+ * leadfield-projected (`src/engine/artifacts.ts`) — gated by the same UI
+ * toggle via `EegEngine.setArtifactGates()` in `engine/adapter.ts`. Keeping
+ * them here too would sum two independently-triggered copies of the same
+ * artifact on top of each other. `chewing` stays here because the engine has
+ * no masseter generator (GeneratorCatalogue.md's engine table has no
+ * "chewing" row) — it is legacy-only by necessity, not by choice.
+ */
 function artifactVoltage(el: string, t: number, ap: Set<string>): number {
   const c = classify(el);
   let v = 0;
-
-  if (ap.has('blink')) {
-    if (nextEventTime('blink', t, 2, 5)) {
-      setT('blink-amp', jitter(1, 0.15));
-      setT('blink-dur', jitter(1, 0.2));
-      setT('blink-double', Math.random() < 0.2 ? 1 : 0);
-    }
-    const dt = t - getT('blink');
-    const bDur = getT('blink-dur');
-    const isDouble = getT('blink-double') === 1;
-    for (let i = 0; i < (isDouble ? 2 : 1); i++) {
-      const offset = i * 0.4;
-      if (dt > offset && dt < offset + 0.3 * bDur) {
-        const localDt = (dt - offset) / bDur;
-        if (['Fp1','Fp2'].includes(el)) {
-          v +=  60 * getT('blink-amp') * gaussian(localDt, 0.05, 0.025);
-          v -= 280 * getT('blink-amp') * gaussian(localDt, 0.16, 0.06);
-        } else if (['F3','F4','F7','F8'].includes(el)) {
-          v +=  20 * getT('blink-amp') * gaussian(localDt, 0.05, 0.025);
-          v -=  90 * getT('blink-amp') * gaussian(localDt, 0.16, 0.06);
-        }
-      }
-    }
-  }
-
-  if (ap.has('eye-movement')) {
-    if (nextEventTime('eye-mv', t, 3, 6)) {
-      setT('eye-mv-amp', jitter(1, 0.2));
-    }
-    const dt = t - getT('eye-mv');
-    if (dt > 0 && dt < 0.8) {
-      // asymmetric onset/offset
-      const env = dt < 0.25 ? gaussian(dt, 0.25, 0.08) : gaussian(dt, 0.25, 0.15);
-      const pulse = 180 * getT('eye-mv-amp') * env;
-      if (['F7','Fp1','T3'].includes(el)) v += pulse;
-      if (['F8','Fp2','T4'].includes(el)) v -= pulse;
-    }
-  }
-
-  if (ap.has('muscle')) {
-    if (c.isTemporal || c.isFrontal || c.isPostTmp) {
-      const env = getEnvelope('art-muscle', t, 0.3, 0.1);
-      v += 60 * env * (Math.random() - 0.5);
-    }
-  }
 
   if (ap.has('chewing') && (c.isTemporal || el === 'T3' || el === 'T4')) {
     // Real mastication comes in discrete episodes — a run of a few chews at roughly
@@ -686,44 +652,6 @@ function artifactVoltage(el: string, t: number, ap: Set<string>): number {
         v += 50 * amp * (Math.random() - 0.5);
       }
     }
-  }
-
-  if (ap.has('electrode-pop')) {
-    if (nextEventTime('pop-time', t, 3, 7)) {
-      setT('pop-el', ALL_ELECTRODES.indexOf(ALL_ELECTRODES[Math.floor(Math.random() * ALL_ELECTRODES.length)]));
-      setT('pop-amp', jitter(1, 0.3));
-      setT('pop-freq', jitter(6, 0.3)); // 4-8Hz
-    }
-    const popIdx = Math.round(getT('pop-el'));
-    if (ALL_ELECTRODES[popIdx] === el) {
-      const dt = t - getT('pop-time');
-      if (dt > 0 && dt < 1.5) {
-        v += 350 * getT('pop-amp') * Math.exp(-dt * 12) * Math.cos(2 * Math.PI * getT('pop-freq') * dt);
-        // occasional baseline drift
-        if (getT('pop-amp') > 1.1) {
-           v += 100 * getT('pop-amp') * gaussian(dt, 0.5, 0.3);
-        }
-      }
-    }
-  }
-
-  if (ap.has('sweat') && (c.isFrontal || ['F3','F4'].includes(el))) {
-    if (nextEventTime('sweat', t, 6, 12)) {
-      setT('sweat-amp', jitter(1, 0.2));
-    }
-    const dt = t - getT('sweat');
-    if (dt > 0 && dt < 12) {
-      // asymmetric slow wave
-      const env = dt < 4 ? gaussian(dt, 4, 1.5) : gaussian(dt, 4, 3);
-      v += 220 * getT('sweat-amp') * multiToneSignal(dt, [{f:0.1, a:1}, {f:0.15, a:0.5}], 1) * env;
-    }
-  }
-
-  if (ap.has('50hz')) {
-    const j = getJitter(el + '-50hz');
-    // ±5% fluctuation
-    const fluct = 1 + 0.05 * Math.sin(2 * Math.PI * 0.2 * t);
-    v += 45 * j * fluct * Math.sin(2 * Math.PI * 50 * t);
   }
 
   return v;

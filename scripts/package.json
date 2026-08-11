@@ -6,6 +6,12 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "process-colin-mesh": "tsx ./src/processColinMesh.ts",
+    "process-head-mesh": "tsx ./src/processHeadMesh.ts",
+    "fix-mesh-frame": "tsx ./src/fixMeshFrame.ts",
+    "decimate-mesh": "tsx ./src/decimateMesh.ts",
+    "extract-skin-nifti": "tsx ./src/extractSkinFromNifti.ts",
+    "build-head-brain": "tsx ./src/buildHeadAndBrain.ts",
+    "build-1020": "tsx ./src/build1020.ts",
     "validate": "tsx ./src/validateEngine.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

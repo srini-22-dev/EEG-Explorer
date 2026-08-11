@@ -99,6 +99,42 @@ export type GroundTruth = {
   popChannel: number;
 };
 
+/**
+ * Per-generator runtime enable flags for the engine's own artifact layer (§8,
+ * `artifacts.ts`). Distinct from the `artifacts` *constructor* option: that one
+ * decides once, at build time, whether the artifact sources exist in the
+ * leadfield at all (used to isolate neural-only validation runs). This is the
+ * opposite kind of switch — read every sample, on an engine that already
+ * exists, so a UI checkbox can silence a generator without rebuilding the
+ * engine (see `next()`'s comment and the class doc on `setPatientState`).
+ * Every flag defaults to true so a caller that never touches this — every
+ * existing construction, including `validateEngine.ts` — sees the engine's
+ * previous always-on artifact behaviour unchanged.
+ */
+export type ArtifactGates = {
+  /** Corneo-retinal blink deflection at the ocular sources. */
+  blink: boolean;
+  /** Lateral gaze / saccade deflection and its onset spike. */
+  saccade: boolean;
+  /** Temporalis + frontalis EMG (muscle) shot noise. */
+  emg: boolean;
+  /** Electrode pop (single-channel step + decay, leadfield bypassed). */
+  pop: boolean;
+  /** Frontal sweat-gland drift. */
+  sweat: boolean;
+  /** Mains interference injected in the recording chain. */
+  line: boolean;
+  /**
+   * Cardiac field contaminating scalp electrodes. NOT the dedicated ECG
+   * channel — that is `getECGVoltage()` in `utils/eegGenerator.ts`, a
+   * separate always-on generator feeding the recording's ECG trace, untouched
+   * by this flag.
+   */
+  ecgScalp: boolean;
+  /** Large, rare mechanical movement transients. */
+  movement: boolean;
+};
+
 export type PatientState = 'awake' | 'drowsy' | 'n1' | 'n2' | 'n3';
 
 type Band = 'background' | 'alpha' | 'mu' | 'theta' | 'delta' | 'beta';
@@ -156,6 +192,10 @@ export class EegEngine {
   private defects: ChannelDefect[] = [];
   private sampleIndex = 0;
   private patientState: PatientState = 'awake';
+  private gates: ArtifactGates = {
+    blink: true, saccade: true, emg: true, pop: true,
+    sweat: true, line: true, ecgScalp: true, movement: true,
+  };
 
   constructor(opts: EngineOptions = {}) {
     const {
@@ -331,18 +371,31 @@ export class EegEngine {
     let lineVal = 0;
     if (this.blink) {
       const ix = this.artifactIndex;
+      const g = this.gates;
+      // Every generator advances unconditionally every sample — gating only
+      // decides whether its output is added to V. That keeps each renewal
+      // process's own statistics (rate, phase, decay) running underneath a
+      // disabled toggle, so re-enabling it resumes rather than restarts.
       const blinkV = this.blink.next(gains.ocularRate) * 110;
-      V[ix.eyeL] += blinkV;
-      V[ix.eyeR] += blinkV;
-      V[ix.gaze] += this.saccade!.next(gains.ocularRate) * 45;
-      V[ix.temporalisL] += this.emgL!.next(gains.emg) * 9 * gains.emg;
-      V[ix.temporalisR] += this.emgR!.next(gains.emg) * 9 * gains.emg;
-      V[ix.frontalis] += this.emgF!.next(gains.emg) * 6 * gains.emg;
-      V[ix.heart] += this.ecg!.next() * 9;
-      V[ix.sweatFrontal] += this.sweat!.next() * 7;
+      if (g.blink) { V[ix.eyeL] += blinkV; V[ix.eyeR] += blinkV; }
+      const saccadeV = this.saccade!.next(gains.ocularRate) * 45;
+      if (g.saccade) V[ix.gaze] += saccadeV;
+      const emgLV = this.emgL!.next(gains.emg) * 9 * gains.emg;
+      const emgRV = this.emgR!.next(gains.emg) * 9 * gains.emg;
+      const emgFV = this.emgF!.next(gains.emg) * 6 * gains.emg;
+      if (g.emg) {
+        V[ix.temporalisL] += emgLV;
+        V[ix.temporalisR] += emgRV;
+        V[ix.frontalis] += emgFV;
+      }
+      const heartV = this.ecg!.next() * 9;
+      if (g.ecgScalp) V[ix.heart] += heartV;
+      const sweatV = this.sweat!.next() * 7;
+      if (g.sweat) V[ix.sweatFrontal] += sweatV;
       const mv = this.movement!.next() * 60;
-      V[ix.eyeL] += mv; V[ix.eyeR] += mv;
-      lineVal = this.line!.next();
+      if (g.movement) { V[ix.eyeL] += mv; V[ix.eyeR] += mv; }
+      const lineRaw = this.line!.next();
+      lineVal = g.line ? lineRaw : 0;
     }
 
     // project sources to electrodes
@@ -361,7 +414,7 @@ export class EegEngine {
     if (this.pop) {
       const popV = this.pop.next() * 220;
       const c = this.pop.channel;
-      if (c >= 0 && c < out.length) out[c] += popV;
+      if (this.gates.pop && c >= 0 && c < out.length) out[c] += popV;
     }
 
     if (this.chain) this.chain.process(out, lineVal, this.subject.lineAmp);
@@ -382,6 +435,17 @@ export class EegEngine {
   setPatientState(state: PatientState) {
     this.patientState = state;
     this.vigilance.setBias(STATE_VIGILANCE[state]);
+  }
+
+  /**
+   * Enable/disable individual artifact generators' contribution to the
+   * output. Cheap by design, same as `setPatientState`: it only flips flags
+   * read at the top of `next()`, never rebuilds a generator or the leadfield,
+   * so a UI checkbox can be toggled mid-recording without resetting any
+   * oscillator phase or vigilance state elsewhere in the engine.
+   */
+  setArtifactGates(gates: Partial<ArtifactGates>) {
+    Object.assign(this.gates, gates);
   }
 
   /** Index of a named electrode, or -1. */

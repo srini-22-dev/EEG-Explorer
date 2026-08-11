@@ -48,3 +48,7 @@ Thumbs.db
 .cache/
 .local/
 graphify-out/
+
+# Raw imaging source data (large, not redistributable) — see scripts/src/processColinMesh.ts
+# and processHeadMesh.ts for the same convention.
+scripts/raw/

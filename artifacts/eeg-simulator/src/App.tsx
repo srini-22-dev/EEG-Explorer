@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { ControlPanel } from './components/ControlPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
@@ -7,9 +7,22 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
 import { QuizMode } from './components/QuizMode';
 import { TutorialMode } from './components/TutorialMode';
-import { SpectrumPanel } from './components/SpectrumPanel';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import { HeadModel3D } from './components/HeadModel3D';
+
+// Both panels are optional and both drag in a large dependency that the trace
+// display itself never touches — three/fiber/drei for the head, recharts for the
+// spectrum. Loading them lazily keeps them out of the initial bundle, so the EEG
+// display is interactive without paying for either.
+const HeadModel3D = lazy(() =>
+  import('./components/HeadModel3D').then(m => ({ default: m.HeadModel3D })));
+const SpectrumPanel = lazy(() =>
+  import('./components/SpectrumPanel').then(m => ({ default: m.SpectrumPanel })));
+
+const PanelLoading = ({ label }: { label: string }) => (
+  <div className="w-full h-full flex items-center justify-center bg-[#1e2a1e] text-xs text-slate-500">
+    Loading {label}…
+  </div>
+);
 // Patterns that are graphoelements of a specific sleep/drowsiness stage, not
 // independent overlays — they cannot occur outside the state that defines them.
 // `target` is the state selecting the pattern jumps Background State to;
@@ -107,51 +120,58 @@ export default function App() {
           brainOpacity={brainOpacity} setBrainOpacity={setBrainOpacity}
         />
         <div className="flex-1 flex flex-col h-full relative">
-          {show3DPanel ? (
-            <PanelGroup direction="horizontal">
-              <Panel defaultSize={70} minSize={30}>
-                <EEGCanvas
-                  montage={MONTAGES[montageId]}
-                  settings={settings}
-                  activeEffectsLabel={activeEffects}
-                  theme={theme}
-                  showAnnotations={showAnnotations}
-                  isFrozen={isFrozen}
-                  setIsFrozen={setIsFrozen}
-                  dataBuffer={dataBuffer}
-                  timeBuffer={timeBuffer}
-                />
-              </Panel>
-              <PanelResizeHandle className="w-2 bg-[#2e4a2e] hover:bg-[#3e5a3e] cursor-col-resize transition-colors flex items-center justify-center">
-                <div className="w-1 h-8 bg-slate-500 rounded-full" />
-              </PanelResizeHandle>
-              <Panel defaultSize={30} minSize={20}>
-                <HeadModel3D 
-                  montage={MONTAGES[montageId]} 
-                  headOpacity={headOpacity} 
-                  brainOpacity={brainOpacity} 
-                />
-              </Panel>
-            </PanelGroup>
-          ) : (
-            <EEGCanvas
-              montage={MONTAGES[montageId]}
-              settings={settings}
-              activeEffectsLabel={activeEffects}
-              theme={theme}
-              showAnnotations={showAnnotations}
-              isFrozen={isFrozen}
-              setIsFrozen={setIsFrozen}
-              dataBuffer={dataBuffer}
-              timeBuffer={timeBuffer}
-            />
-          )}
+          {/*
+            The PanelGroup is unconditional and EEGCanvas is written exactly once.
+            It used to appear twice — inside the group and again as a bare sibling —
+            so toggling the 3D panel moved it to a different position in the element
+            tree. React read that as an unmount plus a mount, which built a fresh
+            SimulationSource on a new random seed, reset the elapsed clock and wiped
+            both buffers: the record did not merely lose its history, it became a
+            different patient. Holding the position fixed means the toggle only
+            changes the canvas width, which the ResizeObserver handles.
+
+            `order` is required on conditionally-rendered panels so the group can
+            place the 3D panel consistently when it reappears.
+          */}
+          <PanelGroup direction="horizontal">
+            <Panel id="eeg" order={1} minSize={30}>
+              <EEGCanvas
+                montage={MONTAGES[montageId]}
+                settings={settings}
+                activeEffectsLabel={activeEffects}
+                theme={theme}
+                showAnnotations={showAnnotations}
+                isFrozen={isFrozen}
+                setIsFrozen={setIsFrozen}
+                dataBuffer={dataBuffer}
+                timeBuffer={timeBuffer}
+              />
+            </Panel>
+            {show3DPanel && (
+              <>
+                <PanelResizeHandle className="w-2 bg-[#2e4a2e] hover:bg-[#3e5a3e] cursor-col-resize transition-colors flex items-center justify-center">
+                  <div className="w-1 h-8 bg-slate-500 rounded-full" />
+                </PanelResizeHandle>
+                <Panel id="head3d" order={2} defaultSize={30} minSize={20}>
+                  <Suspense fallback={<PanelLoading label="3D head model" />}>
+                    <HeadModel3D
+                      montage={MONTAGES[montageId]}
+                      headOpacity={headOpacity}
+                      brainOpacity={brainOpacity}
+                    />
+                  </Suspense>
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
           {showSpectrum && (
-            <SpectrumPanel 
-              dataBuffer={dataBuffer} 
-              montage={MONTAGES[montageId]} 
-              settings={settings} 
-            />
+            <Suspense fallback={<div className="h-48 bg-[#1e2a1e] border-t border-[#2e4a2e]" />}>
+              <SpectrumPanel
+                dataBuffer={dataBuffer}
+                montage={MONTAGES[montageId]}
+                settings={settings}
+              />
+            </Suspense>
           )}
         </div>
         

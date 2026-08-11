@@ -43,6 +43,29 @@ export class SimulationSource {
    */
   next(settings: SimSettings): Record<string, number> {
     this.setPatientState(settings.patientState as PatientState);
+
+    // The engine's own artifact generators (own topographies, leadfield-
+    // projected — see GeneratorCatalogue.md) are gated by the same "Artifacts"
+    // toggles the legacy pattern layer uses, read fresh every sample so a
+    // checkbox flips instantly without rebuilding the engine (see
+    // `EegEngine.setArtifactGates`'s doc comment). `chewing` has no engine
+    // generator (no masseter source) so it stays legacy-only in
+    // `getPatternVoltage`. `ecgScalp` (cardiac scalp contamination) and
+    // `movement` have no UI toggle at all yet, so they stay off — leaving
+    // them on would reintroduce artifacts nobody asked for on a supposedly
+    // clean background.
+    const ap = settings.activePatterns;
+    this.engine.setArtifactGates({
+      blink: ap.has('blink'),
+      saccade: ap.has('eye-movement'),
+      emg: ap.has('muscle'),
+      pop: ap.has('electrode-pop'),
+      sweat: ap.has('sweat'),
+      line: ap.has('50hz'),
+      ecgScalp: false,
+      movement: false,
+    });
+
     this.engine.next(this.buf);
     this.t += this.dt;
 
