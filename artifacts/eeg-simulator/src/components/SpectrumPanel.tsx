@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Montage } from '../utils/montages';
-import { SimSettings } from '../utils/eegGenerator';
+import type { SimSettings } from '../utils/simTypes';
 
 type SpectrumPanelProps = {
   dataBuffer: React.MutableRefObject<number[][]>;

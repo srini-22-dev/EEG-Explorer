@@ -2,15 +2,19 @@
  * Bridge between the streaming engine and the app's per-sample rendering loop.
  *
  * The canvas wants a map of electrode voltages for each successive sample; the
- * engine produces exactly that, but as a stateful stream that must be advanced in
- * order. This adapter owns the engine instance, keeps the sample clock, and
- * layers the toggleable clinical graphoelements on top of the generated
- * background.
+ * engine produces exactly that, but as a stateful stream that must be advanced
+ * in order. This adapter owns the engine instance and keeps the sample clock.
+ *
+ * All clinical content — background, rhythms, sleep grapho-elements, benign
+ * variants, abnormalities, epileptiform and ictal patterns, and artifacts — now
+ * lives inside the engine as forward-modelled sources. The adapter's only job is
+ * to translate the UI's `activePatterns` set into engine toggles each sample and
+ * copy the resulting electrode potentials out; it no longer adds any voltage of
+ * its own.
  */
 
-import { EegEngine, type PatientState } from './engine';
-import { getPatternVoltage, getBackgroundGate, type SimSettings } from '../utils/eegGenerator';
-import type { Electrode } from '../utils/montages';
+import { EegEngine } from './engine';
+import type { PatientState, SimSettings } from '../utils/simTypes';
 
 export class SimulationSource {
   private engine: EegEngine;
@@ -27,6 +31,9 @@ export class SimulationSource {
     this.buf = new Float64Array(this.engine.electrodes.length);
     this.dt = 1 / fs;
     for (const name of this.engine.electrodes) this.voltages[name] = 0;
+    // ECG is a recorded display channel, not a scalp electrode, so the engine
+    // supplies it separately rather than through the leadfield projection.
+    this.voltages['ECG'] = 0;
   }
 
   setPatientState(state: PatientState) {
@@ -45,15 +52,14 @@ export class SimulationSource {
     this.setPatientState(settings.patientState as PatientState);
 
     // The engine's own artifact generators (own topographies, leadfield-
-    // projected — see GeneratorCatalogue.md) are gated by the same "Artifacts"
-    // toggles the legacy pattern layer uses, read fresh every sample so a
-    // checkbox flips instantly without rebuilding the engine (see
-    // `EegEngine.setArtifactGates`'s doc comment). `chewing` has no engine
-    // generator (no masseter source) so it stays legacy-only in
-    // `getPatternVoltage`. `ecgScalp` (cardiac scalp contamination) and
-    // `movement` have no UI toggle at all yet, so they stay off — leaving
-    // them on would reintroduce artifacts nobody asked for on a supposedly
-    // clean background.
+    // projected) are gated by the "Artifacts"
+    // toggles, read fresh every sample so a checkbox flips instantly without
+    // rebuilding the engine (see `EegEngine.setArtifactGates`'s doc comment).
+    // `chewing` is a pattern source, not an engine artifact generator, so it is
+    // handled by `setActivePatterns` below rather than here. `ecgScalp` (cardiac
+    // scalp contamination) and `movement` have no UI toggle at all yet, so they
+    // stay off — leaving them on would reintroduce artifacts nobody asked for on
+    // a supposedly clean background.
     const ap = settings.activePatterns;
     this.engine.setArtifactGates({
       blink: ap.has('blink'),
@@ -66,16 +72,18 @@ export class SimulationSource {
       movement: false,
     });
 
+    // Every non-artifact clinical toggle (sleep, variants, abnormalities,
+    // epileptiform, ictal, chewing) is a pattern source inside the engine.
+    this.engine.setActivePatterns(ap);
+
     this.engine.next(this.buf);
     this.t += this.dt;
 
-    const gate = getBackgroundGate(this.t, settings);
     const names = this.engine.electrodes;
     for (let i = 0; i < names.length; i++) {
-      const name = names[i];
-      this.voltages[name] =
-        this.buf[i] * gate + getPatternVoltage(name as Electrode, this.t, settings);
+      this.voltages[names[i]] = this.buf[i];
     }
+    this.voltages['ECG'] = this.engine.ecgChannelValue;
     return this.voltages;
   }
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { ControlPanel } from './components/ControlPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
-import { SimSettings, PatientState, resetGenerator } from './utils/eegGenerator';
+import type { SimSettings, PatientState } from './utils/simTypes';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
 import { QuizMode } from './components/QuizMode';
@@ -45,6 +45,7 @@ export default function App() {
 
   const [theme, setTheme] = useState<EEGTheme>('green-paper');
   const [showAnnotations, setShowAnnotations] = useState(false);
+  const [graphHover, setGraphHover] = useState(true);
   const [showSpectrum, setShowSpectrum] = useState(false);
   const [quizMode, setQuizMode] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
@@ -90,10 +91,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientState]);
 
-  const clearAll = () => {
-    setActivePatterns(new Set());
-    resetGenerator();
-  };
+  // Clearing the toggle set is sufficient: the streaming engine quiesces each
+  // source the moment its enabled flag drops (transient schedules clear, scripted
+  // patterns reset their clocks), so there is no separate generator state to reset.
+  const clearAll = () => setActivePatterns(new Set());
 
   const settings: SimSettings = { speed, sensitivity, patientState, activePatterns };
 
@@ -112,6 +113,7 @@ export default function App() {
           clearAll={clearAll}
           theme={theme} setTheme={setTheme}
           showAnnotations={showAnnotations} setShowAnnotations={setShowAnnotations}
+          graphHover={graphHover} setGraphHover={setGraphHover}
           showSpectrum={showSpectrum} setShowSpectrum={setShowSpectrum}
           setQuizMode={setQuizMode} setTutorialMode={setTutorialMode}
           dataBuffer={dataBuffer} timeBuffer={timeBuffer}
@@ -145,6 +147,7 @@ export default function App() {
                 setIsFrozen={setIsFrozen}
                 dataBuffer={dataBuffer}
                 timeBuffer={timeBuffer}
+                graphHover={graphHover}
               />
             </Panel>
             {show3DPanel && (

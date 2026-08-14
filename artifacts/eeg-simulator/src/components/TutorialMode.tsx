@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { PatientState } from '../utils/eegGenerator';
+import type { PatientState } from '../utils/simTypes';
 
 type TutorialStep = {
   title: string;

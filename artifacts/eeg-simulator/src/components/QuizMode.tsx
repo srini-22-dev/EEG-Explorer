@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { PATTERN_BY_ID } from '../utils/patterns';
-import { PatientState } from '../utils/eegGenerator';
+import type { PatientState } from '../utils/simTypes';
 
 type QuizModeProps = {
   onClose: () => void;

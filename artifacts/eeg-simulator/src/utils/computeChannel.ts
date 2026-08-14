@@ -1,5 +1,4 @@
 import { ChannelDef, ALL_ELECTRODES } from './montages';
-import { getECGVoltage } from './eegGenerator';
 
 /**
  * Common average reference: the instantaneous mean over every scalp electrode.
@@ -29,7 +28,9 @@ export function computeChannelVoltage(
   allVoltages: Record<string, number>,
   avgRef: number,
 ): number {
-  if (channel.active === 'ECG') return getECGVoltage(t);
+  // ECG is supplied by the engine as a dedicated display channel (adapter writes
+  // it into allVoltages['ECG']), not derived here from a separate morphology.
+  if (channel.active === 'ECG') return allVoltages['ECG'] ?? 0;
 
   const vActive = allVoltages[channel.active] ?? 0;
   let vRef = 0;

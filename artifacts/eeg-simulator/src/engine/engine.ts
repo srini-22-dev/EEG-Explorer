@@ -32,6 +32,11 @@ import {
 } from './artifacts';
 import { RecordingChain, sampleDefects, type ChannelDefect } from './chain';
 import { Gaussian, deriveSeed } from './rng';
+import {
+  PATTERN_SOURCES,
+  type PatternGenerator, type PatternSourceDescriptor, type SampleContext, type Band,
+} from './sources/registry';
+import type { PatientState } from '../utils/simTypes';
 
 /**
  * Per-subject parameters (briefing §9/§12). Real datasets vary enormously in
@@ -125,19 +130,16 @@ export type ArtifactGates = {
   /** Mains interference injected in the recording chain. */
   line: boolean;
   /**
-   * Cardiac field contaminating scalp electrodes. NOT the dedicated ECG
-   * channel — that is `getECGVoltage()` in `utils/eegGenerator.ts`, a
-   * separate always-on generator feeding the recording's ECG trace, untouched
-   * by this flag.
+   * Cardiac field contaminating scalp electrodes — the QRS complex volume-
+   * conducted onto the EEG. This is the scalp contamination only, not a
+   * dedicated ECG trace.
    */
   ecgScalp: boolean;
   /** Large, rare mechanical movement transients. */
   movement: boolean;
 };
 
-export type PatientState = 'awake' | 'drowsy' | 'n1' | 'n2' | 'n3';
-
-type Band = 'background' | 'alpha' | 'mu' | 'theta' | 'delta' | 'beta';
+export type { PatientState };
 
 type NeuralSource =
   | { kind: 'aperiodic'; src: AperiodicSource; band: 'background' }
@@ -187,6 +189,22 @@ export class EegEngine {
   private line: LineNoiseGenerator | null = null;
   private movement: MovementGenerator | null = null;
   private artifactIndex: Record<string, number> = {};
+
+  // Pattern sources: every toggleable clinical element (sleep grapho-elements,
+  // benign variants, non-epileptiform abnormalities, interictal epileptiform,
+  // ictal). Each owns one leadfield column appended after the artifact block, so
+  // `patternIndex[i]` is the source slot for descriptor `i`. Generators advance
+  // every sample; their `next()` returns 0 when the source is not enabled.
+  private patternDescriptors: PatternSourceDescriptor[] = [];
+  private patternGens: PatternGenerator[] = [];
+  private patternIndex: number[] = [];
+  private activePatterns: Set<string> = new Set();
+
+  // A dedicated, always-on ECG generator whose full-amplitude morphology drives
+  // the synthetic ECG display channel (not the scalp cardiac contamination that
+  // `this.ecg` feeds into V). Exposed via `ecgChannelValue`, read by the adapter.
+  private ecgChannel!: EcgGenerator;
+  ecgChannelValue = 0;
 
   private chain: RecordingChain | null = null;
   private defects: ChannelDefect[] = [];
@@ -238,7 +256,13 @@ export class EegEngine {
     ];
 
     const artifactSpecs: SourceSpec[] = artifacts ? Object.values(ARTIFACT_SOURCES) : [];
-    const allSpecs = [...bgPatches, ...rhythmSpecs, ...artifactSpecs];
+
+    // Pattern sources sit at the tail of the source list so their leadfield
+    // columns form a known contiguous block after the artifact columns.
+    this.patternDescriptors = PATTERN_SOURCES;
+    const patternSpecs = PATTERN_SOURCES.map(d => d.spec);
+
+    const allSpecs = [...bgPatches, ...rhythmSpecs, ...artifactSpecs, ...patternSpecs];
     this.leadfield = buildLeadfield(allSpecs);
     this.electrodes = this.leadfield.electrodes;
 
@@ -246,6 +270,10 @@ export class EegEngine {
       const base = bgPatches.length + rhythmSpecs.length;
       Object.keys(ARTIFACT_SOURCES).forEach((k, i) => { this.artifactIndex[k] = base + i; });
     }
+
+    const patternBase = bgPatches.length + rhythmSpecs.length + artifactSpecs.length;
+    this.patternIndex = PATTERN_SOURCES.map((_, i) => patternBase + i);
+    this.patternGens = PATTERN_SOURCES.map(d => d.make(deriveSeed(seed, d.id), this.dt));
 
     // ---- neural generators ----
     this.neural = [];
@@ -338,6 +366,10 @@ export class EegEngine {
       this.chain = new RecordingChain(seed, this.dt, this.electrodes.length, this.defects);
     }
 
+    // Independent of the `artifacts` flag: the ECG display channel is a first-class
+    // recorded trace, not an artifact, so it exists even when scalp artifacts are off.
+    this.ecgChannel = new EcgGenerator(deriveSeed(seed, 'ecgChannel'), this.dt);
+
     this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1 };
   }
 
@@ -347,6 +379,40 @@ export class EegEngine {
     const gains = this.vigilance.gains();
     const V = this.srcValues;
     V.fill(0);
+
+    // Pattern sources first: each writes its scalar into its own leadfield slot,
+    // and any active generator's gate() composes into `neuralGate`, the single
+    // multiplier applied to the ongoing background+rhythm activity. That is how
+    // burst-suppression and post-ictal attenuation dampen the whole record
+    // without touching individual oscillators. `t` matches the sample about to be
+    // emitted (sampleIndex increments at the end of next()), so the first sample
+    // is evaluated at t = dt, aligning patterns with groundTruth.t.
+    const tNow = (this.sampleIndex + 1) * this.dt;
+    const baseCtx = { t: tNow, dt: this.dt, state: this.patientState, vigilance: this.vigilance.value };
+    let neuralGate = 1;
+    // Per-band multipliers on the ongoing background, for patterns that reshape the
+    // spectrum (gen-slowing abolishing the alpha PDR). 1 = untouched; band gates
+    // from multiple active patterns compose multiplicatively.
+    const bandGate: Record<Band, number> = {
+      background: 1, alpha: 1, mu: 1, theta: 1, delta: 1, beta: 1,
+    };
+    for (let i = 0; i < this.patternGens.length; i++) {
+      const d = this.patternDescriptors[i];
+      const toggleOn = d.toggles.some(tg => this.activePatterns.has(tg));
+      const stateInList = d.states != null && d.states.includes(this.patientState);
+      // See PatternSourceDescriptor.stateIntrinsic for the two gating modes.
+      const enabled = d.stateIntrinsic
+        ? toggleOn || stateInList
+        : toggleOn && (d.states == null || stateInList);
+      const ctx: SampleContext = { ...baseCtx, enabled };
+      const gen = this.patternGens[i];
+      V[this.patternIndex[i]] = gen.next(ctx);
+      if (enabled && gen.gate) neuralGate *= gen.gate(ctx);
+      if (enabled && gen.bandGate) {
+        const bg = gen.bandGate(ctx);
+        for (const b in bg) bandGate[b as Band] *= bg[b as Band]!;
+      }
+    }
 
     const sg = STATE_GAINS[this.patientState];
     let betaBursting = false;
@@ -365,7 +431,11 @@ export class EegEngine {
         v *= n.band === 'theta' ? gains.theta : gains.beta;
         if (n.src.bursting && n.band === 'beta') betaBursting = true;
       }
-      V[i] = v;
+      // Pattern gates attenuate only the ongoing neural background, never the
+      // pattern sources themselves or the artifacts. The scalar `neuralGate`
+      // dampens the whole record (burst-suppression); `bandGate` reshapes which
+      // rhythms survive (gen-slowing abolishing alpha).
+      V[i] = v * neuralGate * bandGate[n.band];
     }
 
     let lineVal = 0;
@@ -419,6 +489,9 @@ export class EegEngine {
 
     if (this.chain) this.chain.process(out, lineVal, this.subject.lineAmp);
 
+    // Synthetic ECG display channel: advanced once per sample, full amplitude.
+    this.ecgChannelValue = this.ecgChannel.next() * 500;
+
     this.sampleIndex++;
     this.groundTruth.t = this.sampleIndex * this.dt;
     this.groundTruth.vigilance = this.vigilance.value;
@@ -446,6 +519,17 @@ export class EegEngine {
    */
   setArtifactGates(gates: Partial<ArtifactGates>) {
     Object.assign(this.gates, gates);
+  }
+
+  /**
+   * Set the currently-enabled pattern toggles (the UI's `activePatterns` set).
+   * Like the gates above, this only swaps a reference read at the top of
+   * `next()` — no generator is rebuilt, so a toggle flips mid-recording without
+   * disturbing oscillator phase or the vigilance walk. A pattern source is only
+   * emitted when one of its `toggles` is in this set (and its state gate passes).
+   */
+  setActivePatterns(active: Set<string>) {
+    this.activePatterns = active;
   }
 
   /** Index of a named electrode, or -1. */

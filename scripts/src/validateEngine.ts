@@ -14,6 +14,7 @@ import { AperiodicSource } from '../../artifacts/eeg-simulator/src/engine/aperio
 import { HopfOscillator, MU_WARP, NO_WARP } from '../../artifacts/eeg-simulator/src/engine/oscillator';
 import { EegEngine, sampleSubject, type EngineOptions } from '../../artifacts/eeg-simulator/src/engine/engine';
 import { electrodeDistanceCm } from '../../artifacts/eeg-simulator/src/engine/forward';
+import type { PatientState } from '../../artifacts/eeg-simulator/src/utils/simTypes';
 import {
   welch, fitAperiodic, std, kurtosis, autocorr, hilbertEnvelope, dfa, spectralPeak, skewness,
 } from './dsp';
@@ -251,6 +252,31 @@ function runEngine(secs: number, opts: EngineOptions = {}) {
   return { eng, data };
 }
 
+// Same as runEngine, but drives a patient state and a set of active pattern
+// toggles first — needed to exercise the pattern sources (sleep, variants, …).
+function runEngineState(
+  secs: number, opts: EngineOptions, state: PatientState, patterns: string[],
+) {
+  const eng = new EegEngine(opts);
+  eng.setPatientState(state);
+  eng.setActivePatterns(new Set(patterns));
+  const n = Math.floor(secs * FS);
+  const nCh = eng.electrodes.length;
+  const data: Float64Array[] = eng.electrodes.map(() => new Float64Array(n));
+  const buf = new Float64Array(nCh);
+  for (let i = 0; i < n; i++) {
+    eng.next(buf);
+    for (let c = 0; c < nCh; c++) data[c][i] = buf[c];
+  }
+  return { eng, data };
+}
+
+/** Robust peak-to-peak: 99th minus 1st percentile, ignoring rare outliers. */
+function pctP2p(x: Float64Array): number {
+  const sorted = Array.from(x).sort((a, b) => a - b);
+  return sorted[Math.floor(0.99 * sorted.length)] - sorted[Math.floor(0.01 * sorted.length)];
+}
+
 function corr(a: Float64Array, b: Float64Array): number {
   let ma = 0, mb = 0;
   for (let i = 0; i < a.length; i++) { ma += a[i]; mb += b[i]; }
@@ -265,6 +291,18 @@ function corr(a: Float64Array, b: Float64Array): number {
 
 function bandPower(x: Float64Array, lo: number, hi: number): number {
   const psd = welch(x, FS, 2048);
+  let s = 0;
+  for (let k = 0; k < psd.freqs.length; k++) {
+    if (psd.freqs[k] >= lo && psd.freqs[k] <= hi) s += psd.power[k];
+  }
+  return s;
+}
+
+// Band power on a SHORT slice: a 512-pt Welch segment (2.05 s) so that a few-second
+// window still holds at least one segment. Coarser frequency resolution than
+// bandPower's 2048, but ictal window checks only compare gross in-band energy.
+function winPower(x: Float64Array, lo: number, hi: number): number {
+  const psd = welch(x, FS, 512);
   let s = 0;
   for (let k = 0; k < psd.freqs.length; k++) {
     if (psd.freqs[k] >= lo && psd.freqs[k] <= hi) s += psd.power[k];
@@ -404,6 +442,397 @@ console.log('\nWhole-signal plausibility:');
   let md = 0;
   for (let i = 0; i < a.length; i++) md = Math.max(md, Math.abs(a[i] - b[i]));
   check('engine reproducible for identical seed', md, 0, 0);
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n=== Step 11: sleep grapho-elements (pattern sources) ===\n');
+
+// The sleep sources are `stateIntrinsic`: a toggle forces them even while awake,
+// which lets us isolate each element against an otherwise-identical awake
+// background (same seed, patterns off) rather than confounding it with the
+// state-dependent shift in background bands. Clean geometry: artifacts and the
+// recording chain are off so we read the source morphology and topography
+// directly. Cz is the vertex; O1 is occipital.
+const SLEEP_OPTS: EngineOptions = { seed: 20, artifacts: false, recordingChain: false, subject: { alphaRms: 12 } };
+const cz = (d: Float64Array[], e: EegEngine) => d[e.indexOf('Cz')];
+const o1c = (d: Float64Array[], e: EegEngine) => d[e.indexOf('O1')];
+
+// Baseline: awake, nothing toggled.
+const base = runEngineState(180, SLEEP_OPTS, 'awake', []);
+const baseCzSigma = bandPower(cz(base.data, base.eng), 12, 15);
+const baseCzP2p = pctP2p(cz(base.data, base.eng));
+const baseO1P2p = pctP2p(o1c(base.data, base.eng));
+
+// A source's own contribution at an electrode = band power with the toggle on
+// minus off, at the same seed (the neural background is byte-identical between
+// the two runs because the pattern generators draw from separate RNG streams).
+// This isolates the source's topography from the state's background — the awake
+// posterior alpha that otherwise swamps a distant electrode's denominator.
+const contrib = (
+  on: { data: Float64Array[]; eng: EegEngine }, name: string, lo: number, hi: number,
+) => bandPower(on.data[on.eng.indexOf(name)], lo, hi) - bandPower(base.data[base.eng.indexOf(name)], lo, hi);
+
+console.log('Spindles (11-16 Hz, vertex-maximal, N2):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['spindles']);
+  const czSigma = bandPower(cz(s.data, s.eng), 12, 15);
+  // Toggle raises sigma-band power at the vertex well above the spindle-free
+  // background, and the spindle's own sigma contribution is central, not occipital.
+  check('Cz sigma power, spindles on / off', czSigma / baseCzSigma, 3, 1e6);
+  check('sigma contribution O1 / Cz (vertex-focal)', contrib(s, 'O1', 12, 15) / contrib(s, 'Cz', 12, 15), -0.1, 0.3);
+}
+
+console.log('\nVertex sharp waves (central, sharp, N1/N2):');
+{
+  const v = runEngineState(180, SLEEP_OPTS, 'awake', ['v-waves']);
+  const czP2p = pctP2p(cz(v.data, v.eng));
+  check('Cz p2p, v-waves on / off', czP2p / baseCzP2p, 1.4, 50);
+  // The v-wave is a ~2 Hz sharp transient; its own low-band contribution is central.
+  check('low-freq contribution O1 / Cz (central-max)', contrib(v, 'O1', 1, 6) / contrib(v, 'Cz', 1, 6), -0.2, 0.5);
+}
+
+console.log('\nK-complexes (large biphasic, frontocentral, N2):');
+{
+  const k = runEngineState(180, SLEEP_OPTS, 'awake', ['k-complex']);
+  const czP2p = pctP2p(cz(k.data, k.eng));
+  const o1P2p = pctP2p(o1c(k.data, k.eng));
+  // The largest sleep transient: it must dominate the vertex.
+  check('Cz p2p, k-complex on / off', czP2p / baseCzP2p, 1.8, 50);
+  check('Cz p2p, k-complex (sanity floor)', czP2p, 90, 700, ' uV');
+  check('Cz p2p / O1 p2p (frontocentral)', czP2p / o1P2p, 1.5, 50);
+}
+
+console.log('\nPOSTS (positive occipital sharp transients, N1/N2):');
+{
+  const p = runEngineState(180, SLEEP_OPTS, 'awake', ['posts']);
+  const o1P2p = pctP2p(o1c(p.data, p.eng));
+  const czP2p = pctP2p(cz(p.data, p.eng));
+  check('O1 p2p, posts on / off', o1P2p / baseO1P2p, 1.3, 50);
+  check('O1 p2p / Cz p2p (occipital-maximal)', o1P2p / czP2p, 1.2, 50);
+}
+
+console.log('\nState gating (N2 shows spindles with no toggle):');
+{
+  // stateIntrinsic: the N2 state alone must bring spindles up, without the user
+  // toggling anything — N2 is not N2 without them.
+  const n2 = runEngineState(180, SLEEP_OPTS, 'n2', []);
+  const n2CzSigma = bandPower(cz(n2.data, n2.eng), 12, 15);
+  check('Cz sigma power, N2 / awake (state-driven)', n2CzSigma / baseCzSigma, 2, 1e6);
+}
+
+console.log('\n=== Step 12: non-epileptiform abnormalities (pattern sources) ===\n');
+
+console.log('Generalised slowing (diffuse theta/delta, no PDR):');
+{
+  const gs = runEngineState(180, SLEEP_OPTS, 'awake', ['gen-slowing']);
+  // (1) The posterior alpha rhythm is abolished — a record with a preserved PDR
+  // is not "slowed". Occipital alpha power collapses vs the same-seed awake
+  // background (`bandGate` mutes the alpha/mu sources to 0.15).
+  const o1AlphaOn = bandPower(o1c(gs.data, gs.eng), 8, 12);
+  const o1AlphaOff = bandPower(o1c(base.data, base.eng), 8, 12);
+  check('O1 alpha power, gen-slowing on / off (PDR lost)', o1AlphaOn / o1AlphaOff, 0, 0.2);
+  // (2) Diffuse slow activity replaces it: low-band (1-7 Hz) power rises markedly
+  // and near-uniformly (broad central source), here read at the vertex.
+  const czSlowOn = bandPower(cz(gs.data, gs.eng), 1, 7);
+  const czSlowOff = bandPower(cz(base.data, base.eng), 1, 7);
+  check('Cz slow (1-7 Hz) power, gen-slowing on / off', czSlowOn / czSlowOff, 1.5, 1e6);
+}
+
+console.log('\nFIRDA (2-3 Hz rhythmic bursts, frontal/midline):');
+{
+  const f = runEngineState(180, SLEEP_OPTS, 'awake', ['firda']);
+  const fzP2pOn = pctP2p(f.data[f.eng.indexOf('Fz')]);
+  const fzP2pOff = pctP2p(base.data[base.eng.indexOf('Fz')]);
+  check('Fz p2p, firda on / off', fzP2pOn / fzP2pOff, 1.3, 50);
+  check('delta (2-3 Hz) contribution Fz / T3 (frontal-max)',
+    contrib(f, 'Fz', 2, 3) / Math.max(contrib(f, 'T3', 2, 3), 1e-6), 1.5, 1e6);
+}
+
+console.log('\nFocal delta, left temporal (polymorphic, lateralised):');
+{
+  const fd = runEngineState(180, SLEEP_OPTS, 'awake', ['focal-delta-temporal']);
+  const t3P2p = pctP2p(fd.data[fd.eng.indexOf('T3')]);
+  const t4P2p = pctP2p(fd.data[fd.eng.indexOf('T4')]);
+  check('T3 p2p / T4 p2p (left-lateralised)', t3P2p / t4P2p, 1.3, 50);
+  const t3DeltaOn = bandPower(fd.data[fd.eng.indexOf('T3')], 1, 3);
+  const t3DeltaOff = bandPower(base.data[base.eng.indexOf('T3')], 1, 3);
+  check('T3 delta power, focal-delta-temporal on / off', t3DeltaOn / t3DeltaOff, 2, 1e6);
+}
+
+console.log('\nTriphasic waves (anterior-predominant, periodic):');
+{
+  const tp = runEngineState(180, SLEEP_OPTS, 'awake', ['triphasic']);
+  const fzP2pOn = pctP2p(tp.data[tp.eng.indexOf('Fz')]);
+  const fzP2pOff = pctP2p(base.data[base.eng.indexOf('Fz')]);
+  const o1P2p = pctP2p(tp.data[tp.eng.indexOf('O1')]);
+  check('Fz p2p, triphasic on / off', fzP2pOn / fzP2pOff, 1.5, 60);
+  check('Fz p2p / O1 p2p (anterior-predominant)', fzP2pOn / o1P2p, 1.3, 50);
+}
+
+console.log('\nGPEDs (generalised periodic discharges, ~1-2 s):');
+{
+  const g = runEngineState(180, SLEEP_OPTS, 'awake', ['gpeds']);
+  const czP2pOn = pctP2p(g.data[g.eng.indexOf('Cz')]);
+  check('Cz p2p, gpeds on / off', czP2pOn / baseCzP2p, 1.8, 60);
+  check('Cz p2p, gpeds (sanity floor)', czP2pOn, 80, 500, ' uV');
+}
+
+console.log('\nLPEDs (left temporal periodic sharp+slow):');
+{
+  const lp = runEngineState(180, SLEEP_OPTS, 'awake', ['lpeds']);
+  const t3P2p = pctP2p(lp.data[lp.eng.indexOf('T3')]);
+  const t4P2p = pctP2p(lp.data[lp.eng.indexOf('T4')]);
+  check('T3 p2p / T4 p2p (left-lateralised)', t3P2p / t4P2p, 1.3, 50);
+  const t3DeltaOn = bandPower(lp.data[lp.eng.indexOf('T3')], 1, 3);
+  const t3DeltaOff = bandPower(base.data[base.eng.indexOf('T3')], 1, 3);
+  check('T3 delta (background slowing) power, lpeds on / off', t3DeltaOn / t3DeltaOff, 1.3, 1e6);
+}
+
+console.log('\n=== Step 13: normal variants (pattern sources) ===\n');
+
+console.log('Mu rhythm (8-12 Hz, arciform, central; tangential -> nulls at C3):');
+{
+  const m = runEngineState(180, SLEEP_OPTS, 'awake', ['mu-rhythm']);
+  // The mu source is tangential (sulcal), like the engine's own background mu, so
+  // its derivative-of-Gaussian field NULLS directly over C3 and peaks at the
+  // flanking electrodes. Probe the central neighbourhood, not C3 itself, and
+  // require it to rise while the posterior rhythm (O1) is left untouched — mu is
+  // a central, not a posterior, rhythm.
+  const bp = (r: typeof base, n: string) => bandPower(r.data[r.eng.indexOf(n)], 8, 12);
+  // Peak flanks of the two tangential sources: both muL (under C3) and muR (under
+  // C4) steer toward the vertex, so Cz catches both superior lobes; T3/T4 catch
+  // the inferior lobes. F3/P3 sit off-axis and only add background-alpha dilution.
+  const centralOn = bp(m, 'Cz') + bp(m, 'T3') + bp(m, 'T4');
+  const centralOff = bp(base, 'Cz') + bp(base, 'T3') + bp(base, 'T4');
+  check('mu central-flank 8-12 power, mu-rhythm on / off', centralOn / centralOff, 1.2, 50);
+  check('mu O1 8-12 power, mu-rhythm on / off (~1, not posterior)',
+    bp(m, 'O1') / bp(base, 'O1'), 0.9, 1.15);
+}
+
+console.log('\nWicket spikes (6-11 Hz bursts, temporal, drowsy only):');
+{
+  const w = runEngineState(180, SLEEP_OPTS, 'drowsy', ['wicket']);
+  const wBase = runEngineState(180, SLEEP_OPTS, 'drowsy', []);
+  // Band power (6-11 Hz), not p2p: the arciform bursts are rhythmic, so their
+  // in-band power lifts clearly even though a single burst barely moves the p2p
+  // against the drowsy background's own transients.
+  const t3On = bandPower(w.data[w.eng.indexOf('T3')], 7, 11);
+  const t3Off = bandPower(wBase.data[wBase.eng.indexOf('T3')], 7, 11);
+  check('T3 7-11 Hz power, wicket on / off (drowsy)', t3On / t3Off, 1.3, 1e6);
+  const wAwake = runEngineState(180, SLEEP_OPTS, 'awake', ['wicket']);
+  const t3AwakeP2p = pctP2p(wAwake.data[wAwake.eng.indexOf('T3')]);
+  check('T3 p2p, wicket toggle while awake (state-gated off)', t3AwakeP2p / baseCzP2p, 0, 1.5);
+}
+
+console.log('\nRMTD (monomorphic ~6 Hz, temporal, drowsy only):');
+{
+  const r = runEngineState(180, SLEEP_OPTS, 'drowsy', ['rmtd']);
+  const rBase = runEngineState(180, SLEEP_OPTS, 'drowsy', []);
+  const t4Theta = bandPower(r.data[r.eng.indexOf('T4')], 5, 7);
+  const t4ThetaBase = bandPower(rBase.data[rBase.eng.indexOf('T4')], 5, 7);
+  check('T4 5-7 Hz power, rmtd on / off (drowsy)', t4Theta / t4ThetaBase, 2, 1e6);
+}
+
+console.log('\nLambda waves (occipito-parietal positive transients):');
+{
+  const l = runEngineState(180, SLEEP_OPTS, 'awake', ['lambda']);
+  const o1P2p = pctP2p(o1c(l.data, l.eng));
+  check('O1 p2p, lambda on / off', o1P2p / baseO1P2p, 1.2, 50);
+  check('lambda contribution O1 / Cz (posterior-max)',
+    contrib(l, 'O1', 4, 10) / contrib(l, 'Cz', 4, 10), 1.0, 1e6);
+}
+
+console.log('\nPSWY (2.5-4.5 Hz, posterior, awake only):');
+{
+  const p = runEngineState(180, SLEEP_OPTS, 'awake', ['pswy']);
+  const o1Slow = bandPower(o1c(p.data, p.eng), 2.5, 4.5);
+  const o1SlowBase = bandPower(o1c(base.data, base.eng), 2.5, 4.5);
+  check('O1 2.5-4.5 Hz power, pswy on / off', o1Slow / o1SlowBase, 1.5, 1e6);
+  const pDrowsy = runEngineState(180, SLEEP_OPTS, 'drowsy', ['pswy']);
+  const o1SlowDrowsy = bandPower(o1c(pDrowsy.data, pDrowsy.eng), 2.5, 4.5);
+  const drowsyBase = runEngineState(180, SLEEP_OPTS, 'drowsy', []);
+  const o1SlowDrowsyBase = bandPower(o1c(drowsyBase.data, drowsyBase.eng), 2.5, 4.5);
+  check('O1 2.5-4.5 Hz power, pswy while drowsy (state-gated off)',
+    o1SlowDrowsy / o1SlowDrowsyBase, 0.7, 1.5);
+}
+
+console.log('\n6 Hz phantom spike-wave (brief, generalised, low-amplitude):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['6hz-sw']);
+  const czP2p = pctP2p(cz(s.data, s.eng));
+  check('Cz p2p, 6hz-sw on / off', czP2p / baseCzP2p, 1.05, 3);
+  check('Cz p2p, 6hz-sw (sanity: phantom = low amplitude)', czP2p, 10, 90, ' uV');
+}
+
+console.log('\n14 & 6 Hz positive bursts (posterior temporal, arciform):');
+{
+  // POS bursts are a drowsy / light-sleep phenomenon (state-gated), so test in
+  // drowsy — where the reduced background alpha also lets the 14 Hz component
+  // stand out. Probe 13.5-15.5 Hz (on the 14 Hz tone, above the alpha shoulder)
+  // at whichever posterior-temporal electrode the source projects to most
+  // strongly; the bursts are brief and low-duty, so the ratio is modest.
+  const b = runEngineState(180, SLEEP_OPTS, 'drowsy', ['14-6-pos']);
+  const bBase = runEngineState(180, SLEEP_OPTS, 'drowsy', []);
+  const rat = (n: string) =>
+    bandPower(b.data[b.eng.indexOf(n)], 13.5, 15.5) / bandPower(bBase.data[bBase.eng.indexOf(n)], 13.5, 15.5);
+  check('T5/T6 13.5-15.5 Hz power, 14-6-pos on / off (drowsy)', Math.max(rat('T5'), rat('T6')), 1.3, 1e6);
+  // Toggling it awake does nothing: the state gate holds it off.
+  const bAwake = runEngineState(180, SLEEP_OPTS, 'awake', ['14-6-pos']);
+  const t6Awake = bandPower(bAwake.data[bAwake.eng.indexOf('T6')], 13.5, 15.5);
+  const t6AwakeBase = bandPower(base.data[base.eng.indexOf('T6')], 13.5, 15.5);
+  check('T6 13.5-15.5 Hz power, 14-6-pos while awake (state-gated off)', t6Awake / t6AwakeBase, 0.8, 1.2);
+}
+
+console.log('\nBETS (very brief <50ms, low-amplitude, temporal, alternating side):');
+{
+  const bt = runEngineState(180, SLEEP_OPTS, 'awake', ['bets']);
+  const t3P2p = pctP2p(bt.data[bt.eng.indexOf('T3')]);
+  const t4P2p = pctP2p(bt.data[bt.eng.indexOf('T4')]);
+  check('T3 p2p, bets on / off', t3P2p / baseCzP2p, 0.3, 3);
+  check('T4 p2p, bets on / off', t4P2p / baseCzP2p, 0.3, 3);
+}
+
+console.log('\n=== Step 14: chewing artifact (pattern source) ===\n');
+{
+  const chew = runEngineState(150, SLEEP_OPTS, 'awake', ['chewing']);
+  const hf = (r: typeof base, n: string) => bandPower(r.data[r.eng.indexOf(n)], 15, 60);
+  // Chewing's burst + masseter EMG is broadband/high-frequency; look well above
+  // the neural bands at both temporal electrodes, on vs. off.
+  const temporalOn = (hf(chew, 'T3') + hf(chew, 'T4')) / 2;
+  const temporalOff = (hf(base, 'T3') + hf(base, 'T4')) / 2;
+  check('temporal (T3/T4) high-freq power, chewing on/off', temporalOn / temporalOff, 4, 500);
+  // Temporal-predominant: bilateral masseter sources dwarf a midline electrode.
+  check('temporal / midline (Cz) high-freq power, chewing on', temporalOn / hf(chew, 'Cz'), 2.5, 200);
+}
+
+console.log('\n=== Step 15: interictal epileptiform (pattern sources) ===\n');
+
+console.log('Focal left temporal spikes (T3-maximal):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['focal-spikes-lt']);
+  const t3P2p = pctP2p(s.data[s.eng.indexOf('T3')]);
+  const baseT3P2p = pctP2p(base.data[base.eng.indexOf('T3')]);
+  check('T3 p2p, focal-spikes-lt on / off', t3P2p / baseT3P2p, 1.5, 150);
+  check('low-freq contrib Fp2 / T3 (focal, not diffuse)',
+    contrib(s, 'Fp2', 1, 20) / contrib(s, 'T3', 1, 20), -0.3, 0.4);
+}
+
+console.log('\nFocal right temporal spikes (T4-maximal):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['focal-spikes-rt']);
+  check('T4 p2p, focal-spikes-rt on / off',
+    pctP2p(s.data[s.eng.indexOf('T4')]) / pctP2p(base.data[base.eng.indexOf('T4')]), 1.5, 150);
+}
+
+console.log('\nFocal left frontal spikes (F3-maximal):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['focal-spikes-lf']);
+  check('F3 p2p, focal-spikes-lf on / off',
+    pctP2p(s.data[s.eng.indexOf('F3')]) / pctP2p(base.data[base.eng.indexOf('F3')]), 1.5, 150);
+  check('low-freq contrib O1 / F3 (focal, not diffuse)',
+    contrib(s, 'O1', 1, 20) / contrib(s, 'F3', 1, 20), -0.3, 0.4);
+}
+
+console.log('\n3 Hz generalised spike-wave (frontally-max, ~3 Hz):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['3hz-gsw']);
+  const peak = spectralPeak(welch(s.data[s.eng.indexOf('Fz')], FS, 4096), 2, 4);
+  check('Fz spectral peak near 3 Hz', peak.freq, 2.6, 3.4, ' Hz');
+  check('Fz p2p, 3hz-gsw on / off',
+    pctP2p(s.data[s.eng.indexOf('Fz')]) / pctP2p(base.data[base.eng.indexOf('Fz')]), 1.5, 200);
+}
+
+console.log('\nPolyspike-wave (frontally-max, JME pattern):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['polyspike-wave']);
+  check('Fz p2p, polyspike-wave on / off',
+    pctP2p(s.data[s.eng.indexOf('Fz')]) / pctP2p(base.data[base.eng.indexOf('Fz')]), 1.5, 200);
+}
+
+console.log('\nBurst-suppression (gate: bimodal amplitude, not additive):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['burst-suppression']);
+  const czBs = s.data[s.eng.indexOf('Cz')], czBase = base.data[base.eng.indexOf('Cz')];
+  check('Cz p2p, burst-suppression on / off', pctP2p(czBs) / pctP2p(czBase), 1.3, 25);
+  // Most of the record sits in the 0.04x suppressed floor, so the 25th percentile
+  // of |amplitude| should collapse vs baseline — this is what distinguishes a
+  // genuine suppression/burst gate from a simple amplitude boost.
+  const p25abs = (x: Float64Array) =>
+    Array.from(x, Math.abs).sort((a, b) => a - b)[Math.floor(0.25 * x.length)];
+  check('Cz 25th-pct |amp|, burst-suppression on / off', p25abs(czBs) / p25abs(czBase), 0, 0.9);
+}
+
+console.log('\nHypsarrhythmia (diffuse desynchronised delta + multifocal spikes):');
+{
+  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['hypsarrhythmia']);
+  const lowOn = (n: string) => bandPower(s.data[s.eng.indexOf(n)], 1, 4);
+  const lowOff = (n: string) => bandPower(base.data[base.eng.indexOf(n)], 1, 4);
+  check('Fz low-freq power, hyps on / off', lowOn('Fz') / lowOff('Fz'), 3, 1e6);
+  check('O1 low-freq power, hyps on / off', lowOn('O1') / lowOff('O1'), 3, 1e6);
+  check('F3 p2p, hyps on / off (multifocal spikes)',
+    pctP2p(s.data[s.eng.indexOf('F3')]) / pctP2p(base.data[base.eng.indexOf('F3')]), 1.8, 150);
+}
+
+console.log('\n=== Step 16: ictal / seizure sources (pattern sources) ===\n');
+
+// Windowed accessor: a slice of one electrode's trace between t0 and t1 seconds.
+// The ictal patterns are scripted evolutions, so their diagnostic features live
+// in specific time windows (onset vs. spread, clonic vs. post-ictal) rather than
+// in a whole-record statistic.
+const win = (r: typeof base, name: string, t0: number, t1: number) =>
+  r.data[r.eng.indexOf(name)].subarray(Math.floor(t0 * FS), Math.floor(t1 * FS));
+
+console.log('Absence (3 Hz generalised spike-wave, frontally-max):');
+{
+  const a = runEngineState(40, SLEEP_OPTS, 'awake', ['absence-ictal']);
+  const aBase = runEngineState(40, SLEEP_OPTS, 'awake', []);
+  const fzOn = bandPower(a.data[a.eng.indexOf('Fz')], 2.5, 3.5);
+  const fzOff = bandPower(aBase.data[aBase.eng.indexOf('Fz')], 2.5, 3.5);
+  check('Fz 2.5-3.5 Hz power, absence on / off', fzOn / fzOff, 2, 1e6);
+  // Generalised but frontally predominant: the discharge is larger at Fz than O1.
+  const o1On = bandPower(a.data[a.eng.indexOf('O1')], 2.5, 3.5);
+  const o1Off = bandPower(aBase.data[aBase.eng.indexOf('O1')], 2.5, 3.5);
+  check('absence 3 Hz contrib Fz / O1 (frontal-max)',
+    (fzOn - fzOff) / Math.max(o1On - o1Off, 1e-6), 1.2, 1e6);
+}
+
+console.log('\nGTC (clonic discharge -> post-ictal suppression):');
+{
+  const gt = runEngineState(60, SLEEP_OPTS, 'awake', ['gtc-ictal']);
+  // Clonic discharge (clock ~10-17 s) is high-amplitude; post-ictal suppression
+  // (clock ~43-49 s, gate at 0.08) is near-flat. The contrast IS the seizure.
+  const clonic = pctP2p(win(gt, 'Fz', 10, 17));
+  const suppressed = pctP2p(win(gt, 'Fz', 43, 49));
+  check('Fz clonic p2p, gtc (high-amplitude discharge)', clonic, 120, 900, ' uV');
+  check('Fz post-ictal p2p / clonic p2p (suppression)', suppressed / clonic, 0, 0.4);
+}
+
+console.log('\nFocal temporal (left onset, late contralateral spread):');
+{
+  const ft = runEngineState(40, SLEEP_OPTS, 'awake', ['focal-temporal-ictal']);
+  // Active window is clock ~5-35 s. Early (clock 8-12 s): onset side only. Late
+  // (clock 28-33 s): contralateral spread has ramped in.
+  const t3Early = winPower(win(ft, 'T3', 8, 12), 3.5, 6);
+  const t4Early = winPower(win(ft, 'T4', 8, 12), 3.5, 6);
+  const t4Late = winPower(win(ft, 'T4', 28, 33), 3.5, 6);
+  check('T3 / T4 theta, focal-temporal early (onset lateralised)',
+    t3Early / Math.max(t4Early, 1e-6), 2, 1e6);
+  check('T4 theta late / early (contralateral spread appears)',
+    t4Late / Math.max(t4Early, 1e-6), 2, 1e6);
+}
+
+console.log('\nFocal frontal (left onset, low-voltage-fast evolving down):');
+{
+  const ff = runEngineState(30, SLEEP_OPTS, 'awake', ['focal-frontal-ictal']);
+  // Active window is clock ~5-20 s. Onset is fast (beta) and evolves DOWN toward
+  // delta, so early carries more beta than late; onset is left-frontal (F3>F4).
+  const f3BetaEarly = winPower(win(ff, 'F3', 7, 11), 14, 20);
+  const f3BetaLate = winPower(win(ff, 'F3', 16, 19), 14, 20);
+  const f4BetaEarly = winPower(win(ff, 'F4', 7, 11), 14, 20);
+  check('F3 / F4 beta, focal-frontal early (onset lateralised)',
+    f3BetaEarly / Math.max(f4BetaEarly, 1e-6), 1.5, 1e6);
+  check('F3 beta early / late (frequency evolves down)',
+    f3BetaEarly / Math.max(f3BetaLate, 1e-6), 1.3, 1e6);
 }
 
 console.log('\n' + '='.repeat(60));

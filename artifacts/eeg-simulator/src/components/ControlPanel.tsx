@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info, ChevronDown, Download, MonitorPlay, Brain } from 'lucide-react';
 import { MONTAGES, Montage } from '../utils/montages';
-import { PatientState } from '../utils/eegGenerator';
+import type { PatientState } from '../utils/simTypes';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { EEGTheme } from '../utils/themes';
 import { exportCSV, exportScreenshot } from '../utils/exportUtils';
@@ -33,6 +33,8 @@ type Props = {
   setTheme: (t: EEGTheme) => void;
   showAnnotations: boolean;
   setShowAnnotations: (b: boolean) => void;
+  graphHover: boolean;
+  setGraphHover: (b: boolean) => void;
   showSpectrum: boolean;
   setShowSpectrum: (b: boolean) => void;
   setQuizMode: (b: boolean) => void;
@@ -61,6 +63,7 @@ export function ControlPanel({
   brainOpacity = 0.8, setBrainOpacity,
   theme, setTheme,
   showAnnotations, setShowAnnotations,
+  graphHover, setGraphHover,
   showSpectrum, setShowSpectrum,
   setQuizMode, setTutorialMode,
   dataBuffer, timeBuffer
@@ -275,6 +278,11 @@ export function ControlPanel({
           <div className="flex items-center justify-between">
             <Label className="text-xs text-slate-300">Show Annotations</Label>
             <Switch checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Graph Hover Highlight</Label>
+            <Switch checked={graphHover} onCheckedChange={setGraphHover} className="scale-90 data-[state=checked]:bg-emerald-600" />
           </div>
 
           <div className="flex items-center justify-between">

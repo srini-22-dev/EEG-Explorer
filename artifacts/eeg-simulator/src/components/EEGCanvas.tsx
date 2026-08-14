@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Montage, ALL_ELECTRODES } from '../utils/montages';
-import { SimSettings } from '../utils/eegGenerator';
+import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
 import { SimulationSource } from '../engine/adapter';
 import { THEMES, EEGTheme } from '../utils/themes';
@@ -25,6 +25,11 @@ type EEGCanvasProps = {
   setIsFrozen: (b: boolean) => void;
   dataBuffer: React.MutableRefObject<number[][]>;
   timeBuffer: React.MutableRefObject<number[]>;
+  // When false, hovering the traces no longer highlights a channel. The 3D
+  // brain electrode hover is independent and unaffected — hovering an electrode
+  // still cross-highlights its channels here, because that comes through
+  // hoveredElectrodes, not this canvas's own mouse-move.
+  graphHover?: boolean;
 };
 
 const PX_PER_MM_X = 4;   // horizontal: pixels per mm
@@ -105,10 +110,10 @@ function getChannelAtY(layout: RowLayout[], y: number, h: number): number | null
 
 type Point = { x: number, y: number, t: number, v: number };
 
-export function EEGCanvas({ 
-  montage, settings, activeEffectsLabel, 
+export function EEGCanvas({
+  montage, settings, activeEffectsLabel,
   theme, showAnnotations, isFrozen, setIsFrozen,
-  dataBuffer, timeBuffer 
+  dataBuffer, timeBuffer, graphHover = true
 }: EEGCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -591,6 +596,7 @@ export function EEGCanvas({
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!graphHover) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -602,6 +608,12 @@ export function EEGCanvas({
   const handleCanvasMouseLeave = () => {
     setHoverChannels(new Set());
   };
+
+  // Turning graph hover off mid-hover would otherwise leave the last hovered
+  // channel stuck highlighted, since no further mouse-move fires to clear it.
+  useEffect(() => {
+    if (!graphHover) setHoverChannels(new Set());
+  }, [graphHover]);
 
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>
