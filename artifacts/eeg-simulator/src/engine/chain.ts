@@ -123,6 +123,17 @@ export class RecordingChain {
   }
 
   /**
+   * Change one channel's defect mid-recording. Electrode contact is not a
+   * property fixed when the montage was applied: a lead comes off, or a
+   * technologist re-gels it, and the channel's character changes from that
+   * moment on. Only the defect changes — the filters, gain and noise stream keep
+   * their state, so nothing else about the channel jumps.
+   */
+  setDefect(c: number, d: ChannelDefect) {
+    this.defects[c] = d;
+  }
+
+  /**
    * Apply the chain in place. `line` is the mains waveform, passed separately
    * because a high-impedance electrode picks up disproportionately more of it.
    */

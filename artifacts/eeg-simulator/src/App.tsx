@@ -2,7 +2,10 @@ import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { ControlPanel } from './components/ControlPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
-import type { SimSettings, PatientState } from './utils/simTypes';
+import type {
+  SimSettings, PatientState, IctalParams, IctalParamsMap, ArtifactParams,
+} from './utils/simTypes';
+import { defaultIctalParamsMap, defaultArtifactParams } from './utils/simTypes';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
 import { QuizMode } from './components/QuizMode';
@@ -34,6 +37,12 @@ const STATE_LOCKED_PATTERNS: Record<string, { target: PatientState; compatible: 
   'spindles':  { target: 'n2', compatible: ['n2'] },
   'wicket':    { target: 'drowsy', compatible: ['drowsy'] },
   'rmtd':      { target: 'drowsy', compatible: ['drowsy'] },
+  // Activation procedures need an awake, cooperative patient: you cannot ask a
+  // sleeping one to overbreathe, and a driving response is judged on an awake
+  // background. Drowsiness is tolerated because patients do drift during a
+  // three-minute procedure.
+  'photic':           { target: 'awake', compatible: ['awake', 'drowsy'] },
+  'hyperventilation': { target: 'awake', compatible: ['awake', 'drowsy'] },
 };
 
 export default function App() {
@@ -42,11 +51,22 @@ export default function App() {
   const [sensitivity,  setSensitivity]  = useState<5 | 7 | 10 | 15>(7);
   const [patientState, setPatientState] = useState<PatientState>('awake');
   const [activePatterns, setActivePatterns] = useState<Set<string>>(new Set());
+  const [ictalParams, setIctalParams] = useState<IctalParamsMap>(defaultIctalParamsMap());
+  const updateIctalParams = (toggleId: string, patch: Partial<IctalParams>) =>
+    setIctalParams(prev => ({ ...prev, [toggleId]: { ...prev[toggleId], ...patch } }));
+
+  // One object for the whole artifact layer rather than one per toggle: unlike
+  // seizures, which run independently and simultaneously, there is only ever one
+  // patient's jaw, heart and mains supply.
+  const [artifactParams, setArtifactParams] = useState<ArtifactParams>(defaultArtifactParams());
+  const updateArtifactParams = (patch: Partial<ArtifactParams>) =>
+    setArtifactParams(prev => ({ ...prev, ...patch }));
 
   const [theme, setTheme] = useState<EEGTheme>('green-paper');
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [graphHover, setGraphHover] = useState(true);
   const [showSpectrum, setShowSpectrum] = useState(false);
+  const [freezeYAxis, setFreezeYAxis] = useState(false);
   const [quizMode, setQuizMode] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
@@ -63,10 +83,12 @@ export default function App() {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
+        if (id === 'eyes-open') next.delete('blink');
       } else {
         next.add(id);
         const lock = STATE_LOCKED_PATTERNS[id];
         if (lock) setPatientState(lock.target);
+        if (id === 'blink') next.add('eyes-open');
       }
       return next;
     });
@@ -96,7 +118,9 @@ export default function App() {
   // patterns reset their clocks), so there is no separate generator state to reset.
   const clearAll = () => setActivePatterns(new Set());
 
-  const settings: SimSettings = { speed, sensitivity, patientState, activePatterns };
+  const settings: SimSettings = {
+    speed, sensitivity, patientState, activePatterns, ictalParams, artifactParams,
+  };
 
   // Build active-effects label list for canvas overlay
   const activeEffects = Array.from(activePatterns).slice(0, 5).join(' · ');
@@ -107,6 +131,8 @@ export default function App() {
         <ControlPanel
           montageId={montageId}         setMontageId={setMontageId}
           activePatterns={activePatterns} togglePattern={togglePattern}
+          ictalParams={ictalParams} updateIctalParams={updateIctalParams}
+          artifactParams={artifactParams} updateArtifactParams={updateArtifactParams}
           speed={speed}                 setSpeed={setSpeed}
           sensitivity={sensitivity}     setSensitivity={setSensitivity}
           patientState={patientState}   setPatientState={setPatientState}
@@ -172,6 +198,8 @@ export default function App() {
               <SpectrumPanel
                 dataBuffer={dataBuffer}
                 montage={MONTAGES[montageId]}
+                freezeYAxis={freezeYAxis}
+                setFreezeYAxis={setFreezeYAxis}
                 settings={settings}
               />
             </Suspense>

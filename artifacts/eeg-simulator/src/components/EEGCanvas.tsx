@@ -4,7 +4,7 @@ import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
 import { SimulationSource } from '../engine/adapter';
 import { THEMES, EEGTheme } from '../utils/themes';
-import { EDUCATIONAL_ANNOTATIONS } from '../utils/annotations';
+import { EDUCATIONAL_ANNOTATIONS, PATTERN_COLOR, REGION_ORDER } from '../utils/annotations';
 import { Pause, Play } from 'lucide-react';
 import {
   subscribe,
@@ -238,6 +238,11 @@ export function EEGCanvas({
       const w = canvas.width;
       const h = canvas.height;
 
+      // Width of the fixed channel-label strip on the left. Declared here rather
+      // than at its first draw (section 6) because the annotation overlay in
+      // section 5b also anchors to it.
+      const lblW = 66;
+
       // 1. Base paper
       ctx.fillStyle = currentTheme.bgEven;
       ctx.fillRect(0, 0, w, h);
@@ -322,6 +327,17 @@ export function EEGCanvas({
       });
       const anyHighlight = highlightedChannels.size > 0;
 
+      // A detached electrode is flattened in the engine, but that only *looks*
+      // dead in a referential montage; in a bipolar chain the two derivations
+      // containing it correctly show the neighbour's activity, so the trace keeps
+      // moving and reads as still connected. Marking the affected rows makes the
+      // detachment legible in any montage without altering the waveform: the row
+      // still draws the true (flat or neighbour) signal, it is just labelled off.
+      const detached = currentSettings.artifactParams.detachedElectrodes;
+      const detachedSet = detached.length ? new Set(detached) : null;
+      const rowDetached = (ch: Montage['channels'][number]) =>
+        !!detachedSet && (detachedSet.has(ch.active) || (!!ch.reference && detachedSet.has(ch.reference)));
+
       for (const row of layout) {
         if (row.channelIndex < 0) continue;
         const i       = row.channelIndex;
@@ -333,6 +349,11 @@ export function EEGCanvas({
         const dimmed  = anyHighlight && !isHighlighted;
 
         const scale = isECG ? pxPerMm * 10 / 1000 : pxPerUV;
+
+        if (rowDetached(ch)) {
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
+          ctx.fillRect(0, (row.centerFrac - row.rowFrac / 2) * h, w, row.rowFrac * h);
+        }
 
         ctx.save();
         if (dimmed) ctx.globalAlpha = 0.4;
@@ -358,66 +379,61 @@ export function EEGCanvas({
           // amplitude at a glance. Only guard against non-finite values —
           // that protects canvas rendering, it does not limit amplitude.
           if (!Number.isFinite(v)) continue;
-          const y = centerY - v;
+          // Clinical EEG is drawn NEGATIVE-UP: a channel whose active input is
+          // more positive than its reference deflects DOWNWARD. That is the
+          // convention every reader is trained on and the reason a blink — which
+          // drives Fp1/Fp2 positive via Bell's phenomenon — reads as a downward
+          // frontopolar deflection (IK-001).
+          //
+          // Canvas y grows downward, so negative-up is `centerY + v`, not
+          // `centerY - v`. This previously read `- v`, which inverted every
+          // trace in the app. It looked right only for the patterns whose
+          // morphology had been written pre-inverted to compensate; the ones
+          // stated in true scalp polarity (V-waves, K-complexes, POSTS, lambda,
+          // triphasics, blink) all rendered upside down. Fixing the convention
+          // here is what lets every generator speak plain physiological sign.
+          const y = centerY + v;
           if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
         ctx.restore();
       }
 
-      // 5b. Annotations
+      // 5b. Annotations — a universal teaching legend. Every active pattern that
+      // has a cue contributes one line; they are sorted so the stack runs in the
+      // same top-to-bottom order as the montage rows they describe, and stacked
+      // with a fixed pitch so no two ever overlap however many are on at once.
+      // The cue names its own channels, so this needs no arrow into the trace.
       if (annotationsRef.current) {
+        const cues = [];
         for (const pattern of currentSettings.activePatterns) {
           const ann = EDUCATIONAL_ANNOTATIONS[pattern];
-          if (ann) {
-            let targetRow = layout.find(r => r.channelIndex >= 0 && (ann.targetRegion === 'all' || montage.channels[r.channelIndex].group === ann.targetRegion));
-            if (!targetRow) targetRow = layout.find(r => r.channelIndex >= 0);
-            
-            if (targetRow) {
-              const y = targetRow.centerFrac * h - 30;
-              const x = w / 2;
+          if (ann) cues.push({ text: ann.text, color: PATTERN_COLOR[pattern] ?? currentTheme.overlayText, order: REGION_ORDER[ann.targetRegion] });
+        }
+        cues.sort((a, b) => a.order - b.order);
 
-              // Set the font before measuring — measureText uses the *current*
-              // font, so measuring first sized the backing box with whatever font
-              // the previous drawing step happened to leave set. One measurement
-              // then serves the box and the right-hand arrow, which re-measured
-              // the same string four more times.
-              ctx.font = '11px sans-serif';
-              const textW = ctx.measureText(ann.text).width;
-
-              ctx.fillStyle = currentTheme.overlayBg;
-              ctx.fillRect(x - 10, y - 10, textW + 20, 20);
-              ctx.fillStyle = currentTheme.overlayText;
-              ctx.textAlign = 'left';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(ann.text, x, y);
-
-              ctx.strokeStyle = currentTheme.overlayText;
-              ctx.beginPath();
-              if (ann.arrowDirection === 'down') {
-                ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 25);
-                ctx.lineTo(x - 3, y + 22); ctx.moveTo(x, y + 25); ctx.lineTo(x + 3, y + 22);
-              } else if (ann.arrowDirection === 'up') {
-                ctx.moveTo(x, y - 10); ctx.lineTo(x, y - 25);
-                ctx.lineTo(x - 3, y - 22); ctx.moveTo(x, y - 25); ctx.lineTo(x + 3, y - 22);
-              } else if (ann.arrowDirection === 'right') {
-                ctx.moveTo(x + textW + 10, y);
-                ctx.lineTo(x + textW + 25, y);
-                ctx.lineTo(x + textW + 22, y - 3);
-                ctx.moveTo(x + textW + 25, y);
-                ctx.lineTo(x + textW + 22, y + 3);
-              } else {
-                ctx.moveTo(x - 10, y); ctx.lineTo(x - 25, y);
-                ctx.lineTo(x - 22, y - 3); ctx.moveTo(x - 25, y); ctx.lineTo(x - 22, y + 3);
-              }
-              ctx.stroke();
-            }
-          }
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const x0 = lblW + 10;       // clear of the label strip
+        const pitch = 21;
+        let cy = 52;                // below the freeze button in the top-left
+        for (const cue of cues) {
+          if (cy > h - 28) break;   // ran out of vertical room; drop the rest
+          const textW = ctx.measureText(cue.text).width;
+          ctx.fillStyle = currentTheme.overlayBg;
+          ctx.fillRect(x0 - 6, cy - 9, textW + 18, 18);
+          // Category-coloured tab on the left edge ties the cue to its control-
+          // panel section at a glance.
+          ctx.fillStyle = cue.color;
+          ctx.fillRect(x0 - 6, cy - 9, 3, 18);
+          ctx.fillStyle = currentTheme.overlayText;
+          ctx.fillText(cue.text, x0 + 4, cy);
+          cy += pitch;
         }
       }
 
       // 6. Channel label strip
-      const lblW = 66;
       ctx.fillStyle = currentTheme.labelBg;
       ctx.fillRect(0, 0, lblW, h);
       ctx.beginPath();
@@ -438,11 +454,22 @@ export function EEGCanvas({
           ctx.fillStyle = 'rgba(255, 215, 0, 0.25)';
           ctx.fillRect(0, row.centerFrac * h - 7, lblW, 14);
         }
-        ctx.fillStyle    = currentTheme.traceColors[ch.group];
+        const isDetached = rowDetached(ch);
+        ctx.fillStyle    = isDetached ? '#f59e0b' : currentTheme.traceColors[ch.group];
         ctx.font         = isHighlighted ? 'bold 10.5px "Courier New", monospace' : 'bold 9.5px "Courier New", monospace';
         ctx.textAlign    = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(ch.label, 4, row.centerFrac * h);
+        // A hollow amber dot at the strip's edge flags the dead electrode — the
+        // one signal that survives dimming and reads at a glance without parsing
+        // the label text.
+        if (isDetached) {
+          ctx.beginPath();
+          ctx.arc(lblW - 6, row.centerFrac * h, 2.6, 0, Math.PI * 2);
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
         ctx.restore();
       }
 
@@ -582,7 +609,11 @@ export function EEGCanvas({
     const pxPerUV = pxPerMm / currentSettings.sensitivity;
     
     const centerY = closestRow.centerFrac * h;
-    const clickV = (centerY - y) / pxPerUV;
+    // Same negative-up mapping the renderer uses (`y = centerY + v`), inverted.
+    // This read `(centerY - y)`, i.e. positive-up: the caliper reported the
+    // opposite sign to the trace it was placed on. The readout shows |Δv| so no
+    // displayed number was wrong, but the stored value was.
+    const clickV = (y - centerY) / pxPerUV;
     
     const point = { x, y, t: clickT, v: clickV };
     
@@ -615,6 +646,33 @@ export function EEGCanvas({
     if (!graphHover) setHoverChannels(new Set());
   }, [graphHover]);
 
+  // Keyboard transport. Freezing the trace and measuring on it is the single
+  // most useful thing a learner can do here, and it was reachable only through
+  // one small unlabelled button. Space is the freeze/resume key every clinical
+  // review system uses; Escape clearing the calipers saves a throwaway third
+  // click just to begin a new measurement (a third click currently restarts the
+  // pair anyway, but only after the old one is still on screen).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      // Never steal the key from a control that already means something by it:
+      // Space types into the pattern search box and activates focused buttons
+      // and switches.
+      if (el && (el.isContentEditable
+        || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName)
+        || el.getAttribute('role') === 'switch')) return;
+      if (e.code === 'Space') {
+        e.preventDefault();          // otherwise the page scrolls
+        setIsFrozen(!frozenRef.current);
+      } else if (e.key === 'Escape' && frozenRef.current) {
+        measurePointsRef.current = { a: null, b: null };
+        setHasMeasurePoints(v => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setIsFrozen]);
+
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>
       <canvas
@@ -632,10 +690,17 @@ export function EEGCanvas({
               ? 'bg-amber-500/90 border-amber-600 text-white hover:bg-amber-600' 
               : 'bg-white/80 border-slate-300 text-slate-700 hover:bg-white'
           }`}
-          title={isFrozen ? 'Resume EEG' : 'Freeze EEG (for measurement)'}
+          title={isFrozen ? 'Resume EEG (Space)' : 'Freeze EEG for measurement (Space)'}
         >
           {isFrozen ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
         </button>
+        {/* The measuring workflow is not guessable from a pause button, so it is
+            spelled out while frozen — that is the only time it applies. */}
+        {isFrozen && (
+          <div className="flex items-center h-8 px-2 rounded bg-black/70 text-[11px] text-amber-200 whitespace-nowrap pointer-events-none">
+            Click two points to measure · Esc clears · Space resumes
+          </div>
+        )}
       </div>
     </div>
   );

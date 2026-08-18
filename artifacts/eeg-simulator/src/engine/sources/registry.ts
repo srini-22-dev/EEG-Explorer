@@ -16,7 +16,7 @@
  */
 
 import type { SourceSpec } from '../forward';
-import type { PatientState } from '../../utils/simTypes';
+import type { PatientState, IctalHemisphere } from '../../utils/simTypes';
 
 /**
  * The rhythm bands the engine's ongoing background is decomposed into. A pattern
@@ -37,6 +37,23 @@ export type SampleContext = {
   enabled: boolean;
   /** Continuous vigilance level, 0..1 (from `state.ts`). */
   vigilance: number;
+  /**
+   * Amplitude multiplier for ictal sources (1 = default severity). Only the
+   * ictal generators (`ictal.ts`) consult this; every other generator ignores it.
+   */
+  ictalIntensity: number;
+  /**
+   * Multiplier on an ictal source's discharge frequency (1 = the textbook rate).
+   * Scales both ends of a pattern's scripted frequency sweep together, so the
+   * evolution keeps its shape. Only the ictal generators consult this.
+   */
+  ictalFrequency: number;
+  /**
+   * Which side a focal seizure originates on. Only consulted by the focal
+   * temporal and focal frontal ictal generators — absence and GTC are
+   * generalised and ignore it.
+   */
+  ictalHemisphere: IctalHemisphere;
 };
 
 export interface PatternGenerator {
@@ -95,6 +112,7 @@ import { NON_EPILEPTIFORM_SOURCES } from './nonEpileptiform';
 import { EPILEPTIFORM_SOURCES } from './epileptiform';
 import { ICTAL_SOURCES } from './ictal';
 import { ARTIFACT_PATTERN_SOURCES } from './artifactsPatterns';
+import { ACTIVATION_SOURCES } from './activation';
 
 /** The complete, ordered list of pattern sources the engine builds into its leadfield. */
 export const PATTERN_SOURCES: PatternSourceDescriptor[] = [
@@ -104,4 +122,5 @@ export const PATTERN_SOURCES: PatternSourceDescriptor[] = [
   ...EPILEPTIFORM_SOURCES,
   ...ICTAL_SOURCES,
   ...ARTIFACT_PATTERN_SOURCES,
+  ...ACTIVATION_SOURCES,
 ];

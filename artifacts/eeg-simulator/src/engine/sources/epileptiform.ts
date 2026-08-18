@@ -15,7 +15,7 @@ import { sourceUnder } from '../forward';
 import { Gaussian } from '../rng';
 import { TransientSource } from './transient';
 import {
-  gaussian, spikeSlowWave, rhythmicSpikeWave, multiToneSignal, hashUnit,
+  gaussian, spikeSlowWave, epileptiformTransient, rhythmicSpikeWave, multiToneSignal, hashUnit,
   DELTA_TONES, DELTA_TONE_NORM,
 } from './morphology';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
@@ -80,6 +80,51 @@ function focalSpikeSource(
 const focalSpikesLt = focalSpikeSource(
   'focal-spikes-lt', 'focal-spikes-lt', ['T3'], 0.25, 3, 7, 185, 130,
 );
+
+// ---------------------------------------------------------------------------
+// Interictal discharge MORPHOLOGY set (IK-012). The four waveforms a reader
+// must tell apart, placed at one left-temporal focus (T3) so they can be
+// compared side by side:
+//   - spike:               a pointed transient 20-70 ms at its base, no slow wave
+//   - sharp wave:          a pointed transient 70-200 ms at its base, no slow wave
+//   - spike-and-slow-wave: a spike followed by an obligatory after-going slow wave
+//   - sharp-and-slow-wave: a sharp wave followed by that same slow wave
+// DURATION separates a spike from a sharp wave; the AFTER-GOING SLOW WAVE is
+// what makes either a "-and-slow-wave" complex. `epileptiformTransient` encodes
+// both axes (sigma sets the base width, ampSlow adds the slow wave). This is
+// distinct from the localised `focal-spikes-*` foci above, which teach phase
+// reversal at a named electrode rather than the morphology distinction.
+// ---------------------------------------------------------------------------
+type MorphEvent = { amp: number };
+
+// Base widths at 10% of peak: sigma 0.007 s -> ~30 ms (spike), 0.025 s -> ~107 ms
+// (sharp wave). Peak spike ~160 uV, sharp ~150 uV, slow wave ~110 uV at T3.
+const SPIKE_SIGMA = 0.007;
+const SHARP_SIGMA = 0.025;
+
+function morphologySource(
+  id: string, sigmaSharp: number, ampSharp: number, ampSlow: number,
+): PatternSourceDescriptor {
+  return {
+    id,
+    toggles: [id],
+    spec: sourceUnder(id, ['T3'], { extent: 0.25 }),
+    make(seed, dt) {
+      const ts = new TransientSource<MorphEvent>(seed, dt, {
+        schedule: { kind: 'periodic', period: 5, jitterFrac: 0.4 }, // ~3-7 s, as the focal foci
+        duration: 1.05,
+        onset: (g) => ({ amp: jit(g, 1, 0.2) }),
+        morphology: (t, e) => epileptiformTransient(t, ampSharp * e.amp, sigmaSharp, ampSlow * e.amp),
+      });
+      return asGenerator(ts);
+    },
+  };
+}
+
+const iedSpike     = morphologySource('ied-spike',      SPIKE_SIGMA, 160, 0);
+const iedSpikeWave = morphologySource('ied-spike-wave', SPIKE_SIGMA, 160, 110);
+const iedSharp     = morphologySource('ied-sharp',      SHARP_SIGMA, 150, 0);
+const iedSharpWave = morphologySource('ied-sharp-wave', SHARP_SIGMA, 150, 110);
 const focalSpikesRt = focalSpikeSource(
   'focal-spikes-rt', 'focal-spikes-rt', ['T4'], 0.25, 3, 7, 185, 130,
 );
@@ -160,10 +205,12 @@ const polyspikeWave: PatternSourceDescriptor = {
           // hashUnit, not per-sample jitter: each polyspike needs ONE amplitude that
           // differs from its neighbours', fixed for its own gaussian bump — a stream
           // re-rolled every sample would scribble noise across the burst instead.
-          v += amp * (0.65 + 0.35 * hashUnit(i + 1)) * gaussian(dt, 0.03 + i * 0.04, 0.015);
+          // Surface-negative polyspikes, positive after-going slow wave — the
+          // same polarity convention as spikeSlowWave (see morphology.ts).
+          v -= amp * (0.65 + 0.35 * hashUnit(i + 1)) * gaussian(dt, 0.03 + i * 0.04, 0.015);
         }
         // The obligatory slow wave following the last polyspike.
-        v -= amp * 0.7 * gaussian(dt, 0.03 + e.count * 0.04 + 0.1, 0.07);
+        v += amp * 0.7 * gaussian(dt, 0.03 + e.count * 0.04 + 0.1, 0.07);
         return v;
       },
     });
@@ -306,6 +353,10 @@ export const EPILEPTIFORM_SOURCES: PatternSourceDescriptor[] = [
   focalSpikesLt,
   focalSpikesRt,
   focalSpikesLf,
+  iedSpike,
+  iedSpikeWave,
+  iedSharp,
+  iedSharpWave,
   gsw3hz,
   polyspikeWave,
   burstSuppression,

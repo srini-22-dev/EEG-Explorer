@@ -56,25 +56,35 @@ export class SimulationSource {
     // toggles, read fresh every sample so a checkbox flips instantly without
     // rebuilding the engine (see `EegEngine.setArtifactGates`'s doc comment).
     // `chewing` is a pattern source, not an engine artifact generator, so it is
-    // handled by `setActivePatterns` below rather than here. `ecgScalp` (cardiac
-    // scalp contamination) and `movement` have no UI toggle at all yet, so they
-    // stay off — leaving them on would reintroduce artifacts nobody asked for on
-    // a supposedly clean background.
+    // handled by `setActivePatterns` below rather than here.
     const ap = settings.activePatterns;
     this.engine.setArtifactGates({
       blink: ap.has('blink'),
+      eyeOpening: ap.has('eye-opening'),
       saccade: ap.has('eye-movement'),
       emg: ap.has('muscle'),
       pop: ap.has('electrode-pop'),
       sweat: ap.has('sweat'),
       line: ap.has('50hz'),
-      ecgScalp: false,
-      movement: false,
+      // Cardiac scalp contamination is distinct from the ECG display channel at
+      // the bottom of the montage: that one is always on and is the *reference*
+      // a reader checks a suspect transient against, while this is the QRS
+      // leaking into the scalp electrodes. Both had to exist before the toggle
+      // was worth exposing, which is why this stayed hard-off until now.
+      ecgScalp: ap.has('ecg-artifact'),
+      movement: ap.has('movement'),
     });
+
+    // The contextual settings behind those same toggles — which electrode pops,
+    // which muscles are contracting, mains frequency, heart rate. The engine
+    // short-circuits on an unchanged object reference, so passing it every
+    // sample costs one comparison.
+    this.engine.setArtifactParams(settings.artifactParams);
 
     // Every non-artifact clinical toggle (sleep, variants, abnormalities,
     // epileptiform, ictal, chewing) is a pattern source inside the engine.
     this.engine.setActivePatterns(ap);
+    this.engine.setIctalParams(settings.ictalParams);
 
     this.engine.next(this.buf);
     this.t += this.dt;

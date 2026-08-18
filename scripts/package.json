@@ -11,6 +11,7 @@
     "decimate-mesh": "tsx ./src/decimateMesh.ts",
     "extract-skin-nifti": "tsx ./src/extractSkinFromNifti.ts",
     "build-head-brain": "tsx ./src/buildHeadAndBrain.ts",
+    "compress-meshes": "tsx ./src/compressMeshes.ts",
     "build-1020": "tsx ./src/build1020.ts",
     "validate": "tsx ./src/validateEngine.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

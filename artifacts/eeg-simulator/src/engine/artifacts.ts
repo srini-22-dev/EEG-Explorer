@@ -48,6 +48,11 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
   // shallow, with the mild lateralisation §8 notes. It sits left of midline.
   heart:       { id: 'heart',       pos: [ 0.55, -2.60, 0.20], orientation: { kind: 'radial' }, extent: 3.2 },
   sweatFrontal:{ id: 'sweatFrontal',pos: [ 0.00, 0.45, 0.62], orientation: { kind: 'radial' }, extent: 0.55 },
+  // Posterior cervical (nuchal) muscles: behind and below the occipital
+  // electrodes, which is why neck tone obscures the posterior dominant rhythm
+  // and can mimic posterior sharp transients. Broad extent because the muscle
+  // sheet is wide and bilateral, unlike the compact temporalis bellies.
+  nuchal:      { id: 'nuchal',      pos: [ 0.00,-0.35,-0.85], orientation: { kind: 'radial' }, extent: 0.50 },
 };
 
 /** Blink: a smooth monophasic lid-movement deflection, 200-400 ms (§8). */
@@ -63,6 +68,8 @@ export class BlinkGenerator {
     this.g = new Gaussian(seed);
     this.schedule(1);
   }
+  /** Blink rate is clinically informative in itself — it rises with anxiety and falls with drowsiness. */
+  setRatePerMin(r: number) { this.ratePerMin = r; }
   private schedule(rateScale: number) {
     const mean = 60 / Math.max(this.ratePerMin * rateScale, 0.5);
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(mean) / this.dt));
@@ -88,6 +95,70 @@ export class BlinkGenerator {
   }
 }
 
+/** Asymmetric lid-movement transient: fast onset, slower return, 0 -> 1 -> 0 over u in [0,1]. */
+function lidShape(u: number): number {
+  return u < 0.35
+    ? 0.5 - 0.5 * Math.cos((Math.PI * u) / 0.35)
+    : 0.5 + 0.5 * Math.cos((Math.PI * (u - 0.35)) / 0.65);
+}
+
+/**
+ * Eye opening/closing maneuver: the slow ocular deflection when a patient opens
+ * their eyes on command and closes them again a few seconds later (§8).
+ *
+ * The eye is a standing dipole with an electropositive cornea. On EYE OPENING
+ * the lids retract and the globe settles from its resting/Bell's-elevated
+ * position toward primary gaze, sweeping the positive cornea inferiorly — away
+ * from Fp1/Fp2, which therefore go negative and render UPWARD on the negative-up
+ * display. This is the mirror image of a blink (BlinkGenerator, IK-001), and
+ * both slower and smaller. On EYE CLOSING the cornea sweeps back up toward Fp by
+ * the same mechanism as a blink, a downward deflection. One maneuver is thus an
+ * upward transient at opening, a baseline plateau while the eyes are held open
+ * (the ocular DC potential re-baselines over ~1 s), and a smaller downward
+ * transient at closing.
+ */
+export class EyeOpeningGenerator {
+  private g: Gaussian;
+  private samplesToNext = 0;
+  private elapsed = -1;
+  private length = 0;
+  private openLen = 0;
+  private closeLen = 0;
+  private amp = 1;
+
+  constructor(seed: number, private dt: number, private ratePerMin = 5) {
+    this.g = new Gaussian(seed);
+    this.schedule();
+  }
+  private schedule() {
+    const mean = 60 / Math.max(this.ratePerMin, 0.2);
+    this.samplesToNext = Math.max(1, Math.round(this.g.exponential(mean) / this.dt));
+  }
+  next(): number {
+    if (--this.samplesToNext <= 0) {
+      this.elapsed = 0;
+      // Eyes are held open for a few seconds between opening and closing.
+      this.length = Math.round(this.g.range(2.5, 4.5) / this.dt);
+      // Lid retraction/settling is slower than a blink's snap-close (~0.2 s).
+      this.openLen = Math.round(this.g.range(0.35, 0.55) / this.dt);
+      this.closeLen = Math.round(this.g.range(0.35, 0.55) / this.dt);
+      this.amp = this.g.logNormal(1, 0.25);
+      this.schedule();
+    }
+    if (this.elapsed < 0) return 0;
+    const i = this.elapsed;
+    this.elapsed++;
+    if (i >= this.length) { this.elapsed = -1; return 0; }
+    // Opening: upward -> negative transient at the start of the maneuver.
+    if (i < this.openLen) return -this.amp * lidShape(i / this.openLen);
+    // Closing: downward -> positive transient at the end, smaller than the open.
+    const startClose = this.length - this.closeLen;
+    if (i >= startClose) return 0.7 * this.amp * lidShape((i - startClose) / this.closeLen);
+    // Eyes held open: baseline.
+    return 0;
+  }
+}
+
 /**
  * Saccade: a gaze step plus the brief extraocular spike potential at onset.
  * The spike is broadband and ~20 ms, and §4 notes it is a major contaminant of
@@ -106,6 +177,7 @@ export class SaccadeGenerator {
     this.g = new Gaussian(seed);
     this.schedule(1);
   }
+  setRatePerMin(r: number) { this.ratePerMin = r; }
   private schedule(rateScale: number) {
     const mean = 60 / Math.max(this.ratePerMin * rateScale, 0.5);
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(mean) / this.dt));
@@ -193,6 +265,11 @@ export class EcgGenerator {
     this.g = new Gaussian(seed);
     this.interval = 60 / bpm;
   }
+  /**
+   * Change the heart rate. The current beat runs to completion first — a rate
+   * change takes effect from the next R wave, as it does physiologically.
+   */
+  setBpm(bpm: number) { this.bpm = bpm; }
   next(): number {
     this.phase += this.dt;
     if (this.phase >= this.interval) {
@@ -226,18 +303,34 @@ export class ElectrodePopGenerator {
   private decay: number;
   /** Index of the channel currently affected, or -1. */
   channel = -1;
+  /** Electrode index pops are confined to, or -1 for "any electrode". */
+  private target = -1;
 
   constructor(seed: number, private dt: number, private nChannels: number, private meanInterval = 45) {
     this.g = new Gaussian(seed);
     this.decay = Math.exp(-dt / 0.35);
     this.schedule();
   }
+  /** Confine pops to one electrode (teaching a single bad lead) or -1 for any. */
+  setTarget(ch: number) { this.target = ch; }
+  setMeanInterval(sec: number) { this.meanInterval = Math.max(0.5, sec); }
+  /**
+   * Fire a pop on `ch` right now, outside the renewal schedule. Used when the
+   * user deliberately breaks an electrode's contact: the pop *is* the moment the
+   * junction fails, so it must be a definite event rather than something to wait
+   * for.
+   */
+  trigger(ch: number) {
+    this.channel = ch;
+    this.level = this.g.logNormal(1.3, 0.3) * (this.g.uniform() < 0.5 ? -1 : 1);
+    this.decay = Math.exp(-this.dt / this.g.range(0.25, 0.5));
+  }
   private schedule() {
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(this.meanInterval) / this.dt));
   }
   next(): number {
     if (--this.samplesToNext <= 0) {
-      this.channel = Math.floor(this.g.uniform() * this.nChannels);
+      this.channel = this.target >= 0 ? this.target : Math.floor(this.g.uniform() * this.nChannels);
       this.level = this.g.logNormal(1, 0.5) * (this.g.uniform() < 0.5 ? -1 : 1);
       this.decay = Math.exp(-this.dt / this.g.range(0.15, 0.6));
       this.schedule();
@@ -282,6 +375,8 @@ export class LineNoiseGenerator {
     this.aF = Math.exp(-dt / 8);
     this.aA = Math.exp(-dt / 4);
   }
+  /** 50 Hz across most of the world, 60 Hz in the Americas — the reader has to recognise both. */
+  setFreq(hz: number) { this.baseFreq = hz; }
   next(): number {
     this.freqState = this.aF * this.freqState + Math.sqrt(1 - this.aF * this.aF) * this.g.next();
     this.ampState = this.aA * this.ampState + Math.sqrt(1 - this.aA * this.aA) * this.g.next();
@@ -305,6 +400,7 @@ export class MovementGenerator {
     this.g = new Gaussian(seed);
     this.schedule();
   }
+  setMeanInterval(sec: number) { this.meanInterval = Math.max(1, sec); }
   private schedule() {
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(this.meanInterval) / this.dt));
   }
@@ -326,11 +422,12 @@ export class MovementGenerator {
 export function artifactSeeds(seed: number) {
   return {
     blink: deriveSeed(seed, 'blink'),
+    eyeOpening: deriveSeed(seed, 'eyeOpening'),
     saccade: deriveSeed(seed, 'saccade'),
     emgL: deriveSeed(seed, 'emgL'),
     emgR: deriveSeed(seed, 'emgR'),
     emgF: deriveSeed(seed, 'emgF'),
-    ecg: deriveSeed(seed, 'ecg'),
+    emgN: deriveSeed(seed, 'emgN'),
     pop: deriveSeed(seed, 'pop'),
     sweat: deriveSeed(seed, 'sweat'),
     line: deriveSeed(seed, 'line'),

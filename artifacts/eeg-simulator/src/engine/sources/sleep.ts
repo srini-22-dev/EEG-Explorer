@@ -81,8 +81,17 @@ const kComplex: PatternSourceDescriptor = {
         sharpDur: jit(g, 0.20, 0.1),
       }),
       morphology: (t, e) => {
-        const sharp = -base * e.aSharp * Math.sin(TWO_PI * 3 * t) * gaussian(t, e.sharpDur, 0.08);
-        const slow = base * 0.9 * e.aSlow * Math.sin(TWO_PI * 0.8 * t) * gaussian(t, 0.70, 0.24);
+        // Signs are inverted relative to how this was first written. Both carrier
+        // sines are past their first half-cycle by the time their envelope peaks
+        // (the 3 Hz sharp term at ~250 ms, the 0.8 Hz slow term at ~940 ms), so
+        // the leading `-`/`+` do NOT set the polarity of the dominant phase — the
+        // complex actually ran small-negative / large-POSITIVE / large-negative,
+        // i.e. a surface-positive sharp component. That is backwards from this
+        // block's own description and from the vertex sharp wave above. As
+        // written now it runs small-positive / large-NEGATIVE / large-positive:
+        // the sharp surface-negative peak followed by the slower positive.
+        const sharp = base * e.aSharp * Math.sin(TWO_PI * 3 * t) * gaussian(t, e.sharpDur, 0.08);
+        const slow = -base * 0.9 * e.aSlow * Math.sin(TWO_PI * 0.8 * t) * gaussian(t, 0.70, 0.24);
         let v = sharp + slow;
         if (t > 0.5 && t < 1.5 && e.aSharp > 1) {
           v += 20 * gaussian(t, 1.0, 0.2) * multiToneSignal(t, SPINDLE_TONES, SPINDLE_TONE_NORM);

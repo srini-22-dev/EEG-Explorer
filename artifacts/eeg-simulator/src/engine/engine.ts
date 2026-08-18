@@ -22,11 +22,11 @@ import { HopfOscillator, MU_WARP, SLOW_WAVE_WARP, type PhaseWarp } from './oscil
 import { BurstyOscillator } from './bursts';
 import { VigilanceState } from './state';
 import {
-  buildLeadfield, sourceUnder, backgroundPatches, tangentialAt,
+  buildLeadfield, sourceUnder, backgroundPatches,
   type SourceSpec, type Leadfield,
 } from './forward';
 import {
-  ARTIFACT_SOURCES, BlinkGenerator, SaccadeGenerator, EmgGenerator, EcgGenerator,
+  ARTIFACT_SOURCES, BlinkGenerator, EyeOpeningGenerator, SaccadeGenerator, EmgGenerator, EcgGenerator,
   ElectrodePopGenerator, SweatGenerator, LineNoiseGenerator, MovementGenerator,
   artifactSeeds,
 } from './artifacts';
@@ -36,7 +36,11 @@ import {
   PATTERN_SOURCES,
   type PatternGenerator, type PatternSourceDescriptor, type SampleContext, type Band,
 } from './sources/registry';
-import type { PatientState } from '../utils/simTypes';
+import type {
+  PatientState, IctalHemisphere, IctalParams, IctalParamsMap,
+  ArtifactParams, EmgRegion,
+} from '../utils/simTypes';
+import { defaultIctalParamsMap, POP_TARGET_ANY } from '../utils/simTypes';
 
 /**
  * Per-subject parameters (briefing §9/§12). Real datasets vary enormously in
@@ -119,6 +123,8 @@ export type GroundTruth = {
 export type ArtifactGates = {
   /** Corneo-retinal blink deflection at the ocular sources. */
   blink: boolean;
+  /** Eye opening/closing maneuver: slow upward (open) then smaller downward (close) at Fp. */
+  eyeOpening: boolean;
   /** Lateral gaze / saccade deflection and its onset spike. */
   saccade: boolean;
   /** Temporalis + frontalis EMG (muscle) shot noise. */
@@ -179,11 +185,12 @@ export class EegEngine {
   private vigilance: VigilanceState;
 
   private blink: BlinkGenerator | null = null;
+  private eyeOpening: EyeOpeningGenerator | null = null;
   private saccade: SaccadeGenerator | null = null;
   private emgL: EmgGenerator | null = null;
   private emgR: EmgGenerator | null = null;
   private emgF: EmgGenerator | null = null;
-  private ecg: EcgGenerator | null = null;
+  private emgN: EmgGenerator | null = null;
   private pop: ElectrodePopGenerator | null = null;
   private sweat: SweatGenerator | null = null;
   private line: LineNoiseGenerator | null = null;
@@ -199,21 +206,40 @@ export class EegEngine {
   private patternGens: PatternGenerator[] = [];
   private patternIndex: number[] = [];
   private activePatterns: Set<string> = new Set();
+  private ictalParams: IctalParamsMap = defaultIctalParamsMap();
 
-  // A dedicated, always-on ECG generator whose full-amplitude morphology drives
-  // the synthetic ECG display channel (not the scalp cardiac contamination that
-  // `this.ecg` feeds into V). Exposed via `ecgChannelValue`, read by the adapter.
+  // One heart. It drives both the synthetic ECG display channel (full amplitude,
+  // exposed via `ecgChannelValue` and read by the adapter) and the scalp cardiac
+  // contamination injected at the `heart` source. These used to be two
+  // independently seeded generators, so the QRS complexes leaking into the scalp
+  // channels did not coincide with the R waves on the ECG trace — which is
+  // exactly the check a reader is taught to make to confirm ECG artifact.
   private ecgChannel!: EcgGenerator;
   ecgChannelValue = 0;
+  /** This sample's raw cardiac waveform, shared by the display channel and the scalp artifact. */
+  private ecgRaw = 0;
 
   private chain: RecordingChain | null = null;
   private defects: ChannelDefect[] = [];
   private sampleIndex = 0;
   private patientState: PatientState = 'awake';
   private gates: ArtifactGates = {
-    blink: true, saccade: true, emg: true, pop: true,
+    blink: true, eyeOpening: true, saccade: true, emg: true, pop: true,
     sweat: true, line: true, ecgScalp: true, movement: true,
   };
+
+  // Contextual artifact settings. Empty by default and read with `??`, so an
+  // engine nobody configures behaves exactly as it did before these existed.
+  private aparams: Partial<ArtifactParams> = {};
+  private lastAparams: Partial<ArtifactParams> | null = null;
+  /** Electrode indices the user has detached, whether or not the flat has taken effect yet. */
+  private detached = new Set<number>();
+  /**
+   * Electrode index -> samples remaining before its channel goes flat. Contact
+   * failure is a pop *followed by* a dead channel; flattening on the same sample
+   * would swallow the pop that announces it.
+   */
+  private detachDelay = new Map<number, number>();
 
   constructor(opts: EngineOptions = {}) {
     const {
@@ -232,18 +258,29 @@ export class EegEngine {
     // ---- source geometry ----
     const bgPatches = backgroundPatches(backgroundPatchCount);
     const rhythmSpecs: SourceSpec[] = [
-      sourceUnder('pdrL', ['O1', 'P3'], { extent: S.smearing * 1.6 }),
-      sourceUnder('pdrR', ['O2', 'P4'], { extent: S.smearing * 1.6 }),
-      // Mu is sensorimotor and largely sulcal, hence tangential — which is why it
-      // is focal at C3/C4 rather than a broad central blob (§4).
-      (() => {
-        const s = sourceUnder('muL', ['C3'], { extent: S.smearing });
-        return { ...s, orientation: tangentialAt(s.pos, [0, 0, 1]) };
-      })(),
-      (() => {
-        const s = sourceUnder('muR', ['C4'], { extent: S.smearing });
-        return { ...s, orientation: tangentialAt(s.pos, [0, 0, 1]) };
-      })(),
+      // The posterior dominant rhythm is maximal at the occiput and read off the
+      // posterior links of an antero-posterior chain — P3-O1/P4-O2 and T5-O1/T6-O2
+      // (IK-006). A bipolar link's amplitude tracks the *spatial gradient* of the
+      // field across it, not the field's height, so getting the alpha onto those
+      // links is a question of where the field is steepest. Anchoring the source
+      // squarely under O1/O2 puts O and P at near-equal gain (the peak of a
+      // Gaussian is flat), so P3-O1/P4-O2 nearly cancel and the steepest gradient —
+      // and thus the visible alpha — lands one link forward at C3-P3/C4-P4, which
+      // is the reported defect. The real medial-occipital (calcarine) generator
+      // sits posterior-inferior to the O1/O2 scalp sites, toward the occipital
+      // pole; anchoring it there (offset inferior in y) drops the scalp field
+      // sharply between O and P, so the O-P links carry the dominant alpha and
+      // T5-O1/T6-O2 stay strong, while C-P retains a smaller share — the clinical
+      // topography. Extent is the plain smearing width; the inferior offset, not a
+      // broadened patch, is what shapes the gradient.
+      sourceUnder('pdrL', ['O1'], { extent: S.smearing, offset: [0, -0.4, 0] }),
+      sourceUnder('pdrR', ['O2'], { extent: S.smearing, offset: [0, -0.4, 0] }),
+      // Radial (default orientation): a tangential field is zero at its own
+      // anchor point by construction, which would put this always-on background
+      // mu's peak off at F3/F4/Fz instead of C3/C4. The deliberately tangential,
+      // toggleable arch-shaped mu variant lives separately in sources/variants.ts.
+      sourceUnder('muL', ['C3'], { extent: S.smearing }),
+      sourceUnder('muR', ['C4'], { extent: S.smearing }),
       sourceUnder('betaL', ['C3'], { extent: S.smearing * 1.1 }),
       sourceUnder('betaR', ['C4'], { extent: S.smearing * 1.1 }),
       sourceUnder('betaF', ['Fz', 'F3', 'F4'], { extent: S.smearing * 1.4 }),
@@ -350,11 +387,12 @@ export class EegEngine {
       const A = artifactSeeds(seed);
       const b = S.artifactBurden;
       this.blink = new BlinkGenerator(A.blink, this.dt, 16 * b);
+      this.eyeOpening = new EyeOpeningGenerator(A.eyeOpening, this.dt, 5 * b);
       this.saccade = new SaccadeGenerator(A.saccade, this.dt, 25 * b);
       this.emgL = new EmgGenerator(A.emgL, this.dt);
       this.emgR = new EmgGenerator(A.emgR, this.dt);
       this.emgF = new EmgGenerator(A.emgF, this.dt);
-      this.ecg = new EcgGenerator(A.ecg, this.dt);
+      this.emgN = new EmgGenerator(A.emgN, this.dt);
       this.pop = new ElectrodePopGenerator(A.pop, this.dt, this.electrodes.length, 60 / b);
       this.sweat = new SweatGenerator(A.sweat, this.dt);
       this.line = new LineNoiseGenerator(A.line, this.dt, S.lineFreq);
@@ -368,6 +406,7 @@ export class EegEngine {
 
     // Independent of the `artifacts` flag: the ECG display channel is a first-class
     // recorded trace, not an artifact, so it exists even when scalp artifacts are off.
+    // The scalp cardiac artifact reads this same generator (see `ecgRaw`).
     this.ecgChannel = new EcgGenerator(deriveSeed(seed, 'ecgChannel'), this.dt);
 
     this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1 };
@@ -388,7 +427,9 @@ export class EegEngine {
     // emitted (sampleIndex increments at the end of next()), so the first sample
     // is evaluated at t = dt, aligning patterns with groundTruth.t.
     const tNow = (this.sampleIndex + 1) * this.dt;
-    const baseCtx = { t: tNow, dt: this.dt, state: this.patientState, vigilance: this.vigilance.value };
+    const baseCtx = {
+      t: tNow, dt: this.dt, state: this.patientState, vigilance: this.vigilance.value,
+    };
     let neuralGate = 1;
     // Per-band multipliers on the ongoing background, for patterns that reshape the
     // spectrum (gen-slowing abolishing the alpha PDR). 1 = untouched; band gates
@@ -404,7 +445,14 @@ export class EegEngine {
       const enabled = d.stateIntrinsic
         ? toggleOn || stateInList
         : toggleOn && (d.states == null || stateInList);
-      const ctx: SampleContext = { ...baseCtx, enabled };
+      const ip = this.ictalParams[d.toggles[0]];
+      const ctx: SampleContext = {
+        ...baseCtx,
+        enabled,
+        ictalIntensity: ip?.intensity ?? 1,
+        ictalFrequency: ip?.frequency ?? 1,
+        ictalHemisphere: ip?.hemisphere ?? 'left',
+      };
       const gen = this.patternGens[i];
       V[this.patternIndex[i]] = gen.next(ctx);
       if (enabled && gen.gate) neuralGate *= gen.gate(ctx);
@@ -438,31 +486,48 @@ export class EegEngine {
       V[i] = v * neuralGate * bandGate[n.band];
     }
 
+    // One cardiac cycle per sample, advanced before the artifact block so the
+    // scalp contamination and the ECG display channel are the same heartbeat.
+    this.ecgRaw = this.ecgChannel.next();
+
     let lineVal = 0;
     if (this.blink) {
       const ix = this.artifactIndex;
       const g = this.gates;
+      const p = this.aparams;
       // Every generator advances unconditionally every sample — gating only
       // decides whether its output is added to V. That keeps each renewal
       // process's own statistics (rate, phase, decay) running underneath a
       // disabled toggle, so re-enabling it resumes rather than restarts.
       const blinkV = this.blink.next(gains.ocularRate) * 110;
       if (g.blink) { V[ix.eyeL] += blinkV; V[ix.eyeR] += blinkV; }
+      // Eye opening rides the same ocular sources as the blink but at half the
+      // amplitude and opposite sign on opening (see EyeOpeningGenerator): opening
+      // drives Fp negative -> upward, closing a smaller downward transient.
+      const openV = this.eyeOpening!.next() * 55;
+      if (g.eyeOpening) { V[ix.eyeL] += openV; V[ix.eyeR] += openV; }
       const saccadeV = this.saccade!.next(gains.ocularRate) * 45;
       if (g.saccade) V[ix.gaze] += saccadeV;
-      const emgLV = this.emgL!.next(gains.emg) * 9 * gains.emg;
-      const emgRV = this.emgR!.next(gains.emg) * 9 * gains.emg;
-      const emgFV = this.emgF!.next(gains.emg) * 6 * gains.emg;
+      // Which muscles are tense is a separate question from how hard they are
+      // contracting, so region selection and severity are separate controls.
+      const emgSev = p.emgSeverity ?? 1;
+      const regions = p.emgRegions;
+      const on = (r: EmgRegion) => regions == null || regions.includes(r);
+      const emgLV = this.emgL!.next(gains.emg) * 9 * gains.emg * emgSev;
+      const emgRV = this.emgR!.next(gains.emg) * 9 * gains.emg * emgSev;
+      const emgFV = this.emgF!.next(gains.emg) * 6 * gains.emg * emgSev;
+      const emgNV = this.emgN!.next(gains.emg) * 8 * gains.emg * emgSev;
       if (g.emg) {
-        V[ix.temporalisL] += emgLV;
-        V[ix.temporalisR] += emgRV;
-        V[ix.frontalis] += emgFV;
+        if (on('temporalisL')) V[ix.temporalisL] += emgLV;
+        if (on('temporalisR')) V[ix.temporalisR] += emgRV;
+        if (on('frontalis'))   V[ix.frontalis]   += emgFV;
+        if (on('nuchal'))      V[ix.nuchal]      += emgNV;
       }
-      const heartV = this.ecg!.next() * 9;
+      const heartV = this.ecgRaw * 9;
       if (g.ecgScalp) V[ix.heart] += heartV;
-      const sweatV = this.sweat!.next() * 7;
+      const sweatV = this.sweat!.next() * 7 * (p.sweatSeverity ?? 1);
       if (g.sweat) V[ix.sweatFrontal] += sweatV;
-      const mv = this.movement!.next() * 60;
+      const mv = this.movement!.next() * 60 * (p.movementSeverity ?? 1);
       if (g.movement) { V[ix.eyeL] += mv; V[ix.eyeR] += mv; }
       const lineRaw = this.line!.next();
       lineVal = g.line ? lineRaw : 0;
@@ -487,10 +552,27 @@ export class EegEngine {
       if (this.gates.pop && c >= 0 && c < out.length) out[c] += popV;
     }
 
-    if (this.chain) this.chain.process(out, lineVal, this.subject.lineAmp);
+    // A detached electrode does not go dead the instant the pop starts: the pop
+    // IS the contact failing, and it rings for a few hundred milliseconds
+    // afterwards. Only once it has decayed does the channel fall to the noise
+    // floor, which is what `ChannelDefect.flat` models.
+    if (this.detachDelay.size > 0 && this.chain) {
+      for (const [c, left] of this.detachDelay) {
+        if (left <= 1) {
+          this.chain.setDefect(c, { kind: 'flat' });
+          this.detachDelay.delete(c);
+        } else {
+          this.detachDelay.set(c, left - 1);
+        }
+      }
+    }
 
-    // Synthetic ECG display channel: advanced once per sample, full amplitude.
-    this.ecgChannelValue = this.ecgChannel.next() * 500;
+    if (this.chain) this.chain.process(out, lineVal, this.aparams.lineAmpUv ?? this.subject.lineAmp);
+
+    // Synthetic ECG display channel: same waveform as the scalp contamination
+    // above, at the amplitude a real ECG lead records rather than the fraction
+    // that reaches the scalp.
+    this.ecgChannelValue = this.ecgRaw * 500;
 
     this.sampleIndex++;
     this.groundTruth.t = this.sampleIndex * this.dt;
@@ -530,6 +612,76 @@ export class EegEngine {
    */
   setActivePatterns(active: Set<string>) {
     this.activePatterns = active;
+  }
+
+  /**
+   * Set the ictal severity multiplier, discharge-frequency multiplier and
+   * focal-seizure hemisphere, independently
+   * per ictal toggle id. Cheap by design, same as the setters above: values are
+   * only read at the top of `next()`, so any can change mid-recording without
+   * resetting a seizure's epoch clock.
+   */
+  setIctalParams(params: Partial<Record<string, Partial<IctalParams>>>) {
+    for (const key of Object.keys(params)) {
+      const p = params[key]!;
+      const cur = this.ictalParams[key] ?? { intensity: 1, frequency: 1, hemisphere: 'left' as IctalHemisphere };
+      this.ictalParams[key] = {
+        intensity: p.intensity ?? cur.intensity,
+        frequency: p.frequency ?? cur.frequency,
+        hemisphere: p.hemisphere ?? cur.hemisphere,
+      };
+    }
+  }
+
+  /**
+   * Set the contextual artifact settings (rates, severities, which muscles are
+   * contracting, which electrode pops, which electrodes have come off).
+   *
+   * Called every sample by the adapter with the UI's params object, so it
+   * short-circuits on an unchanged reference: the fields that need a generator
+   * touched — rates, mains frequency, heart rate, detachment — must not be
+   * re-applied 250 times a second. Anything omitted is left as the generator was
+   * constructed, which is why a caller that never calls this (validateEngine)
+   * sees the engine's original behaviour.
+   */
+  setArtifactParams(params: Partial<ArtifactParams>) {
+    if (params === this.lastAparams) return;
+    this.lastAparams = params;
+    Object.assign(this.aparams, params);
+    const p = this.aparams;
+
+    if (p.blinkRatePerMin != null) this.blink?.setRatePerMin(p.blinkRatePerMin);
+    if (p.saccadeRatePerMin != null) this.saccade?.setRatePerMin(p.saccadeRatePerMin);
+    if (p.popRatePerMin != null) this.pop?.setMeanInterval(60 / Math.max(p.popRatePerMin, 0.05));
+    if (p.movementRatePerMin != null) this.movement?.setMeanInterval(60 / Math.max(p.movementRatePerMin, 0.05));
+    if (p.lineFreq != null) this.line?.setFreq(p.lineFreq);
+    if (p.ecgBpm != null) this.ecgChannel.setBpm(p.ecgBpm);
+    if (p.popTarget != null) {
+      this.pop?.setTarget(p.popTarget === POP_TARGET_ANY ? -1 : this.indexOf(p.popTarget));
+    }
+
+    // Detachment is declarative: this list is the set of electrodes currently
+    // off. Entering the list breaks contact (pop, then flat); leaving it is the
+    // technologist re-gelling the electrode, which restores whatever contact
+    // quality this subject's electrode had to begin with.
+    if (p.detachedElectrodes != null) {
+      const want = new Set<number>();
+      for (const name of p.detachedElectrodes) {
+        const c = this.indexOf(name);
+        if (c >= 0) want.add(c);
+      }
+      for (const c of want) {
+        if (this.detached.has(c)) continue;
+        this.pop?.trigger(c);
+        this.detachDelay.set(c, Math.max(1, Math.round(0.8 / this.dt)));
+      }
+      for (const c of this.detached) {
+        if (want.has(c)) continue;
+        this.detachDelay.delete(c);
+        this.chain?.setDefect(c, this.defects[c] ?? { kind: 'ok' });
+      }
+      this.detached = want;
+    }
   }
 
   /** Index of a named electrode, or -1. */

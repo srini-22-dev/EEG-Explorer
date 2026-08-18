@@ -16,6 +16,17 @@
 
 import { Gaussian } from '../rng';
 
+/**
+ * Lead-in (seconds) before the FIRST event after a toggle is switched on. A
+ * newly-enabled event source would otherwise wait a full inter-event interval —
+ * up to several seconds for a spike focus — before anything appeared, which
+ * reads as the toggle doing nothing. The timing of the first event relative to
+ * an arbitrary toggle press is not a physiological quantity (the pattern's RATE,
+ * which is, lives in the inter-event interval and is untouched), so showing it
+ * promptly is purely a UI-latency improvement.
+ */
+const FIRST_EVENT_LEAD = 0.3;
+
 export type TransientSchedule =
   /** Fixed rate with optional proportional jitter on each interval. */
   | { kind: 'periodic'; period: number; jitterFrac?: number }
@@ -94,8 +105,13 @@ export class TransientSource<E = void> {
     this.clock += this.dt;
 
     if (this.nextOnset < 0) {
-      // First enabled sample: schedule the first event a short, seeded delay out.
-      this.nextOnset = this.clock + this.drawInterval();
+      // First enabled sample after a toggle-on: show the first event almost
+      // immediately (FIRST_EVENT_LEAD) rather than after a full, possibly
+      // multi-second, inter-event interval. Every SUBSEQUENT onset is scheduled
+      // by drawInterval() when the current event ends, so the pattern's rate is
+      // unchanged — only the wait for the very first event is shortened. No RNG
+      // draw is consumed here, so the drawn interval sequence stays identical.
+      this.nextOnset = this.clock + FIRST_EVENT_LEAD;
     }
 
     if (this.onset < 0 && this.clock >= this.nextOnset) {

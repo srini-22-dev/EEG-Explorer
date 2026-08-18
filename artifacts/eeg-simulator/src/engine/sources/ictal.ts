@@ -31,6 +31,25 @@
  * uses for interictal transients, just hand-rolled here because a seizure's
  * state machine has more than one phase.
  *
+ * Three settings-driven knobs, read from `ctx` every sample (`registry.ts`):
+ *
+ *  - `ictalIntensity` is a plain amplitude multiplier on a generator's whole
+ *    output — severity changing how strong the discharge is, not the scripted
+ *    timeline (frequency evolution, phase durations, post-ictal suppression
+ *    depth) that carries the diagnosis.
+ *  - `ictalFrequency` multiplies BOTH endpoints of a generator's scripted
+ *    frequency sweep. Scaling both together is deliberate: the diagnosis lives
+ *    in the proportional slowing across the event, not in the absolute rate, so
+ *    the evolution has to survive the knob. It is applied only where a discharge
+ *    rate is written down — not to post-ictal delta, which is not a discharge,
+ *    and not to any phase duration.
+ *  - `ictalHemisphere` selects which side a FOCAL seizure (temporal, frontal)
+ *    originates on; absence and GTC are generalised and ignore it. Temporal
+ *    and frontal each have a left- and a right-sided source descriptor, and
+ *    at each sample the one matching `ictalHemisphere` plays the onset role
+ *    while the other plays whatever its non-onset role is (contralateral
+ *    spread for temporal, silent for frontal — see below).
+ *
  * Every evolving-frequency phase integrates frequency into phase (`sweepPhase`
  * or the legacy inline `cycles = f0*tau - (f0-f1)*tau^2/(2T)` form) rather than
  * `sin(2*pi*f(t)*t)` with a time-varying f — see `sweepPhase`'s comment in
@@ -51,6 +70,7 @@ import {
   DELTA_TONES, DELTA_TONE_NORM,
 } from './morphology';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
+import type { IctalHemisphere } from '../../utils/simTypes';
 
 /** Per-event multiplicative jitter, matching the legacy `jitter(base, frac)`. */
 const jit = (g: Gaussian, base: number, frac: number): number =>
@@ -97,15 +117,21 @@ const absenceIctal: PatternSourceDescriptor = {
 
         const cycle = elapsed % (dur + ABSENCE_GAP);
         if (cycle < dur) {
-          const freqNow = 3.2 - (cycle / dur) * 0.7; // slows 3.2 -> ~2.5 Hz
+          // Both sweep endpoints carry the same multiplier, so the discharge
+          // still slows by the same PROPORTION over its course whatever rate the
+          // slider picks. `cycles` is the time-integral of `freqNow`, so it takes
+          // the multiplier too — scaling one without the other would desynchronise
+          // phase from the spike-wave interval.
+          const F = ctx.ictalFrequency;
+          const freqNow = F * (3.2 - (cycle / dur) * 0.7); // slows 3.2 -> ~2.5 Hz
           const cycleLen = 1 / freqNow;
-          const cycles = 3.2 * cycle - 0.7 * cycle * cycle / (2 * dur);
+          const cycles = F * (3.2 * cycle - 0.7 * cycle * cycle / (2 * dur));
           const dt = (cycles % 1) * cycleLen;
-          return rhythmicSpikeWave(dt, cycleLen, 220, 220 * 0.7);
+          return ctx.ictalIntensity * rhythmicSpikeWave(dt, cycleLen, 220, 220 * 0.7);
         }
         if (cycle < dur + 2) {
           const fade = 1 - (cycle - dur) / 2;
-          return 40 * fade * multiToneSignal(elapsed, DELTA_TONES, DELTA_TONE_NORM);
+          return ctx.ictalIntensity * 40 * fade * multiToneSignal(elapsed, DELTA_TONES, DELTA_TONE_NORM);
         }
         return 0;
       },
@@ -167,24 +193,26 @@ const gtcIctal: PatternSourceDescriptor = {
 
         const cycle = el2 % GTC_PERIOD;
 
+        const I = ctx.ictalIntensity;
         if (cycle < 4) {
           const env = Math.pow(cycle / 4, 2);
-          return env * 30 * multiToneSignal(el2, BETA_TONES, BETA_TONE_NORM, 0, 1.2);
+          return I * env * 30 * multiToneSignal(el2, BETA_TONES, BETA_TONE_NORM, 0, 1.2);
         }
         if (cycle < 18) {
           const tau = cycle - 4;
           const pos = tau / 14;
-          const freqNow = 3 - pos * 1.5; // slows 3 -> 1.5 Hz
-          const cycles = 3 * tau - 1.5 * tau * tau / 28;
+          const F = ctx.ictalFrequency;
+          const freqNow = F * (3 - pos * 1.5); // slows 3 -> 1.5 Hz
+          const cycles = F * (3 * tau - 1.5 * tau * tau / 28);
           const cycleLen = 1 / freqNow;
           const amp = 100 + pos * 100;
           let v = rhythmicSpikeWave((cycles % 1) * cycleLen, cycleLen, amp, amp * 0.6);
           v += amp * 0.3 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM);
-          return v;
+          return I * v;
         }
         if (cycle < 35) {
           const env = 1 - (cycle - 18) / 17;
-          return env * 120 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM, -0.5);
+          return I * env * 120 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM, -0.5);
         }
         if (cycle < 50) {
           if (pidNext < 0 || clock >= pidNext) {
@@ -194,13 +222,13 @@ const gtcIctal: PatternSourceDescriptor = {
           }
           const dtb = clock - pidOnset;
           if (dtb >= 0 && dtb < 1.2) {
-            return 25 * pidAmp * gaussian(dtb, 0.5, 0.3) * multiToneSignal(dtb, DELTA_TONES, DELTA_TONE_NORM);
+            return I * 25 * pidAmp * gaussian(dtb, 0.5, 0.3) * multiToneSignal(dtb, DELTA_TONES, DELTA_TONE_NORM);
           }
           return 0;
         }
         if (cycle < 70) {
           const pos = (cycle - 50) / 20;
-          return pos * 30 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM);
+          return I * pos * 30 * multiToneSignal(el2, DELTA_TONES, DELTA_TONE_NORM);
         }
         return 0;
       },
@@ -218,24 +246,27 @@ const gtcIctal: PatternSourceDescriptor = {
 };
 
 // ---------------------------------------------------------------------------
-// Focal (temporal lobe) seizure — LEFT temporal onset. The onset is
-// deliberately SUBTLE: rhythmic theta barely above background that builds to
-// full amplitude across the active window — exactly what makes a real
-// temporal seizure onset easy to miss and worth teaching. Frequency evolves
-// 6 Hz -> 3.5 Hz across the same window via `sweepPhase` (never
-// `sin(2*pi*f(t)*t)` with a moving f). A left-onset seizure classically
-// spreads to the contralateral (right) temporal region only once it is
-// established, not from the first second: modelled as a SECOND descriptor
-// under T4, same toggle, lower amplitude, whose gain stays at 0 for the first
-// half of the active window and then ramps in. Both descriptors run the same
-// fixed (non-random) timeline, so — with no RNG in either — they stay in
-// lock-step as one seizure seen from two electrodes.
+// Focal (temporal lobe) seizure — onset side selectable via `ctx.ictalHemisphere`
+// (§ header). The onset is deliberately SUBTLE: rhythmic theta barely above
+// background that builds to full amplitude across the active window — exactly
+// what makes a real temporal seizure onset easy to miss and worth teaching.
+// Frequency evolves 6 Hz -> 3.5 Hz across the same window via `sweepPhase`
+// (never `sin(2*pi*f(t)*t)` with a moving f). An onset seizure classically
+// spreads to the contralateral temporal region only once it is established,
+// not from the first second: modelled as a SECOND descriptor under the other
+// side's electrode, same toggle, lower amplitude, whose gain stays at 0 for
+// the first half of the active window and then ramps in. Both descriptors run
+// the same fixed (non-random) timeline, so — with no RNG in either — they
+// stay in lock-step as one seizure seen from two electrodes; only which one
+// is playing the onset role swaps with `ictalHemisphere`.
 // ---------------------------------------------------------------------------
 const FTEMP_PERIOD = 90;
 const FTEMP_ACTIVE = 30;
 const FTEMP_DELAY = 5;
+const FTEMP_AMP_ONSET = 120;
+const FTEMP_AMP_SPREAD = 60;
 
-function ftempGenerator(ampPeak: number, contralateral: boolean) {
+function ftempGenerator(side: IctalHemisphere) {
   return (): PatternGenerator => {
     let clock = 0;
     let start = -1;
@@ -250,12 +281,16 @@ function ftempGenerator(ampPeak: number, contralateral: boolean) {
         if (cycle >= FTEMP_ACTIVE) return 0;
 
         const pos = cycle / FTEMP_ACTIVE;
-        // Contralateral spread starts at the halfway point and ramps in over
-        // the second half; the onset side is present (scaled by the subtle
-        // amplitude build) from the start.
-        const spreadFactor = contralateral ? Math.max(0, (pos - 0.5) * 2) : 1.0;
-        const amp = ampPeak * (0.1 + 0.9 * pos) * spreadFactor;
-        const phase = sweepPhase(cycle, 6, 3.5, FTEMP_ACTIVE, THETA_TONE_CENTER);
+        // Whichever side matches the selected onset hemisphere plays the onset
+        // role (present from the start, scaled by the subtle amplitude build);
+        // the other plays contralateral spread — silent until the halfway
+        // point, then ramping in at lower amplitude.
+        const isOnset = ctx.ictalHemisphere === side;
+        const ampPeak = isOnset ? FTEMP_AMP_ONSET : FTEMP_AMP_SPREAD;
+        const spreadFactor = isOnset ? 1.0 : Math.max(0, (pos - 0.5) * 2);
+        const amp = ctx.ictalIntensity * ampPeak * (0.1 + 0.9 * pos) * spreadFactor;
+        const F = ctx.ictalFrequency;
+        const phase = sweepPhase(cycle, 6 * F, 3.5 * F, FTEMP_ACTIVE, THETA_TONE_CENTER);
         return amp * multiToneSignal(phase, THETA_TONES, THETA_TONE_NORM);
       },
     };
@@ -266,43 +301,48 @@ const focalTemporalL: PatternSourceDescriptor = {
   id: 'focal-temporal-ictal-l',
   toggles: ['focal-temporal-ictal'],
   spec: sourceUnder('focal-temporal-ictal-l', ['T3'], { extent: 0.35 }),
-  make: ftempGenerator(120, false),
+  make: ftempGenerator('left'),
 };
 
 const focalTemporalR: PatternSourceDescriptor = {
   id: 'focal-temporal-ictal-r',
   toggles: ['focal-temporal-ictal'],
   spec: sourceUnder('focal-temporal-ictal-r', ['T4'], { extent: 0.35 }),
-  make: ftempGenerator(60, true),
+  make: ftempGenerator('right'),
 };
 
 // ---------------------------------------------------------------------------
-// Focal (frontal lobe) seizure — LEFT frontal onset with LOW-VOLTAGE FAST
-// onset, the diagnostic hallmark of frontal lobe epilepsy: a near-invisible
-// ~18 Hz beta rhythm that builds in amplitude while its frequency evolves DOWN
-// to ~3 Hz (again via `sweepPhase`, never `sin(2*pi*f(t)*t)` with a moving f).
-// Short and explosive — ~15s active out of a 70s cycle — unlike the temporal
+// Focal (frontal lobe) seizure — onset side selectable via `ctx.ictalHemisphere`,
+// same convention as the temporal pair above. LOW-VOLTAGE FAST onset is the
+// diagnostic hallmark of frontal lobe epilepsy: a near-invisible ~18 Hz beta
+// rhythm that builds in amplitude while its frequency evolves DOWN to ~3 Hz
+// (again via `sweepPhase`, never `sin(2*pi*f(t)*t)` with a moving f). Short
+// and explosive — ~15s active out of a 70s cycle — unlike the temporal
 // seizure's slower build. Frontal seizures characteristically produce
 // movement (hypermotor/tonic posturing), so a small muscle/movement
 // contamination term grows in step with the seizure; the legacy code drew
 // this from unseeded `Math.random()` every sample, ported here to a held
 // `Gaussian` stream so the recording stays reproducible from its seed.
+//
+// Unlike the temporal pair, frontal seizures are NOT modelled with spread to
+// the other side — the non-onset descriptor stays fully silent rather than
+// ramping in at reduced amplitude, since this engine has no frontal-spread
+// timeline to script. Two descriptors (F3, F4) exist only so a source is
+// available under either hemisphere; only the one matching `ictalHemisphere`
+// ever produces output.
 // ---------------------------------------------------------------------------
 const FFRONT_PERIOD = 70;
 const FFRONT_ACTIVE = 15;
 const FFRONT_DELAY = 5;
 
-const focalFrontalIctal: PatternSourceDescriptor = {
-  id: 'focal-frontal-ictal',
-  toggles: ['focal-frontal-ictal'],
-  spec: sourceUnder('focal-frontal-ictal', ['F3'], { extent: 0.4 }),
-  make(seed) {
+function ffrontGenerator(side: IctalHemisphere) {
+  return (seed: number): PatternGenerator => {
     const g = new Gaussian(seed);
     let clock = 0;
     let start = -1;
     return {
       next(ctx) {
-        if (!ctx.enabled) { clock = 0; start = -1; return 0; }
+        if (!ctx.enabled || ctx.ictalHemisphere !== side) { clock = 0; start = -1; return 0; }
         clock += ctx.dt;
         if (start < 0) start = clock + FFRONT_DELAY;
         const el2 = clock - start;
@@ -312,13 +352,28 @@ const focalFrontalIctal: PatternSourceDescriptor = {
 
         const pos = cycle / FFRONT_ACTIVE;
         const amp = 100 * (0.1 + 0.9 * pos);
-        const phase = sweepPhase(cycle, 18, 3, FFRONT_ACTIVE, BETA_TONE_CENTER);
+        const F = ctx.ictalFrequency;
+        const phase = sweepPhase(cycle, 18 * F, 3 * F, FFRONT_ACTIVE, BETA_TONE_CENTER);
         let v = amp * multiToneSignal(phase, BETA_TONES, BETA_TONE_NORM);
         v += 30 * pos * (g.uniform() - 0.5); // seeded muscle/movement contamination
-        return v;
+        return ctx.ictalIntensity * v;
       },
     };
-  },
+  };
+}
+
+const focalFrontalL: PatternSourceDescriptor = {
+  id: 'focal-frontal-ictal-l',
+  toggles: ['focal-frontal-ictal'],
+  spec: sourceUnder('focal-frontal-ictal-l', ['F3'], { extent: 0.4 }),
+  make: ffrontGenerator('left'),
+};
+
+const focalFrontalR: PatternSourceDescriptor = {
+  id: 'focal-frontal-ictal-r',
+  toggles: ['focal-frontal-ictal'],
+  spec: sourceUnder('focal-frontal-ictal-r', ['F4'], { extent: 0.4 }),
+  make: ffrontGenerator('right'),
 };
 
 export const ICTAL_SOURCES: PatternSourceDescriptor[] = [
@@ -326,5 +381,6 @@ export const ICTAL_SOURCES: PatternSourceDescriptor[] = [
   gtcIctal,
   focalTemporalL,
   focalTemporalR,
-  focalFrontalIctal,
+  focalFrontalL,
+  focalFrontalR,
 ];

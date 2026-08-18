@@ -118,11 +118,43 @@ export function gaussian(x: number, mu: number, sigma: number): number {
   return Math.exp(-((x - mu) ** 2) / (2 * sigma * sigma));
 }
 
+// Every generator in this app returns a TRUE SCALP POTENTIAL: positive means
+// surface-positive, and the canvas renders it negative-up (see EEGCanvas). An
+// epileptiform spike is surface-NEGATIVE — that is what makes it phase-reverse
+// the way readers are taught to look for — so the sharp component is negative
+// and the after-going slow wave positive.
+//
+// The signs here were formerly the other way round. That was a second error
+// cancelling the canvas's inverted convention: two wrongs that made spikes look
+// right while every correctly-signed pattern in the app rendered upside down.
+// With the canvas fixed, these have to state the real polarity. The complex is
+// negated as a whole, so the spike:slow-wave shape and ratio the original author
+// tuned are untouched — only the space they are expressed in changes.
 export function spikeSlowWave(dt: number, ampSpike: number, ampSlow: number): number {
   if (dt < 0 || dt > 0.9) return 0;
-  const spike = ampSpike * gaussian(dt, 0.05, 0.022);
-  const slow = -ampSlow * gaussian(dt, 0.45, 0.16);
+  const spike = -ampSpike * gaussian(dt, 0.05, 0.022);
+  const slow = ampSlow * gaussian(dt, 0.45, 0.16);
   return spike + slow;
+}
+
+// A single pointed epileptiform transient of configurable base width, optionally
+// carrying the obligatory after-going slow wave that turns it into a complex.
+// The two axes a reader is taught to separate are encoded directly:
+//   - DURATION distinguishes a spike from a sharp wave. Base width at 10% of the
+//     peak for a Gaussian is 4.29*sigma, so sigmaSharp 0.007 s gives a ~30 ms
+//     spike (clinical 20-70 ms) and 0.025 s a ~107 ms sharp wave (70-200 ms).
+//   - The AFTER-GOING SLOW WAVE is what adds "-and-slow-wave": ampSlow > 0 adds
+//     the surface-positive slow wave at 450 ms; ampSlow = 0 leaves a bare spike
+//     or sharp wave with no slow wave.
+// Surface-negative transient, positive slow wave — same polarity convention as
+// spikeSlowWave above, for the same reason.
+export function epileptiformTransient(
+  dt: number, ampSharp: number, sigmaSharp: number, ampSlow: number,
+): number {
+  if (dt < 0 || dt > 0.9) return 0;
+  const sharp = -ampSharp * gaussian(dt, 0.06, sigmaSharp);
+  const slow = ampSlow > 0 ? ampSlow * gaussian(dt, 0.45, 0.16) : 0;
+  return sharp + slow;
 }
 
 // spikeSlowWave() places its slow-wave trough at 450 ms and runs for 900 ms, which
@@ -133,8 +165,10 @@ export function spikeSlowWave(dt: number, ampSpike: number, ampSlow: number): nu
 export function rhythmicSpikeWave(dt: number, cycleLen: number, ampSpike: number, ampSlow: number): number {
   if (dt < 0 || dt > cycleLen) return 0;
   const k = cycleLen / 0.333;
-  const spike = ampSpike * gaussian(dt, 0.055 * k, 0.020 * k);
-  const slow = -ampSlow * gaussian(dt, 0.190 * k, 0.075 * k);
+  // Surface-negative sharp component, positive after-going slow wave — same
+  // polarity convention as spikeSlowWave above, for the same reason.
+  const spike = -ampSpike * gaussian(dt, 0.055 * k, 0.020 * k);
+  const slow = ampSlow * gaussian(dt, 0.190 * k, 0.075 * k);
   return spike + slow;
 }
 

@@ -259,8 +259,10 @@ const sixHzSw: PatternSourceDescriptor = {
       onset: (g) => ({ amp: jit(g, 1, 0.2) }),
       morphology: (t, e) => {
         const cyc = t % (1 / 6);
-        const spike = 50 * e.amp * gaussian(cyc, 0.02, 0.008);
-        const wave = -30 * e.amp * gaussian(cyc, 0.1, 0.035);
+        // Surface-negative spike, positive after-going wave — same polarity
+        // convention as spikeSlowWave (see morphology.ts).
+        const spike = -50 * e.amp * gaussian(cyc, 0.02, 0.008);
+        const wave = 30 * e.amp * gaussian(cyc, 0.1, 0.035);
         return spike + wave;
       },
     });
@@ -326,7 +328,10 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
         schedule: { kind: 'periodic', period: 6.5, jitterFrac: 0.38 }, // legacy 4-9 s
         duration: 0.05,
         onset: (g) => ({ amp: jit(g, 1, 0.3), decay: jit(g, 60, 0.2) }),
-        morphology: (t, e) => 40 * e.amp * Math.exp(-t * e.decay),
+        // Surface-negative, like the other sharp transients — small sharp spikes
+        // have a steep negative ascending limb. Was positive, which under the
+        // corrected negative-up canvas would point them the wrong way.
+        morphology: (t, e) => -40 * e.amp * Math.exp(-t * e.decay),
       });
       return asGenerator(ts);
     },
@@ -335,6 +340,27 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
 
 const betsL = betsSide('bets-l', 'T3');
 const betsR = betsSide('bets-r', 'T4');
+
+// ---------------------------------------------------------------------------
+// Eyes open — the posterior dominant rhythm (alpha, and its central mu
+// counterpart) is a resting, eyes-closed idling rhythm; opening the eyes
+// desynchronises the posterior generator (the Berger effect / "alpha
+// blocking"). Modelled purely as a `bandGate` attenuator, no source voltage
+// of its own — same shape as `gen-slowing` in nonEpileptiform.ts. Attenuates
+// rather than abolishes (0.35, vs. gen-slowing's more severe 0.15) since this
+// is normal reactive physiology, not pathology.
+// ---------------------------------------------------------------------------
+const eyesOpen: PatternSourceDescriptor = {
+  id: 'eyes-open',
+  toggles: ['eyes-open'],
+  spec: sourceUnder('eyes-open', ['Cz'], { extent: 0.5 }),
+  make() {
+    return {
+      next: () => 0,
+      bandGate: () => ({ alpha: 0.35, mu: 0.35 }),
+    };
+  },
+};
 
 export const VARIANT_SOURCES: PatternSourceDescriptor[] = [
   muL, muR,
@@ -345,4 +371,5 @@ export const VARIANT_SOURCES: PatternSourceDescriptor[] = [
   sixHzSw,
   pos1406,
   betsL, betsR,
+  eyesOpen,
 ];

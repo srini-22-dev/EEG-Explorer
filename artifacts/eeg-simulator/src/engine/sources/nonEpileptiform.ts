@@ -196,8 +196,10 @@ const gpeds: PatternSourceDescriptor = {
       onset: (g) => ({ amp: jit(g, 1, 0.2), morph: jit(g, 1, 0.15) }),
       morphology: (t, e) => {
         const amp = 200 * e.amp; // 200: legacy's frontal/midline coefficient (Cz is midline)
-        const spike = amp * gaussian(t, 0.05 * e.morph, 0.02 * e.morph);
-        const after = amp * 0.5 * gaussian(t, 0.11 * e.morph, 0.04 * e.morph);
+        // Surface-negative sharp component, positive after-going component —
+        // the same polarity convention as spikeSlowWave (see morphology.ts).
+        const spike = -amp * gaussian(t, 0.05 * e.morph, 0.02 * e.morph);
+        const after = -amp * 0.5 * gaussian(t, 0.11 * e.morph, 0.04 * e.morph);
         return spike - after;
       },
     });

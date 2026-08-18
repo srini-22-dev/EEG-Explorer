@@ -88,7 +88,7 @@ export type SourceSpec = {
 export function sourceUnder(
   id: string,
   electrodes: string[],
-  opts: { extent?: number; orientation?: Orientation; depth?: number } = {},
+  opts: { extent?: number; orientation?: Orientation; depth?: number; offset?: Vec3 } = {},
 ): SourceSpec {
   let acc: Vec3 = [0, 0, 0];
   for (const e of electrodes) {
@@ -96,7 +96,11 @@ export function sourceUnder(
     if (!p) throw new Error(`sourceUnder: unknown electrode ${e}`);
     acc = add(acc, p as Vec3);
   }
-  const mean = scale(acc, 1 / electrodes.length);
+  // `offset` nudges the anchor away from the scalp electrode(s) before it is
+  // projected to the cortical shell — used when a generator sits deeper than its
+  // nearest scalp site (e.g. the medial-occipital alpha generator, which lies
+  // posterior-inferior to O1/O2 at the occipital pole).
+  const mean = add(scale(acc, 1 / electrodes.length), opts.offset ?? [0, 0, 0]);
   const dir = unit(sub(mean, HEAD_CENTRE));
   const depth = opts.depth ?? CORTICAL_SHELL;
   return {
