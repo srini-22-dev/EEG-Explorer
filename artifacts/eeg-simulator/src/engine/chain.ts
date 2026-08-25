@@ -15,15 +15,35 @@
 import { Gaussian, deriveSeed } from './rng';
 
 /**
- * Causal one-pole high-pass, matching a real amplifier's ~0.016-0.1 Hz corner.
+ * Amplifier low-frequency-filter corner, in Hz — equivalently a time constant of
+ * 1/(2*pi*fc) = 0.64 s. Routine clinical EEG runs an LFF of 0.53-1 Hz (TC 0.3-0.16 s);
+ * this sits deliberately below that, at the conservative end, so delta survives
+ * essentially intact while slow artifacts still show the recovery swing a real
+ * record has (see AmplifierHighPass).
+ */
+export const CLINICAL_LFF_HZ = 0.25;
+
+/**
+ * Causal one-pole high-pass, standing in for the amplifier's low-frequency filter.
  * Deliberately causal rather than zero-phase: hardware distorts phase, and a
  * filtfilt here would remove a distortion that real recordings have.
+ *
+ * That distortion is visible on the page, and it is the point of the corner value.
+ * A causal high-pass returns a transient to baseline by driving it *past* baseline,
+ * so every slow artifact — blink, eye opening, sweat, movement — carries a smaller
+ * opposite-going recovery swing, and its size is set here rather than by any
+ * generator. At the previous 0.05 Hz (TC 3.2 s) a ~300 ms blink overshot by ~5% of
+ * peak spread over 3.2 s: arithmetically present, invisible to a reader, and wrong
+ * for a clinical teaching record. At 0.25 Hz the same blink overshoots ~18% within
+ * ~0.2 s of its peak — what a learner actually sees (IK-001) — while delta is barely
+ * touched: |H(f)| = f/sqrt(f^2 + fc^2) is 0.89 at 0.5 Hz and 0.97 at 1 Hz, so N3 slow
+ * waves, FIRDA and ictal clonic slowing all survive.
  */
 export class AmplifierHighPass {
   private a: number;
   private prevIn = 0;
   private prevOut = 0;
-  constructor(dt: number, cornerHz = 0.05) {
+  constructor(dt: number, cornerHz = CLINICAL_LFF_HZ) {
     const rc = 1 / (2 * Math.PI * cornerHz);
     this.a = rc / (rc + dt);
   }
@@ -95,7 +115,7 @@ export class RecordingChain {
       sensorNoiseRms = 0.9,
       referenceNoiseRms = 0.6,
       gainSpread = 0.04,
-      highPassHz = 0.05,
+      highPassHz = CLINICAL_LFF_HZ,
       lowPassHz = 100,
     } = opts;
 

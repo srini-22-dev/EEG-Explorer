@@ -144,21 +144,46 @@ const focalDeltaTemporal: PatternSourceDescriptor = {
 // negativity, a dominant positive peak, and a broader final negativity
 // (−/+/−), classic for hepatic/uraemic/other metabolic encephalopathy.
 // Anteriorly predominant: amplitude is largest frontally and falls off
-// posteriorly, modelled here as a single broad source under Fz whose extent
-// (0.6) is wide enough to reach the rest of the scalp at reduced gain rather
-// than a sharply focal frontal spike.
+// posteriorly. Per LEARNINGEEG-STUDY.md §9: "generalised with subtle
+// anterior→posterior lag" — the posterior repetition of the same complex
+// trails the frontal one by tens of milliseconds; this is taught as a
+// distinguishing feature from other generalised periodic patterns.
 //
-// NOT modelled: the classic anterior-to-posterior phase LAG (frontal leads,
-// occipital lags by tens of milliseconds) — see report to the supervisor.
-// A single leadfield column has one time course, so every electrode it
-// projects to peaks in lock-step; only the AMPLITUDE gradient survives.
+// A single leadfield column has one time course, so one source alone can only
+// give an amplitude GRADIENT — every electrode it projects to peaks in
+// lock-step, never a timing difference. Modelling the AP lag therefore needs
+// TWO sources: an anterior one (unchanged) and a posterior one whose
+// morphology is the same triphasicWave shape evaluated LAG_S seconds later.
+//
+// The two descriptors deliberately share the SAME `id` ('triphasic'), which
+// makes `deriveSeed(seed, d.id)` in engine.ts hand them an IDENTICAL derived
+// seed, so their independent TransientSource schedulers draw byte-identical
+// onset times and amplitude jitter (both are gated by the same toggle, so
+// they see the same enabled-sample sequence too) — the posterior complex is
+// thus the SAME discharge as the anterior one, just time-shifted, which is
+// the physiologically correct relationship (one generalised discharge
+// propagating front-to-back), not two independent random processes that
+// happen to look similar. `variants.ts` already relies on this same
+// id-keyed-seed lever for the opposite purpose (decorrelating left/right
+// wicket and BETS sources by giving them DIFFERENT ids); this is that lever
+// run in reverse to deliberately correlate two sources.
 // ---------------------------------------------------------------------------
 type TriphasicEvent = { amp: number };
+
+/** Subtle AP lag per LEARNINGEEG-STUDY.md (no exact ms figure given there;
+ *  60 ms is mid-range for the "tens of milliseconds, subtle" literature
+ *  description and stays well inside the wave's own ~700 ms support). */
+const TRIPHASIC_LAG_S = 0.06;
 
 const triphasic: PatternSourceDescriptor = {
   id: 'triphasic',
   toggles: ['triphasic'],
-  spec: sourceUnder('triphasic', ['Fz'], { extent: 0.6 }),
+  // Tightened from the pre-split 0.6 (when one source alone had to reach the
+  // whole scalp): now that a dedicated posterior source exists, the anterior
+  // source only needs to cover the frontal region convincingly, leaving room
+  // for the posterior source's own (lagged) timing to actually show through
+  // at Cz/Pz/O1/O2 rather than being swamped by the anterior source's reach.
+  spec: sourceUnder('triphasic', ['Fz'], { extent: 0.45 }),
   make(seed, dt) {
     const ts = new TransientSource<TriphasicEvent>(seed, dt, {
       // legacy nextEventTime('triphasic', t, 0.5, 1.2): ~1.5 Hz periodic repetition.
@@ -166,6 +191,26 @@ const triphasic: PatternSourceDescriptor = {
       duration: 0.7, // triphasicWave's own support
       onset: (g) => ({ amp: jit(g, 1, 0.2) }),
       morphology: (t, e) => triphasicWave(t, 180 * e.amp),
+    });
+    return asGenerator(ts);
+  },
+};
+
+// Posterior half of the triphasic pair (see comment above): same complex,
+// anchored under Pz/O1/O2, playing out TRIPHASIC_LAG_S later and at reduced
+// amplitude (65 µV at its own peak electrode vs the anterior source's 180 µV)
+// so the frontal-predominant amplitude gradient the anterior source already
+// establishes is preserved, not overridden.
+const triphasicPosterior: PatternSourceDescriptor = {
+  id: 'triphasic', // shared on purpose — see comment on `triphasic` above.
+  toggles: ['triphasic'],
+  spec: sourceUnder('triphasic-posterior', ['Pz', 'O1', 'O2'], { extent: 0.55 }),
+  make(seed, dt) {
+    const ts = new TransientSource<TriphasicEvent>(seed, dt, {
+      schedule: { kind: 'periodic', period: 0.85, jitterFrac: 0.7 / 1.7 },
+      duration: 0.7 + TRIPHASIC_LAG_S + 0.05, // covers the shifted wave's support with margin
+      onset: (g) => ({ amp: jit(g, 1, 0.2) }),
+      morphology: (t, e) => triphasicWave(t - TRIPHASIC_LAG_S, 65 * e.amp),
     });
     return asGenerator(ts);
   },
@@ -255,5 +300,5 @@ const lpeds: PatternSourceDescriptor = {
 };
 
 export const NON_EPILEPTIFORM_SOURCES: PatternSourceDescriptor[] = [
-  genSlowing, firda, focalDeltaTemporal, triphasic, gpeds, lpeds,
+  genSlowing, firda, focalDeltaTemporal, triphasic, triphasicPosterior, gpeds, lpeds,
 ];

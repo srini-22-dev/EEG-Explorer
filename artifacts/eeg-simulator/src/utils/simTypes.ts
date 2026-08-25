@@ -114,9 +114,17 @@ export function defaultArtifactParams(): ArtifactParams {
   };
 }
 
+/** Selectable paper speeds (mm/s) and display sensitivities (µV/mm). These are
+ *  the only values the Display panel offers; the canvas treats both as plain
+ *  numeric multipliers, so the sets can change here without touching geometry. */
+export const SPEED_VALUES = [10, 20, 30] as const;
+export const SENSITIVITY_VALUES = [1, 3, 5, 7, 10, 15, 30] as const;
+export type Speed = (typeof SPEED_VALUES)[number];
+export type Sensitivity = (typeof SENSITIVITY_VALUES)[number];
+
 export type SimSettings = {
-  speed: 15 | 30 | 60;
-  sensitivity: 5 | 7 | 10 | 15;
+  speed: Speed;
+  sensitivity: Sensitivity;
   patientState: PatientState;
   activePatterns: Set<string>;
   /** Independent intensity/hemisphere state per ictal toggle. */

@@ -55,6 +55,13 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
   nuchal:      { id: 'nuchal',      pos: [ 0.00,-0.35,-0.85], orientation: { kind: 'radial' }, extent: 0.50 },
 };
 
+/**
+ * Minimum interval between consecutive blink onsets, seconds. Set to the longest
+ * lid-deflection (0.40 s, see `next`) so two blinks can never overlap, and within
+ * the physiological ~0.3-0.5 s spontaneous blink refractory period.
+ */
+const BLINK_REFRACTORY_SEC = 0.4;
+
 /** Blink: a smooth monophasic lid-movement deflection, 200-400 ms (§8). */
 export class BlinkGenerator {
   private g: Gaussian;
@@ -72,7 +79,17 @@ export class BlinkGenerator {
   setRatePerMin(r: number) { this.ratePerMin = r; }
   private schedule(rateScale: number) {
     const mean = 60 / Math.max(this.ratePerMin * rateScale, 0.5);
-    this.samplesToNext = Math.max(1, Math.round(this.g.exponential(mean) / this.dt));
+    // Blink refractory period. A pure exponential (Poisson) schedule has its mode
+    // at zero, so its single most likely inter-blink gap is a near-zero one — two
+    // blinks then start within one blink's 0.22-0.40 s lid deflection of each
+    // other and render as a single jagged "double". That is non-physiological:
+    // the orbicularis/levator cannot re-fire instantly, and spontaneous blinks
+    // hold a minimum inter-blink interval of ~0.3-0.5 s. BLINK_REFRACTORY_SEC is a
+    // hard floor on the gap (also >= the max lid-deflection length, so consecutive
+    // blinks never overlap). Subtracting it from the exponential mean leaves the
+    // long-run rate at ratePerMin instead of lowering it by the dead time.
+    const remaining = Math.max(this.dt, mean - BLINK_REFRACTORY_SEC);
+    this.samplesToNext = Math.round((BLINK_REFRACTORY_SEC + this.g.exponential(remaining)) / this.dt);
   }
   /** `rateScale` lets the vigilance state cluster blinks rather than spacing them uniformly. */
   next(rateScale = 1): number {

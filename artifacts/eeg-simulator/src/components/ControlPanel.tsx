@@ -1,4 +1,4 @@
-import React, { useState, RefObject } from 'react';
+import React, { useState, useRef, useEffect, RefObject } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -6,12 +6,46 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info, ChevronDown, Download, MonitorPlay, Brain } from 'lucide-react';
 import { MONTAGES, Montage } from '../utils/montages';
-import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams } from '../utils/simTypes';
-import { ICTAL_TOGGLE_IDS } from '../utils/simTypes';
+import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, Speed, Sensitivity } from '../utils/simTypes';
+import { ICTAL_TOGGLE_IDS, SPEED_VALUES, SENSITIVITY_VALUES } from '../utils/simTypes';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { ArtifactControls } from './ArtifactControls';
 import { EEGTheme } from '../utils/themes';
 import { exportCSV, exportScreenshot } from '../utils/exportUtils';
+
+/** Sensitivity picker: a native dropdown that also steps through the allowed
+ *  values on mouse-wheel while hovered. The wheel listener is attached natively
+ *  with { passive: false } so it can preventDefault the page scroll — React's
+ *  synthetic onWheel is passive and cannot. Scrolling down moves to the next
+ *  (higher) value, matching the top-to-bottom order of the ascending list. */
+function SensitivitySelect({
+  value, onChange,
+}: { value: Sensitivity; onChange: (v: Sensitivity) => void }) {
+  const ref = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const i = SENSITIVITY_VALUES.indexOf(value);
+      const next = i + (e.deltaY > 0 ? 1 : -1);
+      if (next >= 0 && next < SENSITIVITY_VALUES.length) onChange(SENSITIVITY_VALUES[next]);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [value, onChange]);
+  return (
+    <select
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value) as Sensitivity)}
+      className="w-full py-1 px-2 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-emerald-300 hover:bg-slate-800 focus:outline-none focus:border-emerald-600 cursor-pointer">
+      {SENSITIVITY_VALUES.map(v => (
+        <option key={v} value={v}>{v} µV/mm</option>
+      ))}
+    </select>
+  );
+}
 
 type Props = {
   montageId: string;
@@ -23,9 +57,9 @@ type Props = {
   artifactParams: ArtifactParams;
   updateArtifactParams: (patch: Partial<ArtifactParams>) => void;
   speed: number;
-  setSpeed: (v: 15 | 30 | 60) => void;
+  setSpeed: (v: Speed) => void;
   sensitivity: number;
-  setSensitivity: (v: 5 | 7 | 10 | 15) => void;
+  setSensitivity: (v: Sensitivity) => void;
   patientState: PatientState;
   setPatientState: (s: PatientState) => void;
   clearAll: () => void;
@@ -43,6 +77,8 @@ type Props = {
   setGraphHover: (b: boolean) => void;
   showSpectrum: boolean;
   setShowSpectrum: (b: boolean) => void;
+  showRightSpectrum: boolean;
+  setShowRightSpectrum: (b: boolean) => void;
   setQuizMode: (b: boolean) => void;
   setTutorialMode: (b: boolean) => void;
   dataBuffer: React.MutableRefObject<number[][]>;
@@ -85,6 +121,7 @@ export function ControlPanel({
   showAnnotations, setShowAnnotations,
   graphHover, setGraphHover,
   showSpectrum, setShowSpectrum,
+  showRightSpectrum, setShowRightSpectrum,
   setQuizMode, setTutorialMode,
   dataBuffer, timeBuffer
 }: Props) {
@@ -458,7 +495,12 @@ export function ControlPanel({
             <Label className="text-xs text-slate-300">FFT Spectrum</Label>
             <Switch checked={showSpectrum} onCheckedChange={setShowSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
           </div>
-          
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Per-channel Bands</Label>
+            <Switch checked={showRightSpectrum} onCheckedChange={setShowRightSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
           <div className="grid grid-cols-2 gap-2 mt-2">
             <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 hover:bg-slate-800" onClick={() => exportCSV(dataBuffer.current, timeBuffer.current, MONTAGES[montageId])}>
               <Download className="w-3 h-3 mr-1" /> CSV
@@ -492,7 +534,7 @@ export function ControlPanel({
               <span className="text-[10px] font-mono text-emerald-400">{speed} mm/s</span>
             </div>
             <div className="flex gap-1">
-              {([15, 30, 60] as const).map(s => (
+              {SPEED_VALUES.map(s => (
                 <button key={s} onClick={() => setSpeed(s)}
                   className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
                     speed === s
@@ -511,19 +553,8 @@ export function ControlPanel({
               <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Sensitivity</Label>
               <span className="text-[10px] font-mono text-emerald-400">{sensitivity} µV/mm</span>
             </div>
-            <div className="flex gap-1">
-              {([5, 7, 10, 15] as const).map(v => (
-                <button key={v} onClick={() => setSensitivity(v)}
-                  className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                    sensitivity === v
-                      ? 'bg-emerald-700/40 border-emerald-600 text-emerald-300'
-                      : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                  }`}>
-                  {v}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-slate-700">Standard 7 · Low gain 10 µV/mm</p>
+            <SensitivitySelect value={sensitivity as Sensitivity} onChange={setSensitivity} />
+            <p className="text-[10px] text-slate-700">Standard 7 · Low gain 10 µV/mm · scroll to adjust</p>
           </div>
 
           {/*

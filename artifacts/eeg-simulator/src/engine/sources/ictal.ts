@@ -85,11 +85,14 @@ const jit = (g: Gaussian, base: number, frac: number): number =>
 // drift down slightly (~3.2 -> ~2.5 Hz) over their course, which is why phase
 // is the time-integral of frequency (`cycles`) rather than `cycle % (1/freq)`
 // with a moving freq — the latter would make the spike-wave interval visibly
-// jump instead of smoothly lengthening. A brief (~2s) fading delta after the
-// abrupt offset stands in for the transient post-ictal slowing seen clinically
-// before background resumes. Duration (5-15s) is seeded once per epoch onset,
-// as in the legacy code; the discharge then repeats every dur+15s while the
-// toggle stays on.
+// jump instead of smoothly lengthening. Offset drops straight back to baseline:
+// real absence has NO post-ictal slowing, and that instant recovery is itself
+// diagnostic — it separates absence from focal and generalised tonic-clonic
+// seizures, which DO leave post-ictal attenuation/slowing (see gtc's suppression
+// phase below). An earlier port added a ~2 s fading post-ictal delta burst after
+// each discharge here; that was a clinical error and has been removed (IK-017).
+// Duration (5-15s) is seeded once per epoch onset, as in the legacy code; the
+// discharge then repeats every dur+15s while the toggle stays on.
 // ---------------------------------------------------------------------------
 const ABSENCE_GAP = 15; // seconds of normal background between discharges
 const ABSENCE_DELAY = 4; // pre-onset delay after the toggle is enabled
@@ -129,10 +132,7 @@ const absenceIctal: PatternSourceDescriptor = {
           const dt = (cycles % 1) * cycleLen;
           return ctx.ictalIntensity * rhythmicSpikeWave(dt, cycleLen, 220, 220 * 0.7);
         }
-        if (cycle < dur + 2) {
-          const fade = 1 - (cycle - dur) / 2;
-          return ctx.ictalIntensity * 40 * fade * multiToneSignal(elapsed, DELTA_TONES, DELTA_TONE_NORM);
-        }
+        // No post-ictal fade: absence returns instantly to baseline (IK-017).
         return 0;
       },
     };

@@ -13,8 +13,10 @@
 import { AperiodicSource } from '../../artifacts/eeg-simulator/src/engine/aperiodic';
 import { HopfOscillator, MU_WARP, NO_WARP } from '../../artifacts/eeg-simulator/src/engine/oscillator';
 import {
-  EegEngine, sampleSubject, type EngineOptions, type ArtifactGates,
+  EegEngine, sampleSubject, BETA_BURST_OPTS, PDR_ENVELOPE_DEPTH,
+  type EngineOptions, type ArtifactGates,
 } from '../../artifacts/eeg-simulator/src/engine/engine';
+import { BurstyOscillator } from '../../artifacts/eeg-simulator/src/engine/bursts';
 import {
   electrodeDistanceCm, sourceUnder, buildLeadfield,
 } from '../../artifacts/eeg-simulator/src/engine/forward';
@@ -22,6 +24,36 @@ import type { PatientState, ArtifactParams } from '../../artifacts/eeg-simulator
 import {
   welch, fitAperiodic, std, kurtosis, autocorr, hilbertEnvelope, dfa, spectralPeak, skewness,
 } from './dsp';
+
+// Display-space transform (CLAUDE.md §4): the same pipeline EEGCanvas/
+// renderTrace.ts use to turn raw electrode voltages into the montage-derived
+// channel actually drawn on screen. Everything above this reads raw electrodes
+// (referential/spectral space); Step 19 below reads this instead, because a
+// pattern can pass every spectral check and still be wrong once a montage and a
+// common-average reference are applied to it.
+import { SimulationSource } from '../../artifacts/eeg-simulator/src/engine/adapter';
+import { MONTAGES } from '../../artifacts/eeg-simulator/src/utils/montages';
+import { commonAverage, computeChannelVoltage } from '../../artifacts/eeg-simulator/src/utils/computeChannel';
+import { defaultArtifactParams, defaultIctalParamsMap, type SimSettings } from '../../artifacts/eeg-simulator/src/utils/simTypes';
+import type { ChannelDef } from '../../artifacts/eeg-simulator/src/utils/montages';
+
+// A6 audit (Step 21): the pure morphology math for the interictal spike/slow-
+// wave complex, reused to build a genuine spike source anchored MIDWAY between
+// two electrodes (IK-003 case b) — every other spike source in the app is
+// anchored ON an electrode, so no existing toggle demonstrates the midway
+// signature and one has to be synthesized the same way Step 16's static
+// leadfield-gain precedent already does, just driven as a real time series.
+import { spikeSlowWave } from '../../artifacts/eeg-simulator/src/engine/sources/morphology';
+
+// A8 audit (Step 23): renderTrace.ts drives the SAME geometry EEGCanvas.tsx
+// does (CLAUDE.md §4) and exposes its actual pxPerSec/pxPerMm/pxPerUV, so the
+// calibration checks below assert on real production numbers, not a
+// reimplementation of the formulas.
+import { renderTrace } from './renderTrace';
+
+// Scratch dir for Step 23's incidental PNG evidence — not asserted on, just left
+// on disk for a reviewer to open (audit brief, ACCEPTANCE BAR §3).
+const SCRATCH = 'C:/Users/CMC/AppData/Local/Temp/claude/C--Users-CMC-Desktop-EEG-Explorer-dev-EEG-Explorer/430e9c84-cae5-4d2b-a812-86536870ba4c/scratchpad';
 
 const FS = 250;
 const DT = 1 / FS;
@@ -280,6 +312,48 @@ function runEngineState(
   return { eng, data };
 }
 
+// Display-space runner for Step 19: drives SimulationSource -> commonAverage ->
+// computeChannelVoltage exactly as renderTrace.ts / EEGCanvas do, on a montage's
+// channels, rather than runEngineState's raw electrodes.
+function runDisplay(
+  montageId: string, state: PatientState, patterns: string[], secs: number, seed: number,
+) {
+  const montage = MONTAGES[montageId];
+  const settings: SimSettings = {
+    speed: 30, sensitivity: 7, patientState: state,
+    activePatterns: new Set(patterns),
+    ictalParams: defaultIctalParamsMap(),
+    artifactParams: { ...defaultArtifactParams() },
+  };
+  const src = new SimulationSource(seed, FS);
+  const n = Math.floor(secs * FS);
+  const data: Float64Array[] = montage.channels.map(() => new Float64Array(n));
+  for (let i = 0; i < n; i++) {
+    const allV = src.next(settings);
+    const avg = commonAverage(allV);
+    for (let c = 0; c < montage.channels.length; c++) {
+      data[c][i] = computeChannelVoltage(montage.channels[c], src.t, allV, avg);
+    }
+  }
+  return { montage, data };
+}
+
+// A toggle's own isolated contribution on ONE display-space channel: same-seed
+// on-minus-off, mirroring the raw-electrode `contrib` helper (Step 11) but after
+// the montage/CAR transform.
+function displayContrib(
+  montageId: string, state: PatientState, toggle: string, label: string, secs: number, seed: number,
+): Float64Array {
+  const off = runDisplay(montageId, state, [], secs, seed);
+  const on = runDisplay(montageId, state, [toggle], secs, seed);
+  const ci = on.montage.channels.findIndex((c) => c.label === label);
+  if (ci < 0) throw new Error(`no channel '${label}' in montage ${montageId}`);
+  const n = on.data[ci].length;
+  const diff = new Float64Array(n);
+  for (let k = 0; k < n; k++) diff[k] = on.data[ci][k] - off.data[ci][k];
+  return diff;
+}
+
 /** Robust peak-to-peak: 99th minus 1st percentile, ignoring rare outliers. */
 function pctP2p(x: Float64Array): number {
   const sorted = Array.from(x).sort((a, b) => a - b);
@@ -365,6 +439,19 @@ console.log('\nAlpha topography:');
   // radial gives ~17.
   check('C3 / F3 alpha-band power (background mu is central, not frontal)',
     at('C3') / at('F3'), 3.0, 1e6);
+  // L/R PDR symmetry limits (LEARNINGEEG-STUDY §14.1): normal is <1 Hz peak
+  // frequency asymmetry and <50% amplitude asymmetry between hemispheres.
+  // engine.ts builds this in structurally — 'pdrR' is offset +0.25 Hz and
+  // 0.92x the RMS of 'pdrL' — so this asserts the built-in offset stays
+  // inside the clinical bound rather than drifting there by accident.
+  const psdO1 = welch(data[eng.indexOf('O1')], FS, 4096);
+  const psdO2 = welch(data[eng.indexOf('O2')], FS, 4096);
+  const peakO1 = spectralPeak(psdO1, 6, 14).freq;
+  const peakO2 = spectralPeak(psdO2, 6, 14).freq;
+  check('O1 / O2 alpha peak frequency asymmetry (<1 Hz)', Math.abs(peakO1 - peakO2), 0, 1, ' Hz');
+  const ampO1 = Math.sqrt(at('O1')), ampO2 = Math.sqrt(at('O2'));
+  check('O1 / O2 alpha amplitude asymmetry (<50%)',
+    Math.abs(ampO1 - ampO2) / Math.max(ampO1, ampO2), 0, 0.5);
 }
 
 // --- 6c. Alpha on the bipolar chain, and its reactivity (IK-006, IK-007).
@@ -396,6 +483,94 @@ console.log('\nAlpha on the bipolar chain + reactivity:');
   // Alpha reactivity: eye opening attenuates the posterior rhythm to a fraction.
   check('P4-O2 alpha, eyes-open / eyes-closed (Berger effect attenuation)',
     bipAlpha(open, 'P4', 'O2') / bipAlpha(closed, 'P4', 'O2'), 0, 0.45);
+  // Mu does NOT react to eye opening (IK-007): while posterior alpha collapses,
+  // the sensorimotor rhythm at C3/C4 persists — it is precisely this differential
+  // reactivity that tells the two 8-13 Hz rhythms apart (IK-006). The eyes-open
+  // bandGate formerly gated `mu` to 0.35 alongside `alpha`, erasing the
+  // discriminator; with that removed, the mu-dominated 8-13 Hz power at C3+C4 is
+  // largely preserved across the transition (a small residual dip is the
+  // attenuated posterior-alpha field spilling into the central electrodes, not mu
+  // reacting). Referential C3/C4 read here because reactivity is a spectral
+  // question (CLAUDE.md §4).
+  const muBand = (r: typeof closed, e: string) => bandPower(r.data[r.eng.indexOf(e)], 8, 13);
+  check('C3+C4 mu-band, eyes-open / eyes-closed (mu does not block; IK-007)',
+    (muBand(open, 'C3') + muBand(open, 'C4')) / (muBand(closed, 'C3') + muBand(closed, 'C4')),
+    0.8, 1.25);
+}
+
+// --- 6d. Amplitude inversely related to frequency (LEARNINGEEG-STUDY §1, §3):
+// the slower posterior alpha rhythm must be higher-amplitude than the faster
+// beta rhythm, each measured at its own characteristic site (alpha posterior;
+// beta at engine.ts's betaL/betaR/betaF anchors C3/C4/F3/F4/Fz) rather than
+// diluted or contaminated by measuring both at the same electrodes — a fixed
+// 13-30 Hz band read at O1/O2 picks up the posterior alpha line's own spectral
+// skirt, not a real posterior beta rhythm, and would fail this the wrong way.
+console.log('\nAmplitude vs frequency (alpha vs beta, each at its own site):');
+{
+  const { eng, data } = runEngine(120, { seed: 5, artifacts: false, recordingChain: false,
+    subject: { iaf: 10, alphaRms: 16, betaRms: 4, vigilanceBias: 0.62 } });
+  const alphaAmp = (n: string) => Math.sqrt(bandPower(data[eng.indexOf(n)], 8, 12));
+  const betaAmp = (n: string) => Math.sqrt(bandPower(data[eng.indexOf(n)], 13, 30));
+  const alphaPost = Math.max(alphaAmp('O1'), alphaAmp('O2'));
+  const betaOwnSite = Math.max(betaAmp('C3'), betaAmp('C4'), betaAmp('F3'), betaAmp('F4'), betaAmp('Fz'));
+  check('alpha amplitude (posterior) / beta amplitude (central-frontal, own site)',
+    alphaPost / betaOwnSite, 1.5, 20);
+}
+
+// --- 6e. Sensorimotor beta is a low, even admixture, not spiky transients
+// (LEARNINGEEG-STUDY §9). Beta is genuinely bursty, but the BurstyOscillator's
+// log-normal amplitude tail (`ampSigma`, in BETA_BURST_OPTS) governs how far the
+// tallest burst towers over the background. A heavy tail throws occasional bursts
+// several times the median, which land on the page as sharp central packets a
+// learner could mistake for muscle or an epileptiform transient. Total beta power
+// is fixed (the oscillator recalibrates its RMS), so the salience defect lives
+// entirely in the CREST FACTOR — peak envelope / RMS — of the production beta
+// generator. Averaged over seeds for stability: ampSigma 0.4 holds it near 8; the
+// old 0.6 default pushed it past 10. This imports BETA_BURST_OPTS so a revert of
+// the tail is caught here.
+console.log('\nSensorimotor beta salience (no standout spikes):');
+{
+  const crest = (seed: number) => {
+    const src = new BurstyOscillator(seed, DT, { ...BETA_BURST_OPTS, rms: 4 });
+    const n = 120 * FS;
+    const x = new Float64Array(n);
+    for (let i = 0; i < n; i++) x[i] = src.next();
+    const env = hilbertEnvelope(x);
+    let mx = 0, sumSq = 0;
+    for (const v of env) { mx = Math.max(mx, v); sumSq += v * v; }
+    return mx / Math.sqrt(sumSq / env.length);
+  };
+  const seeds = [1, 2, 3, 4, 5];
+  const meanCrest = seeds.reduce((a, s) => a + crest(s), 0) / seeds.length;
+  check('beta burst crest factor (peak/RMS; tamed amplitude tail)', meanCrest, 0, 9.0);
+}
+
+// --- 6f. Posterior dominant rhythm waxing tail (analogous to §6e beta). The
+// HopfOscillator drives its waxing/waning with a log-normal envelope multiplier,
+// exp(PDR_ENVELOPE_DEPTH * modulator); that depth governs how far the tallest
+// alpha burst towers over the in-band RMS. At the old 0.55 default the crest ran
+// ~5.6, and the tallest bursts read referentially (O1/O2-AVG) above the 100 uV
+// PDR ceiling (LEARNINGEEG §1) and sharp enough that a learner could misread a
+// waxing alpha burst as an epileptiform transient. 0.42 tames the tail; mean
+// alpha power is unchanged because the oscillator recalibrates its RMS to `rms`.
+// Imports PDR_ENVELOPE_DEPTH so a revert of the depth is caught here.
+console.log('\nPDR alpha burst salience (waxing tail):');
+{
+  const crest = (seed: number) => {
+    const src = new HopfOscillator(seed, DT, {
+      freq: 10, rms: 16, freqWander: 0.55, damping: -2.6, envelopeDepth: PDR_ENVELOPE_DEPTH,
+    });
+    const n = 120 * FS;
+    const x = new Float64Array(n);
+    for (let i = 0; i < n; i++) x[i] = src.next();
+    const env = hilbertEnvelope(x);
+    let mx = 0, sumSq = 0;
+    for (const v of env) { mx = Math.max(mx, v); sumSq += v * v; }
+    return mx / Math.sqrt(sumSq / env.length);
+  };
+  const seeds = [1, 2, 3, 4, 5];
+  const meanCrest = seeds.reduce((a, s) => a + crest(s), 0) / seeds.length;
+  check('PDR alpha crest factor (peak/RMS; tamed waxing tail)', meanCrest, 0, 5.4);
 }
 
 // --- 7. Artifacts: statistics and topography.
@@ -525,6 +700,58 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
     check('blink Fp1-F3 renders DOWN (+1)', Math.sign(peak), 1, 1);
   }
 
+  // The blink's RECOVERY SWING (IK-001). A real blink does not drop and stop: the
+  // downward deflection is followed by a smaller opposite-going excursion that
+  // carries the trace back through baseline. That overshoot is not made by the
+  // eyelid — `BlinkGenerator.next()` returns a strictly non-negative lid shape, so
+  // the generator alone is monophasic — it is made by the recording chain's causal
+  // low-frequency filter (chain.ts `CLINICAL_LFF_HZ`), which returns any transient
+  // to baseline by driving it past baseline.
+  //
+  // Hence this pair runs WITH the recording chain, unlike every other check in 7c,
+  // which switches it off to isolate a generator. The chain is deterministic and
+  // linear, and both runs share a seed, so its noise, gains and filter states are
+  // identical and cancel in the on-minus-off difference exactly as they do above.
+  {
+    const fp1f3 = (blink: boolean) => {
+      const eng = new EegEngine({ ...POL_OPTS, artifacts: true, recordingChain: true });
+      eng.setArtifactGates({
+        blink, eyeOpening: false, saccade: false, emg: false, pop: false,
+        sweat: false, line: false, ecgScalp: false, movement: false,
+      });
+      const n = Math.floor(SECS * FS);
+      const buf = new Float64Array(eng.electrodes.length);
+      const iA = eng.indexOf('Fp1'), iB = eng.indexOf('F3');
+      const out = new Float64Array(n);
+      for (let i = 0; i < n; i++) { eng.next(buf); out[i] = buf[iA] - buf[iB]; }
+      return out;
+    };
+    const on = fp1f3(true), off = fp1f3(false);
+    const n = on.length;
+    const d = new Float64Array(n);
+    let peak = 0, peakAt = 0;
+    for (let i = 0; i < n; i++) {
+      d[i] = on[i] - off[i];
+      if (Math.abs(d[i]) > Math.abs(peak)) { peak = d[i]; peakAt = i; }
+    }
+    // Largest excursion of the OPPOSITE sign in the 1.5 s following the peak, and
+    // what is left of the row in the 1.5 s after that (the return to baseline).
+    let swing = 0;
+    for (let i = peakAt; i < Math.min(n, peakAt + Math.round(1.5 * FS)); i++) {
+      if (-Math.sign(peak) * d[i] > -Math.sign(peak) * swing) { swing = d[i]; }
+    }
+    let residual = 0;
+    for (let i = peakAt + Math.round(1.5 * FS); i < Math.min(n, peakAt + Math.round(3 * FS)); i++) {
+      residual = Math.max(residual, Math.abs(d[i]));
+    }
+    check('blink Fp1-F3 recovery swing runs UP (-1; IK-001, opposite the main deflection)',
+      Math.sign(swing), -1, -1);
+    check('blink Fp1-F3 recovery swing / downward peak (IK-001: a smaller opposite swing)',
+      Math.abs(swing) / Math.abs(peak), 0.10, 0.50);
+    check('blink Fp1-F3 back at baseline 1.5-3 s after the peak (IK-001), as a fraction of peak',
+      residual / Math.abs(peak), 0, 0.10);
+  }
+
   // Eye opening rides the same ocular sources as a blink but must render the
   // OPPOSITE way — upward, i.e. Fp1-F3 negative — and at a smaller amplitude
   // (IK-011). Its own gate pairs, artifacts built, everything else silenced so
@@ -591,7 +818,7 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
       let slow = 0;
       const end = Math.min(d.length, peakAt + Math.round(0.6 * FS));
       for (let k = peakAt; k < end; k++) if (d[k] > slow) slow = d[k];
-      return { widthMs, slowRatio: slow / Math.abs(peak) };
+      return { widthMs, slowRatio: slow / Math.abs(peak), peak: Math.abs(peak) };
     };
     const spike = measure(iedAtT3('ied-spike'));
     const sharp = measure(iedAtT3('ied-sharp'));
@@ -618,11 +845,17 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
     ['polyspike-wave Fz',        'awake', 'polyspike-wave',  'Fz', 'peak', -1],
     ['GPEDs Cz',                 'awake', 'gpeds',           'Cz', 'peak', -1],
     ['6 Hz phantom spike-wave Cz', 'awake', '6hz-sw',        'Cz', 'peak', -1],
-    ['BETS T3',                  'awake', 'bets',            'T3', 'lead', -1],
+    // BETS is state-gated to drowsy/n1/n2 (A4 fix — see variants.ts betsSide).
+    ['BETS T3',                  'drowsy', 'bets',           'T3', 'lead', -1],
     // Surface-POSITIVE transients — named for their polarity, must point DOWN.
     ['POSTS O1',                 'awake', 'posts',           'O1', 'lead',  1],
     ['lambda O1',                'awake', 'lambda',          'O1', 'lead',  1],
     ['triphasic Fz (dominant)',  'awake', 'triphasic',       'Fz', 'lead',  1],
+    // "14 & 6 Hz POSITIVE bursts" are named for their polarity: pos1406's
+    // morphology now half-wave-emphasises its positive-going phase, so the sharp
+    // comb-teeth are reliably surface-positive and render DOWN (A4 fix — see
+    // variants.ts pos1406). State-gated to drowsiness/light sleep.
+    ['14-6-pos T6',              'drowsy', '14-6-pos',        'T6', 'peak',  1],
   ];
   for (const [label, state, toggle, el, metric, want] of POLARITIES) {
     check(`${label} renders ${want < 0 ? 'UP  ' : 'DOWN'} (${want > 0 ? '+1' : '-1'})`,
@@ -907,6 +1140,15 @@ console.log('\nWicket spikes (6-11 Hz bursts, temporal, drowsy only):');
   const t3On = bandPower(w.data[w.eng.indexOf('T3')], 7, 11);
   const t3Off = bandPower(wBase.data[wBase.eng.indexOf('T3')], 7, 11);
   check('T3 7-11 Hz power, wicket on / off (drowsy)', t3On / t3Off, 1.3, 1e6);
+  // Wicket spans the full 6-11 Hz range the UI names. The old tone set started
+  // at 8.4 Hz and left the lower half empty; assert the 6-7.5 Hz band now lifts
+  // too, so the widened WICKET_TONES cannot silently regress to an alpha-only set.
+  const t3LoOn = bandPower(w.data[w.eng.indexOf('T3')], 6, 7.5);
+  const t3LoOff = bandPower(wBase.data[wBase.eng.indexOf('T3')], 6, 7.5);
+  // Floor 1.2, not 1.3: the low band carries the two smaller tones so its lift is
+  // naturally gentler than the 7-11 Hz band's, but 1.2x still decisively beats the
+  // ~1.0 the old alpha-only tone set would give here.
+  check('T3 6-7.5 Hz power, wicket on / off (drowsy; widened range)', t3LoOn / t3LoOff, 1.2, 1e6);
   const wAwake = runEngineState(180, SLEEP_OPTS, 'awake', ['wicket']);
   const t3AwakeP2p = pctP2p(wAwake.data[wAwake.eng.indexOf('T3')]);
   check('T3 p2p, wicket toggle while awake (state-gated off)', t3AwakeP2p / baseCzP2p, 0, 1.5);
@@ -971,13 +1213,21 @@ console.log('\n14 & 6 Hz positive bursts (posterior temporal, arciform):');
   check('T6 13.5-15.5 Hz power, 14-6-pos while awake (state-gated off)', t6Awake / t6AwakeBase, 0.8, 1.2);
 }
 
-console.log('\nBETS (very brief <50ms, low-amplitude, temporal, alternating side):');
+console.log('\nBETS (very brief <50ms, low-amplitude, temporal, alternating side, drowsy/N1/N2 only):');
 {
-  const bt = runEngineState(180, SLEEP_OPTS, 'awake', ['bets']);
+  // A4 fix: BETS is now state-gated (variants.ts betsSide, states: ['drowsy',
+  // 'n1', 'n2']) — it's a phenomenon of drowsiness/light sleep, not relaxed
+  // wakefulness (site + patterns.ts both call it "sleep"), matching the
+  // wicket/rmtd/14-6-pos precedent. Test on/off in drowsy, and add the
+  // state-gated-off check at awake mirroring wicket's above.
+  const bt = runEngineState(180, SLEEP_OPTS, 'drowsy', ['bets']);
   const t3P2p = pctP2p(bt.data[bt.eng.indexOf('T3')]);
   const t4P2p = pctP2p(bt.data[bt.eng.indexOf('T4')]);
-  check('T3 p2p, bets on / off', t3P2p / baseCzP2p, 0.3, 3);
-  check('T4 p2p, bets on / off', t4P2p / baseCzP2p, 0.3, 3);
+  check('T3 p2p, bets on / off (drowsy)', t3P2p / baseCzP2p, 0.3, 3);
+  check('T4 p2p, bets on / off (drowsy)', t4P2p / baseCzP2p, 0.3, 3);
+  const btAwake = runEngineState(180, SLEEP_OPTS, 'awake', ['bets']);
+  const t3AwakeP2p = pctP2p(btAwake.data[btAwake.eng.indexOf('T3')]);
+  check('T3 p2p, bets toggle while awake (state-gated off)', t3AwakeP2p / baseCzP2p, 0, 1.5);
 }
 
 console.log('\n=== Step 14: chewing artifact (pattern source) ===\n');
@@ -1529,6 +1779,855 @@ console.log('\n=== Step 18: contextual artifact controls (ArtifactParams) ===\n'
     hit /= Math.max(rPeaks.length, 1);
     check('scalp T3 peak at the R wave / its own RMS', hit / std(scalp), 2.5, 1e6);
   }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n=== Step 19: sleep grapho-elements in DISPLAY space (A3 audit) ===\n');
+
+// Step 11 above asserts these same claims on raw electrodes. Repeated here on
+// the montage-derived, negative-up channel (CLAUDE.md §4) because that space can
+// disagree with the raw one even when every spectral check passes — e.g. a
+// channel that sits near the common-average reference's own mean gain nearly
+// cancels in reference-car while still carrying real signal (see K-complex/Pz,
+// IK-A3-b): a spectral check on the raw electrode cannot see that.
+
+console.log('Spindles (11-16 Hz, central-maximal), reference-car:');
+{
+  const diff = displayContrib('reference-car', 'awake', 'spindles', 'Cz-AVG', 180, 20);
+  const pk = spectralPeak(welch(diff, FS, 2048), 6, 25);
+  check('spindle peak frequency, Cz-AVG', pk.freq, 11, 16, ' Hz');
+  const czP2p = pctP2p(diff);
+  const o1P2p = pctP2p(displayContrib('reference-car', 'awake', 'spindles', 'O1-AVG', 180, 20));
+  check('spindle Cz-AVG p2p / O1-AVG p2p (central, not occipital)', czP2p / Math.max(o1P2p, 1e-6), 3, 1e6);
+}
+
+console.log('\nK-complex (sharp UP, then slower smaller DOWN), Cz-AVG reference-car:');
+{
+  const diff = displayContrib('reference-car', 'awake', 'k-complex', 'Cz-AVG', 120, 20);
+  let peak = 0, peakAt = 0;
+  for (let k = 0; k < diff.length; k++) if (Math.abs(diff[k]) > Math.abs(peak)) { peak = diff[k]; peakAt = k; }
+  check('K-complex sharp component renders UP (surface-negative)', peak, -Infinity, 0, ' uV');
+  let slow = 0;
+  const end = Math.min(diff.length, peakAt + Math.round(1.0 * FS));
+  for (let k = peakAt; k < end; k++) if (diff[k] > slow) slow = diff[k];
+  check('K-complex after-going wave renders DOWN, smaller than the sharp peak',
+    slow / Math.abs(peak), 0.2, 0.9);
+}
+
+console.log('\nV-wave: sharp, phase-reverses across Cz (IK-008), bipolar-ap:');
+{
+  const fzCz = displayContrib('bipolar-ap', 'awake', 'v-waves', 'Fz-Cz', 120, 20);
+  const czPz = displayContrib('bipolar-ap', 'awake', 'v-waves', 'Cz-Pz', 120, 20);
+  let fzCzPeak = 0, czPzPeak = 0;
+  for (const v of fzCz) if (Math.abs(v) > Math.abs(fzCzPeak)) fzCzPeak = v;
+  for (const v of czPz) if (Math.abs(v) > Math.abs(czPzPeak)) czPzPeak = v;
+  check('V-wave: Fz-Cz and Cz-Pz peaks have opposite sign (phase reversal at Cz)',
+    Math.sign(fzCzPeak) * Math.sign(czPzPeak), -1, -1);
+}
+
+console.log('\nPOSTS: surface-positive; polarity is montage-dependent (§4/IK-008):');
+{
+  const o1Car = displayContrib('reference-car', 'awake', 'posts', 'O1-AVG', 120, 20);
+  let carPeak = 0;
+  for (const v of o1Car) if (Math.abs(v) > Math.abs(carPeak)) carPeak = v;
+  check('POSTS render DOWN at O1-AVG, reference-car (surface-positive)', carPeak, 0, Infinity, ' uV');
+
+  const t5O1 = displayContrib('bipolar-ap', 'awake', 'posts', 'T5-O1', 120, 20);
+  let bipPeak = 0;
+  for (const v of t5O1) if (Math.abs(v) > Math.abs(bipPeak)) bipPeak = v;
+  check('POSTS polarity inverts at T5-O1, bipolar-ap (O1 is input2)', bipPeak, -Infinity, 0, ' uV');
+}
+
+console.log('\nN3: high-amplitude (>75 uV) generalized delta (0.5-2 Hz), reference-car:');
+{
+  const { montage, data } = runDisplay('reference-car', 'n3', [], 180, 42);
+  // A spread of frontal/central/temporal/occipital/midline channels stands in
+  // for "generalized" without asserting all 19.
+  const reps = ['Fp1-AVG', 'Fz-AVG', 'C3-AVG', 'Cz-AVG', 'T5-AVG', 'O1-AVG', 'Pz-AVG'];
+  for (const label of reps) {
+    const ci = montage.channels.findIndex((c) => c.label === label);
+    check(`N3 ${label} p2p (>75 uV, IK-A3-e)`, pctP2p(data[ci]), 75, 500, ' uV');
+  }
+  const czIdx = montage.channels.findIndex((c) => c.label === 'Cz-AVG');
+  const pk = spectralPeak(welch(data[czIdx], FS, 2048), 0.3, 4);
+  check('N3 Cz-AVG dominant frequency', pk.freq, 0.5, 2, ' Hz');
+}
+
+console.log('\n=== Step 20: normal variants in DISPLAY space (A4 audit) ===\n');
+
+// Same rationale as Step 19: an absolute-microvolt or timing claim (BETS's
+// "<50 ms, <50 uV") is a claim about what a reader sees on the montage-derived
+// trace, not about the raw electrode. Step 13 above already checks these
+// patterns' referential band power/p2p on-off; this repeats the morphology-
+// specific claims on the real display-space channel.
+
+console.log('Wicket (7-11 Hz arciform bursts, temporal, drowsy only): no after-going slow wave, bipolar-ap:');
+{
+  // Not a single pointed transient (it's an oscillatory arciform burst), so
+  // "no slow wave" is checked spectrally rather than via a single base-width
+  // measure: if a slow wave rode along after each burst, the isolated
+  // contribution would carry real delta-band (0.5-4 Hz) power alongside its
+  // arciform (7-11 Hz) power. wicketSide()'s morphology only ever calls
+  // arciformSignal (never a spikeSlowWave-family helper) and TransientSource
+  // returns exactly 0 outside each event's duration window, so that delta
+  // contribution should be negligible.
+  const diff = displayContrib('bipolar-ap', 'drowsy', 'wicket', 'T3-T5', 120, 20);
+  const arciform = bandPower(diff, 7, 11);
+  const delta = bandPower(diff, 0.5, 4);
+  check('wicket T3-T5 has no after-going slow wave (delta/arciform power ratio)',
+    delta / arciform, 0, 0.15);
+}
+
+console.log('\nBETS (<50 ms, <50 uV, temporal, drowsy/N1/N2 only, no slow wave), bipolar-ap:');
+{
+  // A4 fix: BETS is now state-gated (variants.ts betsSide) — drowsy is the
+  // state it actually fires in, and the state a reader would see it in.
+  const diff = displayContrib('bipolar-ap', 'drowsy', 'bets', 'T3-T5', 120, 20);
+  let peak = 0, peakAt = 0;
+  for (let k = 0; k < diff.length; k++) if (Math.abs(diff[k]) > Math.abs(peak)) { peak = diff[k]; peakAt = k; }
+  const thresh = 0.1 * Math.abs(peak);
+  let lo = peakAt; while (lo > 0 && Math.abs(diff[lo]) >= thresh) lo--;
+  let hi = peakAt; while (hi < diff.length - 1 && Math.abs(diff[hi]) >= thresh) hi++;
+  const widthMs = ((hi - lo) / FS) * 1000;
+  let slow = 0;
+  const end = Math.min(diff.length, peakAt + Math.round(0.6 * FS));
+  for (let k = peakAt; k < end; k++) if (diff[k] > slow) slow = diff[k];
+  check('BETS T3-T5 base width (site/patterns.ts: <50 ms)', widthMs, 5, 50, ' ms');
+  check('BETS T3-T5 peak amplitude (patterns.ts: <50 uV)', Math.abs(peak), 3, 50, ' uV');
+  check('BETS T3-T5 has no after-going slow wave', slow / Math.abs(peak), 0, 0.15);
+}
+
+console.log('\nLambda: surface-positive; polarity is montage-dependent (§4/IK-008), same family as POSTS:');
+{
+  const o1Car = displayContrib('reference-car', 'awake', 'lambda', 'O1-AVG', 120, 20);
+  let carPeak = 0;
+  for (const v of o1Car) if (Math.abs(v) > Math.abs(carPeak)) carPeak = v;
+  check('lambda renders DOWN at O1-AVG, reference-car (surface-positive)', carPeak, 0, Infinity, ' uV');
+
+  const p3O1 = displayContrib('bipolar-ap', 'awake', 'lambda', 'P3-O1', 120, 20);
+  let bipPeak = 0;
+  for (const v of p3O1) if (Math.abs(v) > Math.abs(bipPeak)) bipPeak = v;
+  check('lambda polarity inverts at P3-O1, bipolar-ap (O1 is input2)', bipPeak, -Infinity, 0, ' uV');
+}
+
+console.log('\n14 & 6 positive bursts: surface-positive; polarity is montage-dependent (§4/IK-008):');
+{
+  // The classic montage for "14 & 6 positive spikes" is a referential ear
+  // derivation — the burst is a broad, near-bilateral posterior-temporal field,
+  // so common-average and ipsilateral references partly cancel it (T6-AVG lifts
+  // only ~4 uV; the K-complex/Pz mechanism above). The contralateral-ear channel
+  // shows the surface-positive comb-teeth cleanly, deflecting DOWN.
+  const t6Contra = displayContrib('reference-contra', 'drowsy', '14-6-pos', 'T6-A1', 90, 20);
+  let contraPeak = 0;
+  for (const v of t6Contra) if (Math.abs(v) > Math.abs(contraPeak)) contraPeak = v;
+  check('14-6-pos renders DOWN at T6-A1, reference-contra (surface-positive)', contraPeak, 0, Infinity, ' uV');
+
+  // Montage dependence: on a bipolar link where T6 is input 2, the same
+  // surface-positive burst inverts and deflects UP.
+  const t4t6 = displayContrib('bipolar-ap', 'drowsy', '14-6-pos', 'T4-T6', 90, 20);
+  let bipPeak = 0;
+  for (const v of t4t6) if (Math.abs(v) > Math.abs(bipPeak)) bipPeak = v;
+  check('14-6-pos polarity inverts at T4-T6, bipolar-ap (T6 is input2)', bipPeak, -Infinity, 0, ' uV');
+}
+
+console.log('\n=== Step 22: ictal in DISPLAY space (A7 audit) ===\n');
+
+// Step 16 already checks the ictal sources referentially (raw electrode
+// space). A seizure's diagnosis is its EVOLUTION, and CLAUDE.md §4 requires
+// that be verified on the montage-derived, common-average-referenced channel
+// a reader actually looks at, not just as a spectral scalar on the raw
+// electrode. This section repeats the frequency-evolution and field claims in
+// that display space.
+
+console.log('Absence (display space, reference-car): peak frequency lands in the typical 3 Hz band (LEARNINGEEG §12: "3 Hz generalised spike-wave"), frontal-max but still generalised:');
+{
+  // absence-ictal has no gate(), so on-minus-off isolates its own contribution
+  // cleanly. ABSENCE_DELAY is 4 s and the shortest possible epoch is 5 s
+  // (ictal.ts: `dur = g.range(5, 15)`), so a 4.5-8 s window is inside the
+  // discharge for every seed.
+  const fz = displayContrib('reference-car', 'awake', 'absence-ictal', 'Fz-AVG', 12, 7);
+  const fzWin = fz.subarray(Math.floor(4.5 * FS), Math.floor(8 * FS));
+  const pk = spectralPeak(welch(fzWin, FS, 512), 2, 4);
+  check('absence Fz-AVG discharge peak frequency (typical: 2.5-3.5 Hz, not atypical)', pk.freq, 2.5, 3.5, ' Hz');
+
+  // Generalised-but-frontal: O1-AVG must still carry real 2.5-3.5 Hz power
+  // (this is a generalised discharge, not an isolated frontal focus), and
+  // less of it than Fz-AVG (frontal predominance survives the CAR transform).
+  const o1 = displayContrib('reference-car', 'awake', 'absence-ictal', 'O1-AVG', 12, 7);
+  const o1Win = o1.subarray(Math.floor(4.5 * FS), Math.floor(8 * FS));
+  const fzPow = winPower(fzWin, 2.5, 3.5), o1Pow = winPower(o1Win, 2.5, 3.5);
+  check('absence O1-AVG carries real 2.5-3.5 Hz power (generalised field reaches occiput)',
+    o1Pow, 1, 1e6, ' uV^2');
+  check('absence Fz-AVG / O1-AVG 2.5-3.5 Hz power (frontal-max survives CAR)', fzPow / o1Pow, 1.1, 20);
+
+  // IK-017: absence returns INSTANTLY to baseline at offset — no post-ictal
+  // slowing. A prior port added a ~2 s fading delta burst after each discharge;
+  // that oscillatory 0.8-2.1 Hz tail is a clinical error (real absence has none)
+  // and is removed. Verify no oscillatory delta survives into the post-offset
+  // gap. NOTE: the amplifier high-pass (chain.ts) leaves a MONOTONIC baseline-
+  // recovery tail after the discharge's net-DC offset — that is a legitimate,
+  // universal display-chain artifact, not post-ictal slowing. welch subtracts
+  // the per-segment mean, so it rejects that monotonic decay and measures only
+  // the OSCILLATORY 1-2.5 Hz band, which is exactly what the removed fade was
+  // and the recovery tail is not. Detect the first discharge's offset (last
+  // 0.5 s bin whose RMS clears the discharge threshold), then read 2.6 s just
+  // past it. With the fade the band held >=3.6 uV^2; without it, ~0.
+  const isoAbs = displayContrib('reference-car', 'awake', 'absence-ictal', 'Fz-AVG', 24, 7);
+  const binRms = (t0: number, t1: number) => {
+    const s = isoAbs.subarray(Math.floor(t0 * FS), Math.floor(t1 * FS));
+    let sum = 0;
+    for (const v of s) sum += v * v;
+    return Math.sqrt(sum / s.length);
+  };
+  let offset = 4;
+  for (let t = 4; t < 20; t += 0.5) if (binRms(t, t + 0.5) > 30) offset = t + 0.5;
+  const postOffset = isoAbs.subarray(Math.floor((offset + 0.3) * FS), Math.floor((offset + 2.9) * FS));
+  check('absence has NO post-ictal oscillatory delta (instant recovery, IK-017)',
+    winPower(postOffset, 1, 2.5), 0, 2, ' uV^2');
+}
+
+console.log('\nGTC (display space, reference-car): recruiting -> clonic slowing -> post-ictal suppression:');
+{
+  // gtc-ictal defines gate(), which scales the WHOLE background (engine.ts's
+  // neuralGate), not just this generator's own output — an on-minus-off diff
+  // would net out the very suppression being measured. Read the raw on-run
+  // instead, exactly as Step 16's raw-space check does, through the montage/
+  // CAR transform. GTC_DELAY = 6 s, so absolute time = 6 + cycle: recruiting
+  // is t in [6,10), clonic [10,24), decrescendo [24,41), suppression [41,56).
+  const gt = runDisplay('reference-car', 'awake', ['gtc-ictal'], 60, 11);
+  const fzIdx = gt.montage.channels.findIndex((c) => c.label === 'Fz-AVG');
+  const czIdx = gt.montage.channels.findIndex((c) => c.label === 'Cz-AVG');
+  const slice = (ch: number, t0: number, t1: number) =>
+    gt.data[ch].subarray(Math.floor(t0 * FS), Math.floor(t1 * FS));
+
+  // gate()==1 throughout recruiting (cycle < 35), so on-minus-off cleanly
+  // isolates the recruiting rhythm's own contribution here — unlike the
+  // suppression checks below, nothing is confounded by scaling the background.
+  // A ratio against the raw run's own delta band (as opposed to this isolated
+  // diff) is unstable: awake background is 1/f-shaped, so ambient low-frequency
+  // power alone can rival a still-building (env = (cycle/4)^2) beta rhythm —
+  // the isolated diff sidesteps that floor entirely. The recruiting rhythm's
+  // BETA_TONES carrier runs at freqScale 1.2 (a fixed multiplier, not a sweep),
+  // so — unlike the focal-temporal/frontal chirps below — spectralPeak's single
+  // dominant bin is a fair read here: the 14.2 Hz tone (amplitude 1.0, the
+  // tallest in BETA_TONES) scales to ~17 Hz.
+  const gtcContrib = displayContrib('reference-car', 'awake', 'gtc-ictal', 'Fz-AVG', 12, 11);
+  const recruitWin = gtcContrib.subarray(Math.floor(7 * FS), Math.floor(9.5 * FS));
+  const recruitPeak = spectralPeak(welch(recruitWin, FS, 512), 10, 32);
+  check('GTC Fz-AVG recruiting contribution p2p (fast recruiting rhythm, isolated)',
+    pctP2p(recruitWin), 10, 200, ' uV');
+  check('GTC Fz-AVG recruiting contribution peak frequency (beta-range, ~17 Hz)',
+    recruitPeak.freq, 14, 22, ' Hz');
+
+  // Clonic slowing 3 -> 1.5 Hz, read as a spectral-peak drop between an early
+  // and a late 3 s window inside the clonic phase.
+  const early = spectralPeak(welch(slice(fzIdx, 10.5, 13.5), FS, 512), 1, 4);
+  const late = spectralPeak(welch(slice(fzIdx, 20.5, 23.5), FS, 512), 1, 4);
+  check('GTC Fz-AVG clonic peak frequency, early window', early.freq, 2.2, 3.2, ' Hz');
+  check('GTC Fz-AVG clonic peak frequency, late window (slows toward 1.5 Hz)', late.freq, 1.2, 2.2, ' Hz');
+  check('GTC Fz-AVG clonic peak frequency, early / late (organised slowing)', early.freq / late.freq, 1.15, 1e6);
+
+  // Generalised: the clonic discharge must be scalp-visible beyond Fz, at Cz.
+  const czClonic = pctP2p(slice(czIdx, 12, 22));
+  const czBaseline = pctP2p(slice(czIdx, 0, 5));
+  check('GTC Cz-AVG clonic / pre-ictal p2p (generalised field reaches Cz)', czClonic / czBaseline, 1.5, 1e6);
+
+  // Post-ictal suppression: near-flat against the clonic discharge, on the
+  // display-space channel — the display-space pin for the raw-space check
+  // already covering IK's "post-ictal attenuation, not silence".
+  const clonicP2p = pctP2p(slice(fzIdx, 11, 24));
+  const suppP2p = pctP2p(slice(fzIdx, 45, 49));
+  check('GTC Fz-AVG post-ictal / clonic p2p (display-space suppression)', suppP2p / clonicP2p, 0, 0.4);
+}
+
+console.log('\nFocal temporal (display space, reference-car T3-AVG): onset theta evolves 6 -> 3.5 Hz:');
+{
+  // No gate() on this source, so on-minus-off isolates cleanly. FTEMP_DELAY=5,
+  // FTEMP_ACTIVE=30 -> active window is absolute t in [5,35). Early window
+  // sits just after onset (small amplitude, near f0); late window sits just
+  // before the discharge ends (large amplitude, near f1) — never `sin(2*pi*
+  // f(t)*t)`, the sweep comes from `sweepPhase`'s phase integral (morphology.ts).
+  //
+  // NOT read via spectralPeak's single dominant bin: THETA_TONES weights its
+  // components unevenly (4.3 Hz carries amplitude 1.0, 7.2 Hz only 0.7), so the
+  // component the sweep scales up to a high frequency is never the tallest bin
+  // in the spectrum, and the tallest-bin frequency undershoots the true sweep
+  // endpoint at BOTH ends. Step 16's raw-space "ictal frequency knob" check hits
+  // the identical multi-tone-sweep shape and reads it as a band-power SWAP
+  // instead (validateEngine.ts, "T3 low/high band ratio") — mirrored here.
+  const t3 = displayContrib('reference-car', 'awake', 'focal-temporal-ictal', 'T3-AVG', 40, 13);
+  const earlyWin = t3.subarray(Math.floor(6 * FS), Math.floor(9 * FS));
+  const lateWin = t3.subarray(Math.floor(31 * FS), Math.floor(34 * FS));
+  const earlyRatio = winPower(earlyWin, 4.8, 8) / winPower(earlyWin, 2.5, 4);
+  const lateRatio = winPower(lateWin, 4.8, 8) / winPower(lateWin, 2.5, 4);
+  check('focal-temporal T3-AVG onset high/low(4.8-8/2.5-4 Hz) band ratio (power sits high, near 6 Hz)',
+    earlyRatio, 2, 1e6);
+  check('focal-temporal T3-AVG late high/low(4.8-8/2.5-4 Hz) band ratio (power shifts low, toward 3.5 Hz)',
+    lateRatio, 0, 1);
+  check('focal-temporal T3-AVG onset / late band-ratio (evolution, not a static rhythm)',
+    earlyRatio / lateRatio, 3, 1e6);
+}
+
+console.log('\nFocal frontal (display space, reference-car F3-AVG): low-voltage-fast onset evolves 18 -> 3 Hz:');
+{
+  // FFRONT_DELAY=5, FFRONT_ACTIVE=15 -> active window is absolute t in [5,20).
+  // Same evolution requirement as the temporal source above, scaled to the
+  // frontal source's much shorter, more explosive timeline.
+  const f3 = displayContrib('reference-car', 'awake', 'focal-frontal-ictal', 'F3-AVG', 25, 17);
+  const early = spectralPeak(welch(f3.subarray(Math.floor(6 * FS), Math.floor(9 * FS)), FS, 512), 2, 25);
+  const late = spectralPeak(welch(f3.subarray(Math.floor(15.5 * FS), Math.floor(18.5 * FS)), FS, 512), 2, 25);
+  check('focal-frontal F3-AVG onset peak frequency (low-voltage FAST, near 18 Hz)', early.freq, 10, 22, ' Hz');
+  check('focal-frontal F3-AVG late peak frequency (evolved down toward 3 Hz)', late.freq, 2, 9, ' Hz');
+  check('focal-frontal F3-AVG onset / late peak frequency (evolves DOWN, the FLE hallmark)',
+    early.freq / late.freq, 1.5, 1e6);
+}
+
+console.log('\n=== Step 23: calibration & amplitude invariants (A8 audit) ===\n');
+
+// These are properties of the DISPLAY TRANSFORM (CLAUDE.md §4), not of any one
+// generator: paper speed, sensitivity, and the negative-up sign convention are
+// supposed to hold identically for every montage, pattern, and toggle. `renderTrace`
+// drives the real engine through the exact geometry `EEGCanvas.tsx` uses and now
+// returns the actual pxPerSec/pxPerMm/pxPerUV it rendered with (renderTrace.ts:
+// RenderResult), so the checks below read those production numbers directly
+// instead of re-deriving the formulas and risking testing the reimplementation
+// rather than the code.
+//
+// Source-level cross-check (read, not executed — EEGCanvas.tsx is a React
+// component and can't run headlessly here): EEGCanvas.tsx:199 computes
+// `pxPerSec = currentSettings.speed * PX_PER_MM_X` and renderTrace.ts:232 computes
+// the byte-identical `pxPerSec = speed * PX_PER_MM_X`. EEGCanvas.tsx:308 computes
+// `pxPerUV = pxPerMm / currentSettings.sensitivity` and renderTrace.ts:234 computes
+// the byte-identical `pxPerUV = pxPerMm / sensitivity`. EEGCanvas.tsx:395 draws
+// `y = centerY + v` (scale folded into v beforehand) and renderTrace.ts:278 draws
+// `y = centerY + v * scale` — both negative-up (+v renders downward). The two
+// files hold their own copies of PX_PER_MM_X=4 / MM_PER_ROW=10 / GAP_UNITS=0.40
+// (EEGCanvas.tsx:35-37, renderTrace.ts:39-41) rather than sharing one module; they
+// agree today (checked by inspection), but nothing but this comment and manual
+// review would catch them drifting apart — flagged in the audit report, not fixed
+// here (no divergence found, so no surgical change is justified).
+
+console.log('Paper speed: mm/s -> px/s at PX_PER_MM_X=4 (CLAUDE.md §4; 30 mm/s adult default):');
+{
+  // LEARNINGEEG-STUDY.md §2: adult default 30 mm/s. The UI's own speed options
+  // (simTypes.ts SPEED_VALUES) are 10 | 20 | 30.
+  for (const speed of [10, 20, 30] as const) {
+    const res = renderTrace({ speed, seconds: 2, out: `${SCRATCH}/a8-speed-${speed}.png` });
+    check(`pxPerSec @ ${speed} mm/s (speed * PX_PER_MM_X)`, res.pxPerSec, speed * 4, speed * 4);
+  }
+  // Empirical cross-check independent of the pxPerSec field: two renders at the
+  // same speed but different durations must differ in width by exactly
+  // (seconds2 - seconds1) * pxPerSec pixels, i.e. 1 s of paper is 120 px at
+  // 30 mm/s regardless of how the width is assembled internally.
+  const w1 = renderTrace({ speed: 30, seconds: 1, out: `${SCRATCH}/a8-w1.png` }).width;
+  const w11 = renderTrace({ speed: 30, seconds: 11, out: `${SCRATCH}/a8-w11.png` }).width;
+  check('width(11s) - width(1s) @ 30 mm/s (10 s * 120 px/s)', w11 - w1, 1200, 1200, ' px');
+}
+
+console.log('\nSensitivity: µV/mm calibration (CLAUDE.md §4; UI options 1|3|5|7|10|15|30 µV/mm):');
+{
+  for (const sensitivity of [1, 3, 5, 7, 10, 15, 30] as const) {
+    const res = renderTrace({ sensitivity, seconds: 2, out: `${SCRATCH}/a8-sens-${sensitivity}.png` });
+    // Defining relationship: pxPerUV = pxPerMm / sensitivity, i.e. mm = µV / sensitivity.
+    check(`pxPerUV * sensitivity == pxPerMm (${sensitivity} µV/mm)`,
+      (res.pxPerUV * sensitivity) / res.pxPerMm, 0.999, 1.001);
+  }
+  // The worked example from the audit brief: a 50 µV deflection at 7 µV/mm
+  // sensitivity should measure ~7.14 mm on paper.
+  const res7 = renderTrace({ sensitivity: 7, seconds: 2, out: `${SCRATCH}/a8-sens-7.png` });
+  const mmFor50uV = (50 * res7.pxPerUV) / res7.pxPerMm;
+  check('50 µV calibration deflection @ 7 µV/mm', mmFor50uV, 7.0, 7.3, ' mm');
+}
+
+console.log('\nNegative-up polarity (IK-008; CLAUDE.md §4): synthetic input, montage-only, no pattern:');
+{
+  // Isolates the sign convention from any one generator's morphology: feed a
+  // synthetic constant voltage straight into the production computeChannelVoltage
+  // (the same function EEGCanvas/renderTrace call every sample) on a real bipolar
+  // channel definition, then apply renderTrace's own pxPerUV (production number,
+  // not reimplemented) to get the pixel deflection EEGCanvas.tsx:395 /
+  // renderTrace.ts:278 would draw.
+  const bipolarAp = MONTAGES['bipolar-ap'];
+  const fp1F3 = bipolarAp.channels.find((c) => c.label === 'Fp1-F3') as ChannelDef;
+  const res = renderTrace({ sensitivity: 7, seconds: 1, out: `${SCRATCH}/a8-polarity.png` });
+
+  const vSurfacePositive = computeChannelVoltage(fp1F3, 0, { Fp1: 50 }, 0); // input1 (Fp1) > input2 (F3)
+  const vSurfaceNegative = computeChannelVoltage(fp1F3, 0, { Fp1: -50 }, 0);
+  check('computeChannelVoltage(Fp1=+50,F3=0) is surface-positive (input1 - input2)', vSurfacePositive, 50, 50, ' uV');
+  check('computeChannelVoltage(Fp1=-50,F3=0) is surface-negative', vSurfaceNegative, -50, -50, ' uV');
+
+  const yOffsetPositive = vSurfacePositive * res.pxPerUV; // y - centerY, canvas y grows down
+  const yOffsetNegative = vSurfaceNegative * res.pxPerUV;
+  check('surface-positive (+50 µV) deflects DOWN (y - centerY > 0)', yOffsetPositive, 0.01, Infinity, ' px');
+  check('surface-negative (-50 µV) deflects UP (y - centerY < 0)', yOffsetNegative, -Infinity, -0.01, ' px');
+}
+
+console.log('\nNormal amplitude ranges by region (LEARNINGEEG-STUDY.md §1/§3): adult scalp 10-100 µV (mostly 10-50); AP gradient:');
+{
+  // Referential (reference-car), awake, no toggles: the general adult amplitude
+  // envelope and the AP-gradient claim ("faster/lower-amplitude anteriorly,
+  // slower/higher-amplitude posteriorly") restated in amplitude space, as a
+  // corollary to IK-006's power-ratio version of the same gradient.
+  const { montage, data } = runDisplay('reference-car', 'awake', [], 180, 42);
+  const idx = (label: string) => montage.channels.findIndex((c) => c.label === label);
+  const o1P2p = pctP2p(data[idx('O1-AVG')]);
+  const fp1P2p = pctP2p(data[idx('Fp1-AVG')]);
+  check('O1-AVG p2p amplitude, awake eyes-closed (LEARNINGEEG §1: adult scalp 10-100 µV)', o1P2p, 10, 100, ' uV');
+  check('O1-AVG p2p > Fp1-AVG p2p (AP gradient in amplitude space, LEARNINGEEG §3)', o1P2p / fp1P2p, 1.1, 1e6);
+}
+// The A-P gradient in full. The check above compares only the two ENDS of the
+// chain (O1 vs Fp1), so it passes while the middle of the chain is inverted --
+// which is the state the engine shipped in: parietal was the QUIETEST region on
+// the head (P4 8.8 uV RMS, below Fp1's 8.5 only by a hair) and the midline ran
+// Fz > Cz > Pz, backwards. Here the gradient is asserted link by link, and in
+// both of the things learningeeg's Normal Awake chapter says it is: "faster,
+// lower amplitude frequencies ... towards the front" and "slower, higher
+// amplitude frequencies ... in the back". Nothing tested the frequency half.
+//
+// `reference-ipsi`, not `reference-car`: with only 19 electrodes the common
+// average is a poor stand-in for infinity. It subtracts a posteriorly-weighted
+// mean from every channel, which lifts the frontal rows, and it nearly nulls Cz
+// (Cz sits close to the array's electrical centroid) -- so it measures this
+// gradient backwards. Same signal, same seeds: front-to-back reads 2.48 in CAR
+// against 3.86 ear-referenced, and CAR puts Fp1 ABOVE F3. The ear reference is
+// what a reader judges amplitude topography on, so the topographic claim is
+// asserted there. The check above keeps CAR because IK-028 names it.
+//
+// Averaged over three seeds: normal hemispheric asymmetry runs to 50%
+// (LEARNINGEEG §1) and must not be what decides an ordering.
+//
+// NOT asserted: parietal > central. Measured (P3+P4)/(C3+C4) = 0.95. Central
+// still outranks parietal because every subject gets an always-on,
+// full-strength mu rhythm (STATE_GAINS.awake.mu = 1.00), worth ~5.5 uV RMS at
+// C3; zeroing it takes the ratio to 1.08 with the whole ordering correct. Real
+// mu is present in a minority of adults and is not a universal background
+// component, but changing that gain is out of scope here, so the shortfall is
+// recorded rather than asserted.
+{
+  const SEEDS = [42, 7, 1234];
+  const p2p: Record<string, number[]> = {};
+  const cent: Record<string, number[]> = {};
+  for (const seed of SEEDS) {
+    const { montage, data } = runDisplay('reference-ipsi', 'awake', [], 60, seed);
+    montage.channels.forEach((ch, i) => {
+      if (ch.group === 'ecg') return;
+      const el = ch.active as string;
+      (p2p[el] ??= []).push(pctP2p(data[i]));
+      // Spectral centroid over 2-30 Hz: one number for "faster" vs "slower"
+      // without committing to a band. Below 2 Hz is the amplifier corner,
+      // above 30 Hz is muscle and mains.
+      const psd = welch(data[i], FS, 2048);
+      let num = 0, den = 0;
+      for (let k = 0; k < psd.freqs.length; k++) {
+        const f = psd.freqs[k];
+        if (f < 2 || f > 30) continue;
+        num += f * psd.power[k];
+        den += psd.power[k];
+      }
+      (cent[el] ??= []).push(num / den);
+    });
+  }
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const A = (el: string) => mean(p2p[el]);
+  const C = (el: string) => mean(cent[el]);
+  const all = Object.keys(p2p).map(A);
+
+  check('quietest channel p2p, awake, no toggles (LEARNINGEEG §1: adult scalp 10-100 µV)', Math.min(...all), 10, 100, ' uV');
+  check('loudest channel p2p, awake, no toggles (LEARNINGEEG §1: adult scalp 10-100 µV)', Math.max(...all), 10, 100, ' uV');
+
+  // Amplitude half of the gradient, link by link up each chain.
+  check('F3 / Fp1 p2p (AP gradient rises backwards, LEARNINGEEG §3)', A('F3') / A('Fp1'), 1.0, 1e6);
+  check('C3 / F3 p2p (AP gradient, LEARNINGEEG §3)', A('C3') / A('F3'), 1.0, 1e6);
+  check('O1 / P3 p2p (AP gradient, LEARNINGEEG §3)', A('O1') / A('P3'), 1.0, 1e6);
+  check('O1 / C3 p2p (AP gradient, LEARNINGEEG §3)', A('O1') / A('C3'), 1.0, 1e6);
+  check('F4 / Fp2 p2p (AP gradient, LEARNINGEEG §3)', A('F4') / A('Fp2'), 1.0, 1e6);
+  check('C4 / F4 p2p (AP gradient, LEARNINGEEG §3)', A('C4') / A('F4'), 1.0, 1e6);
+  check('O2 / P4 p2p (AP gradient, LEARNINGEEG §3)', A('O2') / A('P4'), 1.0, 1e6);
+  check('O2 / C4 p2p (AP gradient, LEARNINGEEG §3)', A('O2') / A('C4'), 1.0, 1e6);
+  check('Cz / Fz p2p (AP gradient on the midline, LEARNINGEEG §3)', A('Cz') / A('Fz'), 1.0, 1e6);
+  check('Pz / Cz p2p (AP gradient on the midline, LEARNINGEEG §3)', A('Pz') / A('Cz'), 1.0, 1e6);
+  // Parietal is no longer the floor of the head.
+  check('(P3+P4) / (F3+F4) p2p (parietal above frontal, LEARNINGEEG §3)', (A('P3') + A('P4')) / (A('F3') + A('F4')), 1.15, 1e6);
+  check('(P3+P4) / (Fp1+Fp2) p2p (parietal above frontopolar, LEARNINGEEG §3)', (A('P3') + A('P4')) / (A('Fp1') + A('Fp2')), 1.5, 1e6);
+  // Magnitude of the whole gradient. learningeeg's ap-gradient reference image
+  // reads ~3-4x; the band admits normal variation without letting the gradient
+  // collapse back to the 2.2x it had, or run away past a plausible ceiling.
+  check('(O1+O2) / (Fp1+Fp2) p2p (front-to-back magnitude, LEARNINGEEG §3)', (A('O1') + A('O2')) / (A('Fp1') + A('Fp2')), 1.8, 5);
+  // Frequency half of the gradient: "faster towards the front".
+  check('frontopolar / occipital spectral centroid, 2-30 Hz (AP gradient in FREQUENCY, LEARNINGEEG §3)', (C('Fp1') + C('Fp2')) / (C('O1') + C('O2')), 1.1, 3);
+}
+
+console.log('\n=== Step 21: epileptiform in DISPLAY space (A6 audit) ===\n');
+
+// Step 15 already checks these sources referentially (raw electrode space).
+// CLAUDE.md §4 requires the clinical claims specific to epileptiform
+// discharges — spike-vs-sharp DURATION, phase-reversal LOCALISATION, the
+// generalised/frontal-max shape of 3 Hz GSW, multiple spikes per polyspike
+// complex, burst-suppression's alternation, hypsarrhythmia's chaotic
+// multifocality — verified on the montage-derived, common-average/bipolar
+// channel a reader actually reads, not just as a referential scalar.
+
+console.log('IK-012 (spike/sharp duration, ±slow wave) survives the montage transform, bipolar-ap T3-T5:');
+{
+  // Same measure() as Step 20's BETS check: 10%-of-peak base width, and the
+  // after-going slow wave measured as the largest positive excursion within
+  // 0.6 s of the peak, divided by |peak|.
+  const measure = (d: Float64Array) => {
+    let peak = 0, peakAt = 0;
+    for (let k = 0; k < d.length; k++) if (d[k] < peak) { peak = d[k]; peakAt = k; }
+    const thresh = 0.1 * Math.abs(peak);
+    let lo = peakAt; while (lo > 0 && Math.abs(d[lo]) >= thresh) lo--;
+    let hi = peakAt; while (hi < d.length - 1 && Math.abs(d[hi]) >= thresh) hi++;
+    const widthMs = ((hi - lo) / FS) * 1000;
+    let slow = 0;
+    const end = Math.min(d.length, peakAt + Math.round(0.6 * FS));
+    for (let k = peakAt; k < end; k++) if (d[k] > slow) slow = d[k];
+    return { widthMs, slowRatio: slow / Math.abs(peak), peak: Math.abs(peak) };
+  };
+  const spike = measure(displayContrib('bipolar-ap', 'awake', 'ied-spike', 'T3-T5', 180, 7));
+  const sharp = measure(displayContrib('bipolar-ap', 'awake', 'ied-sharp', 'T3-T5', 180, 7));
+  const spikeWave = measure(displayContrib('bipolar-ap', 'awake', 'ied-spike-wave', 'T3-T5', 180, 7));
+  const sharpWave = measure(displayContrib('bipolar-ap', 'awake', 'ied-sharp-wave', 'T3-T5', 180, 7));
+  check('ied-spike T3-T5 base width (IK-012: 20-70 ms)', spike.widthMs, 20, 70, ' ms');
+  check('ied-sharp T3-T5 base width (IK-012: 70-200 ms)', sharp.widthMs, 70, 200, ' ms');
+  check('ied-spike T3-T5 has no after-going slow wave', spike.slowRatio, 0, 0.15);
+  check('ied-sharp T3-T5 has no after-going slow wave', sharp.slowRatio, 0, 0.15);
+  check('ied-spike-wave T3-T5 base width stays spike-length (~20-70 ms)', spikeWave.widthMs, 20, 70, ' ms');
+  check('ied-sharp-wave T3-T5 base width stays sharp-length (~70-200 ms)', sharpWave.widthMs, 70, 200, ' ms');
+  check('ied-spike-wave T3-T5 HAS an after-going slow wave', spikeWave.slowRatio, 0.3, 1.5);
+  check('ied-sharp-wave T3-T5 HAS an after-going slow wave', sharpWave.slowRatio, 0.3, 1.5);
+}
+
+console.log('\nIK-003 case (a): a focal SPIKE source produces a phase reversal AT the electrode it peaks under, bipolar-ap:');
+{
+  // Step 16's existing IK-003 checks use focal-temporal-ictal (a rhythmic
+  // seizure source). The audit brief specifically asks for this signature
+  // reproduced with a genuine SPIKE source — focal-spikes-lt/rt/lf, anchored
+  // at T3/T4/F3 respectively — so the phase-reversal claim is verified for
+  // the interictal spike morphology (spikeSlowWave), not only the ictal one.
+  const check_pair = (toggle: string, link1: string, link2: string, atLabel: string) => {
+    const d1 = displayContrib('bipolar-ap', 'awake', toggle, link1, 180, 3);
+    const d2 = displayContrib('bipolar-ap', 'awake', toggle, link2, 180, 3);
+    // Bound just past -1 (not exactly -1.0) to tolerate floating-point
+    // correlation landing at e.g. -1.0000000000000002 for a near-perfectly
+    // anti-correlated pair.
+    check(`${toggle}: ${link1} vs ${link2} correlation (phase reversal at ${atLabel})`,
+      corr(d1, d2), -1.0001, -0.4);
+    let p1 = 0, p2 = 0;
+    for (const v of d1) if (Math.abs(v) > Math.abs(p1)) p1 = v;
+    for (const v of d2) if (Math.abs(v) > Math.abs(p2)) p2 = v;
+    check(`${toggle}: ${link1} peak vs ${link2} peak deflect OPPOSITE ways (sign product)`,
+      Math.sign(p1) * Math.sign(p2), -1, -1);
+  };
+  check_pair('focal-spikes-lt', 'F7-T3', 'T3-T5', 'T3');
+  check_pair('focal-spikes-rt', 'F8-T4', 'T4-T6', 'T4');
+  check_pair('focal-spikes-lf', 'Fp1-F3', 'F3-C3', 'F3');
+}
+
+console.log('\nIK-003 case (b): a focal SPIKE source anchored MIDWAY between two electrodes cancels on the link spanning them, bipolar-ap:');
+{
+  // No toggle in the app anchors a spike source between two electrodes — every
+  // focal-spikes-* toggle peaks ON an electrode. Following Step 16's existing
+  // synthetic-leadfield precedent (sourceUnder(['F8','T4']) for the static-gain
+  // check), this builds the same midpoint anchor but drives it as a genuine
+  // TIME SERIES through spikeSlowWave and the real computeChannelVoltage, on
+  // the actual Fp2-F8/F8-T4/T4-T6/T6-O2 bipolar-ap channel definitions — a
+  // true display-space check, not a bare static leadfield-gain comparison.
+  const spec = sourceUnder('synthetic-spike-midway-f8-t4', ['F8', 'T4'], { extent: 0.25 });
+  const names = ['Fp2', 'F8', 'T4', 'T6', 'O2'];
+  const lf = buildLeadfield([spec], names);
+  const gainAt = (n: string) => lf.gainAt(names.indexOf(n), 0);
+  const n = Math.round(0.9 * FS); // spikeSlowWave is defined for dt in [0, 0.9]
+  const allVArr: Record<string, number>[] = [];
+  for (let k = 0; k < n; k++) {
+    // Same spike/slow-wave amplitudes as the real focal-spikes-lt/rt toggles.
+    const v = spikeSlowWave(k / FS, 185, 130);
+    const allV: Record<string, number> = {};
+    for (const name of names) allV[name] = gainAt(name) * v;
+    allVArr.push(allV);
+  }
+  const montage = MONTAGES['bipolar-ap'];
+  const chOf = (label: string) => montage.channels.find((c) => c.label === label) as ChannelDef;
+  const chFp2F8 = chOf('Fp2-F8'), chF8T4 = chOf('F8-T4'), chT4T6 = chOf('T4-T6'), chT6O2 = chOf('T6-O2');
+  const trace = (ch: ChannelDef) => allVArr.map((allV, k) => computeChannelVoltage(ch, k / FS, allV, 0));
+  const peakOf = (arr: number[]) => arr.reduce((p, v) => (Math.abs(v) > Math.abs(p) ? v : p), 0);
+  const pk1 = peakOf(trace(chFp2F8));
+  const pk2 = peakOf(trace(chF8T4));
+  const pk3 = peakOf(trace(chT4T6));
+  const pk4 = peakOf(trace(chT6O2));
+  check('F8-T4 (spans the midway source) is near-isoelectric vs its flanks',
+    Math.abs(pk2) / Math.max(Math.abs(pk1), Math.abs(pk3)), 0, 0.1);
+  check('Fp2-F8 and T4-T6 (the flanking links) deflect OPPOSITE ways', Math.sign(pk1) * Math.sign(pk3), -1, -1);
+  check('T4-T6 and T6-O2 continue in the SAME direction past the source', Math.sign(pk3) * Math.sign(pk4), 1, 1);
+  check('T6-O2 decays relative to T4-T6 (falloff with distance)', Math.abs(pk4) / Math.abs(pk3), 0, 0.5);
+}
+
+console.log('\n3 Hz GSW: ~3 Hz, frontally-dominant, generalised/bilateral, spike-then-slow, bipolar-ap:');
+{
+  const fzcz = displayContrib('bipolar-ap', 'awake', '3hz-gsw', 'Fz-Cz', 60, 11);
+  const pk = spectralPeak(welch(fzcz, FS, 4096), 2, 4);
+  check('3hz-gsw Fz-Cz discharge frequency (LEARNINGEEG §12: ~3 Hz)', pk.freq, 2.6, 3.4, ' Hz');
+
+  const fp1f3 = displayContrib('bipolar-ap', 'awake', '3hz-gsw', 'Fp1-F3', 60, 11);
+  const p3o1 = displayContrib('bipolar-ap', 'awake', '3hz-gsw', 'P3-O1', 60, 11);
+  const fp2f4 = displayContrib('bipolar-ap', 'awake', '3hz-gsw', 'Fp2-F4', 60, 11);
+  check('3hz-gsw frontal-max: Fp1-F3 p2p > P3-O1 p2p', pctP2p(fp1f3) / pctP2p(p3o1), 1.2, 8);
+  check('3hz-gsw generalised/bilateral: Fp1-F3 p2p ~= Fp2-F4 p2p (symmetric, unlike a focal spike)',
+    pctP2p(fp1f3) / pctP2p(fp2f4), 0.6, 1.6);
+
+  // Spike-then-slow within one ~333 ms cycle: the sharp component leads, the
+  // after-going slow wave follows within the same cycle, not the next one.
+  let peak = 0, peakAt = 0;
+  for (let k = 0; k < fzcz.length; k++) if (fzcz[k] < peak) { peak = fzcz[k]; peakAt = k; }
+  let slowMax = 0, slowAt = 0;
+  const winEnd = Math.min(fzcz.length, peakAt + Math.round(0.25 * FS));
+  for (let k = peakAt; k < winEnd; k++) if (fzcz[k] > slowMax) { slowMax = fzcz[k]; slowAt = k; }
+  check('3hz-gsw Fz-Cz: after-going slow wave follows the spike within the same ~333 ms cycle',
+    (slowAt - peakAt) / FS * 1000, 20, 250, ' ms');
+}
+
+console.log('\nPolyspike-and-slow-wave: each complex carries MULTIPLE resolvable spikes before its slow wave, bipolar-ap Fz-Cz:');
+{
+  // Fz-Cz (touches the Fz anchor directly) carries far more amplitude than a
+  // link two hops away (Fp1-F3), where the broad frontal source partly
+  // cancels in the bipolar difference. Individual polyspikes within one
+  // complex are 30-40 ms apart (epileptiform.ts: `0.03 + i*0.04`) — closer
+  // than the isolated-spike base width, so they're counted as local minima
+  // dipping back below a relative threshold, not as separate threshold-
+  // crossing runs (which would merge adjacent polyspikes into one).
+  const diff = displayContrib('bipolar-ap', 'awake', 'polyspike-wave', 'Fz-Cz', 60, 13);
+  let gPeak = 0, gAt = 0;
+  for (let k = 0; k < diff.length; k++) if (Math.abs(diff[k]) > Math.abs(gPeak)) { gPeak = diff[k]; gAt = k; }
+  const lo = Math.max(0, gAt - Math.round(0.05 * FS));
+  const hi = Math.min(diff.length, gAt + Math.round(0.22 * FS));
+  const thresh = 0.2 * Math.abs(gPeak);
+  let minimaCount = 0;
+  for (let k = lo + 1; k < hi - 1; k++) {
+    if (diff[k] < -thresh && diff[k] <= diff[k - 1] && diff[k] <= diff[k + 1]) minimaCount++;
+  }
+  check('polyspike-wave Fz-Cz: distinct spikes resolvable in one complex (epileptiform.ts: 2-5 polyspikes)',
+    minimaCount, 2, 5);
+}
+
+console.log('\nBurst-suppression: alternating high-amplitude bursts and near-flat suppression (>=50% suppressed), bipolar-ap Cz-Pz:');
+{
+  // burst-suppression is gate-based (multiplicative on the whole neural
+  // background, not an additive source — engine.ts's neuralGate), so
+  // displayContrib's on-minus-off isolation does not apply; runDisplay's raw
+  // on/off traces are compared directly instead, matching Step 15's
+  // referential precedent for this same pattern.
+  const on = runDisplay('bipolar-ap', 'awake', ['burst-suppression'], 60, 5);
+  const off = runDisplay('bipolar-ap', 'awake', [], 60, 5);
+  const ci = on.montage.channels.findIndex((c) => c.label === 'Cz-Pz');
+  const onCz = on.data[ci], offCz = off.data[ci];
+  check('burst-suppression Cz-Pz p2p amplitude rises during bursts vs baseline', pctP2p(onCz) / pctP2p(offCz), 1.1, 4);
+
+  const p25abs = (x: Float64Array) => Array.from(x, Math.abs).sort((a, b) => a - b)[Math.floor(0.25 * x.length)];
+  check('burst-suppression Cz-Pz: bulk of the trace collapses toward baseline (25th-pctile |amp| ratio)',
+    p25abs(onCz) / p25abs(offCz), 0, 0.7);
+
+  // Duty cycle: LEARNINGEEG §9 requires >=50% suppression to earn the name.
+  // The envelope threshold (25% of its own max) separates burst from
+  // suppression segments without needing to know event boundaries.
+  const env = hilbertEnvelope(onCz);
+  const maxEnv = Math.max(...Array.from(env));
+  const suppressedFrac = Array.from(env).filter((v) => v < 0.25 * maxEnv).length / env.length;
+  check('burst-suppression Cz-Pz: suppressed fraction of the trace (LEARNINGEEG §9: >=50%)', suppressedFrac, 0.5, 0.97);
+}
+
+console.log('\nHypsarrhythmia: high-amplitude, chaotic and multifocal (desynchronised across regions), bipolar-ap:');
+{
+  const on = runDisplay('bipolar-ap', 'awake', ['hypsarrhythmia'], 60, 9);
+  const off = runDisplay('bipolar-ap', 'awake', [], 60, 9);
+  const idxOn = (label: string) => on.montage.channels.findIndex((c) => c.label === label);
+  const idxOff = (label: string) => off.montage.channels.findIndex((c) => c.label === label);
+  const fp1f3On = on.data[idxOn('Fp1-F3')], t4t6On = on.data[idxOn('T4-T6')];
+  check('hypsarrhythmia Fp1-F3 p2p rises vs baseline (high-amplitude)',
+    pctP2p(fp1f3On) / pctP2p(off.data[idxOff('Fp1-F3')]), 1.5, 12);
+  check('hypsarrhythmia T4-T6 p2p rises vs baseline (high-amplitude)',
+    pctP2p(t4t6On) / pctP2p(off.data[idxOff('T4-T6')]), 1.5, 12);
+
+  // Chaotic/multifocal, contrasted directly against 3hz-gsw's generalised
+  // synchrony: two distant chains should correlate weakly for hypsarrhythmia
+  // and much more strongly for 3hz-gsw, using the same channel pair pattern
+  // (Fp1-F3 vs a second chain) so the contrast is apples-to-apples.
+  const hypsCorr = corr(fp1f3On, t4t6On);
+  check('hypsarrhythmia Fp1-F3 vs T4-T6 correlation is weak (chaotic/multifocal, not organised)',
+    hypsCorr, -0.4, 0.4);
+
+  const gsw = runDisplay('bipolar-ap', 'awake', ['3hz-gsw'], 60, 9);
+  const gswCorr = corr(gsw.data[gsw.montage.channels.findIndex((c) => c.label === 'Fp1-F3')],
+    gsw.data[gsw.montage.channels.findIndex((c) => c.label === 'Fp2-F4')]);
+  check('3hz-gsw bilateral correlation is stronger than hypsarrhythmia (generalised vs multifocal)',
+    gswCorr - hypsCorr, 0.1, 2);
+}
+
+console.log('\n=== Step 24: non-epileptiform in DISPLAY space (A5 audit) ===\n');
+
+// Step 12 already checks these sources referentially (raw electrode space).
+// CLAUDE.md §4 requires the clinical claims specific to each pattern's
+// montage-derived shape and topography — FIRDA's frontal-max rhythmicity,
+// focal temporal slowing's lateralization, generalized slowing's true
+// diffuseness, triphasic waves' AP time lag, and GPEDs/LPEDs periodicity —
+// verified on the channel a reader actually reads, not just a spectral
+// scalar averaged across all electrodes.
+
+// No existing primitive detects discrete event onsets in a sparse, jittered
+// pulse train (GPEDs/LPEDs); autocorr's peak-search is a poor fit for signals
+// this sparse (confirmed empirically — it returns no usable secondary peak).
+// Threshold-crossing with a refractory period is the standard, simple way to
+// recover an inter-discharge-interval series from a periodic-source generator.
+function eventIntervals(x: Float64Array, thresholdFrac: number, refractorySec: number): number[] {
+  const absMax = Math.max(...Array.from(x, Math.abs));
+  const thr = absMax * thresholdFrac;
+  const onsets: number[] = [];
+  let lastOnset = -Infinity;
+  for (let i = 1; i < x.length; i++) {
+    const t = i / FS;
+    if (Math.abs(x[i]) >= thr && Math.abs(x[i - 1]) < thr && t - lastOnset > refractorySec) {
+      onsets.push(t);
+      lastOnset = t;
+    }
+  }
+  const intervals: number[] = [];
+  for (let i = 1; i < onsets.length; i++) intervals.push(onsets[i] - onsets[i - 1]);
+  return intervals;
+}
+
+// No existing primitive scans a cross-correlation across a range of lags (the
+// DSP module's autocorr is single-signal only); this is the standard way to
+// find the timing offset between two related channels for the triphasic-wave
+// AP-lag claim.
+function bestLag(a: Float64Array, b: Float64Array, maxLagSamples: number): { lag: number; corr: number } {
+  let best = -Infinity, bestLagV = 0;
+  for (let lag = -maxLagSamples; lag <= maxLagSamples; lag++) {
+    let sa = 0, sb = 0, cnt = 0;
+    for (let i = 0; i < a.length; i++) {
+      const j = i + lag;
+      if (j < 0 || j >= b.length) continue;
+      sa += a[i]; sb += b[j]; cnt++;
+    }
+    const ma = sa / cnt, mb = sb / cnt;
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < a.length; i++) {
+      const j = i + lag;
+      if (j < 0 || j >= b.length) continue;
+      num += (a[i] - ma) * (b[j] - mb);
+      da += (a[i] - ma) ** 2; db += (b[j] - mb) ** 2;
+    }
+    const c = num / Math.sqrt(da * db);
+    if (c > best) { best = c; bestLagV = lag; }
+  }
+  return { lag: bestLagV, corr: best };
+}
+
+console.log('FIRDA: frontal-maximal, rhythmic ~1.5-3 Hz, reference-car:');
+{
+  const fz = displayContrib('reference-car', 'awake', 'firda', 'Fz-AVG', 60, 20);
+  const o1 = displayContrib('reference-car', 'awake', 'firda', 'O1-AVG', 60, 20);
+  const t3 = displayContrib('reference-car', 'awake', 'firda', 'T3-AVG', 60, 20);
+  check('firda Fz-AVG p2p > O1-AVG p2p (frontal-maximal)', pctP2p(fz) / pctP2p(o1), 1.3, 5);
+  check('firda Fz-AVG p2p > T3-AVG p2p (frontal-maximal)', pctP2p(fz) / pctP2p(t3), 1.5, 8);
+  const pk = spectralPeak(welch(fz, FS, 2048), 1, 4);
+  check('firda Fz-AVG discharge frequency (LEARNINGEEG: ~1.5-3 Hz)', pk.freq, 1.5, 3.5, ' Hz');
+  check('firda Fz-AVG spectral peak is tight (rhythmic, not polymorphic)', pk.fwhm, 0, 1.2, ' Hz');
+  const ac = autocorr(fz, Math.round(FS * 3));
+  let bestLagIdx = -1, bestVal = -1;
+  for (let i = Math.round(FS * 0.2); i < ac.length; i++) if (ac[i] > bestVal) { bestVal = ac[i]; bestLagIdx = i; }
+  check('firda Fz-AVG autocorrelation has a strong secondary peak near its own cycle length (rhythmicity)',
+    bestVal, 0.5, 1.0);
+  check('firda Fz-AVG secondary-peak lag lands within one ~1.5-3 Hz cycle', bestLagIdx / FS, 0.25, 0.7, ' s');
+  renderTrace({ state: 'awake', patterns: ['firda'], montage: 'reference-car', seconds: 6, seed: 20,
+    out: `${SCRATCH}/a5-firda-refcar.png` });
+}
+
+console.log('\nFocal temporal slowing: lateralized delta/theta, bipolar-ap:');
+{
+  const t3t5 = displayContrib('bipolar-ap', 'awake', 'focal-delta-temporal', 'T3-T5', 60, 20);
+  const t4t6 = displayContrib('bipolar-ap', 'awake', 'focal-delta-temporal', 'T4-T6', 60, 20);
+  check('focal-delta-temporal T3-T5 p2p >> T4-T6 p2p (lateralized, LEARNINGEEG: unilateral)',
+    pctP2p(t3t5) / pctP2p(t4t6), 20, 1e7);
+  const pk = spectralPeak(welch(t3t5, FS, 2048), 0.5, 4);
+  check('focal-delta-temporal T3-T5 discharge frequency is delta/theta range', pk.freq, 0.5, 4, ' Hz');
+  renderTrace({ state: 'awake', patterns: ['focal-delta-temporal'], montage: 'bipolar-ap', seconds: 6, seed: 20,
+    out: `${SCRATCH}/a5-focal-delta-temporal-bipap.png` });
+}
+
+console.log('\nGeneralized slowing: truly diffuse (not focal), reference-car, ON-state delta+theta power ratio to Cz:');
+{
+  // Direct ON-state bandPower, not the on-off DIFF: gen-slowing carries a
+  // bandGate that suppresses the posterior alpha PDR, which leaks power
+  // below 8 Hz into the on-off diff specifically at posterior electrodes
+  // (where baseline alpha is largest) and falsely looks non-diffuse. The
+  // raw ON-state ratio to Cz isolates the added slow-wave topography itself.
+  const on = runDisplay('reference-car', 'awake', ['gen-slowing'], 60, 20);
+  const chOf = (label: string) => on.montage.channels.findIndex((c) => c.label === label);
+  const dCz = bandPower(on.data[chOf('Cz-AVG')], 1, 8);
+  const dFp1 = bandPower(on.data[chOf('Fp1-AVG')], 1, 8);
+  const dO1 = bandPower(on.data[chOf('O1-AVG')], 1, 8);
+  const dT3 = bandPower(on.data[chOf('T3-AVG')], 1, 8);
+  check('gen-slowing Fp1-AVG delta+theta power / Cz-AVG (diffuse: comparable across regions)', dFp1 / dCz, 0.05, 0.4);
+  check('gen-slowing O1-AVG delta+theta power / Cz-AVG (diffuse: comparable across regions)', dO1 / dCz, 0.05, 0.4);
+  check('gen-slowing T3-AVG delta+theta power / Cz-AVG (diffuse: comparable across regions)', dT3 / dCz, 0.05, 0.4);
+  check('gen-slowing diffuseness spread: max/min of the three regional ratios stays tight (no focal outlier)',
+    Math.max(dFp1, dO1, dT3) / Math.min(dFp1, dO1, dT3), 1, 2.5);
+  renderTrace({ state: 'awake', patterns: ['gen-slowing'], montage: 'reference-car', seconds: 6, seed: 20,
+    out: `${SCRATCH}/a5-gen-slowing-refcar.png` });
+}
+
+console.log('\nGPEDs: periodic, roughly regular interval, generalized, reference-car Cz-AVG:');
+{
+  const cz = displayContrib('reference-car', 'awake', 'gpeds', 'Cz-AVG', 120, 20);
+  const iv = eventIntervals(cz, 0.3, 0.5);
+  const mean = iv.reduce((a, b) => a + b, 0) / iv.length;
+  const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) ** 2, 0) / iv.length);
+  check('gpeds Cz-AVG mean inter-discharge interval (LEARNINGEEG: periodic, roughly 1-2.5 s)', mean, 1.0, 2.5, ' s');
+  check('gpeds Cz-AVG interval coefficient of variation stays low (periodic, not random)', sd / mean, 0, 0.35);
+  const o1 = displayContrib('reference-car', 'awake', 'gpeds', 'O1-AVG', 120, 20);
+  check('gpeds present at O1-AVG too (generalized, not focal)', pctP2p(o1), 15, 1e6, ' uV');
+  check('gpeds Cz-AVG / O1-AVG p2p ratio stays within a generalized (not sharply focal) range', pctP2p(cz) / pctP2p(o1), 1, 6);
+  renderTrace({ state: 'awake', patterns: ['gpeds'], montage: 'reference-car', seconds: 8, seed: 20,
+    out: `${SCRATCH}/a5-gpeds-refcar.png` });
+}
+
+console.log('\nLPEDs: periodic, roughly regular interval, lateralized, bipolar-ap:');
+{
+  const t3t5 = displayContrib('bipolar-ap', 'awake', 'lpeds', 'T3-T5', 120, 20);
+  const iv = eventIntervals(t3t5, 0.3, 0.4);
+  const mean = iv.reduce((a, b) => a + b, 0) / iv.length;
+  const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) ** 2, 0) / iv.length);
+  check('lpeds T3-T5 mean inter-discharge interval (LEARNINGEEG: periodic, roughly 0.8-2 s)', mean, 0.8, 2.0, ' s');
+  check('lpeds T3-T5 interval coefficient of variation stays low (periodic, not random)', sd / mean, 0, 0.35);
+  const t4t6 = displayContrib('bipolar-ap', 'awake', 'lpeds', 'T4-T6', 120, 20);
+  check('lpeds T3-T5 p2p >> T4-T6 p2p (lateralized, unlike GPEDs)', pctP2p(t3t5) / pctP2p(t4t6), 20, 1e7);
+  renderTrace({ state: 'awake', patterns: ['lpeds'], montage: 'bipolar-ap', seconds: 8, seed: 20,
+    out: `${SCRATCH}/a5-lpeds-bipap.png` });
+}
+
+console.log('\nTriphasic waves: classic 3-phase morphology with anterior->posterior time lag, reference-ipsi (A1 mastoid ref avoids CAR self-subtraction):');
+{
+  // reference-car is unsuitable here: the anterior source's broad reach
+  // drags the common average toward its own unlagged waveform, injecting an
+  // artifactual unlagged copy back into every AVG-referenced channel and
+  // masking the lag (confirmed empirically). reference-ipsi (a single-
+  // electrode A1/A2 mastoid reference, not an average) doesn't have this
+  // self-subtraction property — same rationale as the existing "14 & 6
+  // positive bursts" check's use of reference-contra over reference-car.
+  const fz = displayContrib('reference-ipsi', 'awake', 'triphasic', 'Fz-A1', 60, 20);
+  const pz = displayContrib('reference-ipsi', 'awake', 'triphasic', 'Pz-A1', 60, 20);
+  const o1 = displayContrib('reference-ipsi', 'awake', 'triphasic', 'O1-A1', 60, 20);
+  const lagPz = bestLag(fz, pz, Math.round(FS * 0.6));
+  const lagO1 = bestLag(fz, o1, Math.round(FS * 0.6));
+  check('triphasic Fz-A1 leads Pz-A1 (positive lag = posterior follows anterior)', lagPz.lag / FS, 0.008, 0.2, ' s');
+  check('triphasic Fz-A1 vs Pz-A1 lagged correlation is a real, positive relationship', lagPz.corr, 0.15, 1.0);
+  check('triphasic Fz-A1 leads O1-A1 (positive lag = posterior follows anterior)', lagO1.lag / FS, 0.008, 0.2, ' s');
+  check('triphasic Fz-A1 vs O1-A1 lagged correlation is a real, positive relationship', lagO1.corr, 0.08, 1.0);
+  check('triphasic Fz-A1 p2p > O1-A1 p2p (anterior-predominant amplitude gradient preserved)',
+    pctP2p(fz) / pctP2p(o1), 1.3, 20);
+  renderTrace({ state: 'awake', patterns: ['triphasic'], montage: 'bipolar-ap', seconds: 6, seed: 20,
+    out: `${SCRATCH}/a5-triphasic-bipap.png` });
+  renderTrace({ state: 'awake', patterns: ['triphasic'], montage: 'reference-car', seconds: 6, seed: 20,
+    out: `${SCRATCH}/a5-triphasic-refcar.png` });
 }
 
 console.log('\n' + '='.repeat(60));

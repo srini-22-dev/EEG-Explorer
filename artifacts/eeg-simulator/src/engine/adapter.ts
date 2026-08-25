@@ -27,7 +27,9 @@ export class SimulationSource {
   t = 0;
 
   constructor(seed = Math.floor(Math.random() * 1e9), fs = 250) {
-    this.engine = new EegEngine({ seed, fs });
+    // ~3 time constants of the 0.25 Hz recording-chain high-pass, so the amplifier
+    // filters are settled before the first displayed sample (see EegEngine `warmup`).
+    this.engine = new EegEngine({ seed, fs, warmup: 2 });
     this.buf = new Float64Array(this.engine.electrodes.length);
     this.dt = 1 / fs;
     for (const name of this.engine.electrodes) this.voltages[name] = 0;

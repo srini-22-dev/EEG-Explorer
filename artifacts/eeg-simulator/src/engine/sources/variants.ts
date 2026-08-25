@@ -31,7 +31,7 @@ import { TransientSource } from './transient';
 import {
   gaussian, arciformSignal, multiToneSignal,
   MU_TONES, MU_TONE_NORM,
-  ALPHA_TONES, ALPHA_TONE_NORM,
+  WICKET_TONES, WICKET_TONE_NORM,
   RMTD_TONES, RMTD_TONE_NORM,
   PSWY_TONES, PSWY_TONE_NORM,
   POS14_TONES, POS6_TONES, POS_BURST_TONE_NORM,
@@ -134,7 +134,7 @@ function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
         onset: (g) => ({ amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3) }),
         morphology: (t, e) => {
           const env = gaussian(t, e.dur / 2, e.dur / 4);
-          return 50 * e.amp * env * arciformSignal(t, ALPHA_TONES, ALPHA_TONE_NORM);
+          return 50 * e.amp * env * arciformSignal(t, WICKET_TONES, WICKET_TONE_NORM);
         },
       });
       return asGenerator(ts);
@@ -297,9 +297,18 @@ const pos1406: PatternSourceDescriptor = {
       onset: (g) => ({ ratio: jit(g, 0.6, 0.4) }),
       morphology: (t, e) => {
         const env = gaussian(t, 0.5, 0.25);
-        const c14 = 28 * env * e.ratio * arciformSignal(t, POS14_TONES, POS_BURST_TONE_NORM);
-        const c6 = 18 * env * (1 - e.ratio) * arciformSignal(t, POS6_TONES, POS_BURST_TONE_NORM);
-        return c14 + c6;
+        const c14 = 28 * e.ratio * arciformSignal(t, POS14_TONES, POS_BURST_TONE_NORM);
+        const c6 = 18 * (1 - e.ratio) * arciformSignal(t, POS6_TONES, POS_BURST_TONE_NORM);
+        const raw = c14 + c6;
+        // 14-&-6 Hz POSITIVE bursts are surface-positive by definition — the sharp
+        // comb-teeth must deflect DOWN (negative-up canvas). arciformSignal is
+        // odd/symmetric, so summed tones carry no polarity bias on their own and
+        // the burst was rendering with an arbitrary sign. Half-wave-emphasise the
+        // positive-going phase so the sharp deflection is reliably surface-positive,
+        // matching the name and the POLARITIES assertion. The ~14/6 Hz spectral
+        // content (and the on/off band-power checks) is preserved: the fundamental
+        // is still fully present, only its up/down asymmetry changes.
+        return env * (raw + 0.6 * Math.max(raw, 0));
       },
     });
     return asGenerator(ts);
@@ -322,6 +331,11 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
   return {
     id,
     toggles: ['bets'],
+    // BETS ("small sharp spikes") are a phenomenon of drowsiness and light
+    // sleep, not relaxed wakefulness — state-gate them like the other drowsy
+    // benign variants (wicket, rmtd, 14-6-pos) rather than letting the toggle
+    // fire while awake.
+    states: ['drowsy', 'n1', 'n2'],
     spec: sourceUnder(id, [electrode], { extent: 0.3 }),
     make(seed, dt) {
       const ts = new TransientSource<BetsEvent>(seed, dt, {
@@ -342,13 +356,17 @@ const betsL = betsSide('bets-l', 'T3');
 const betsR = betsSide('bets-r', 'T4');
 
 // ---------------------------------------------------------------------------
-// Eyes open — the posterior dominant rhythm (alpha, and its central mu
-// counterpart) is a resting, eyes-closed idling rhythm; opening the eyes
-// desynchronises the posterior generator (the Berger effect / "alpha
-// blocking"). Modelled purely as a `bandGate` attenuator, no source voltage
-// of its own — same shape as `gen-slowing` in nonEpileptiform.ts. Attenuates
-// rather than abolishes (0.35, vs. gen-slowing's more severe 0.15) since this
-// is normal reactive physiology, not pathology.
+// Eyes open — the posterior dominant rhythm (alpha) is a resting, eyes-closed
+// idling rhythm; opening the eyes desynchronises the occipital generator (the
+// Berger effect / "alpha blocking"). Mu is NOT gated here: it is a sensorimotor
+// rhythm, indifferent to visual input, and blocks with movement or the intention
+// to move instead. Its persistence through eye opening is precisely one of the
+// features that separates it from posterior alpha (IK-006/IK-007), so gating mu
+// alongside alpha would erase that discriminator — a learner would watch a
+// central rhythm block for the wrong reason. Modelled purely as a `bandGate`
+// attenuator on alpha, no source voltage of its own — same shape as `gen-slowing`
+// in nonEpileptiform.ts. Attenuates rather than abolishes (0.35, vs. gen-slowing's
+// more severe 0.15) since this is normal reactive physiology, not pathology.
 // ---------------------------------------------------------------------------
 const eyesOpen: PatternSourceDescriptor = {
   id: 'eyes-open',
@@ -357,7 +375,7 @@ const eyesOpen: PatternSourceDescriptor = {
   make() {
     return {
       next: () => 0,
-      bandGate: () => ({ alpha: 0.35, mu: 0.35 }),
+      bandGate: () => ({ alpha: 0.35 }),
     };
   },
 };

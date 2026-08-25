@@ -54,14 +54,20 @@ export const POS14_TONES: Tone[] = [
 export const POS6_TONES: Tone[] = [
   { f: 5.7, a: 0.8 }, { f: 6.2, a: 1.0 }, { f: 6.7, a: 0.7 },
 ];
-export const ALPHA_TONES: Tone[] = [
-  { f: 8.4, a: 0.5 }, { f: 9.1, a: 0.8 }, { f: 9.7, a: 1.0 },
-  { f: 10.3, a: 0.9 }, { f: 10.9, a: 0.6 }, { f: 8.8, a: 0.35 },
-  { f: 11.3, a: 0.3 },
+// Wicket spikes span the full 6-11 Hz mu/alpha band, not just its upper end. The
+// tone set formerly used here (8.4-11.3 Hz, an alpha borrowing) left the lower
+// half of the advertised range unrepresented, so wicket bursts rendered a full
+// octave too high — closer to fast alpha than to the temporal 6-7 Hz arciform
+// runs a reader is taught to recognise. These tones cover 6.2-11 Hz so the
+// morphology matches the range the UI names.
+export const WICKET_TONES: Tone[] = [
+  { f: 6.2, a: 0.5 }, { f: 7.0, a: 0.7 }, { f: 8.0, a: 0.9 },
+  { f: 8.8, a: 1.0 }, { f: 9.6, a: 0.85 }, { f: 10.4, a: 0.6 },
+  { f: 11.0, a: 0.35 },
 ];
 
 // Per-tone-set normalisers so a unit-amplitude multiToneSignal peaks near ±1.
-export const ALPHA_TONE_NORM = 2.4;
+export const WICKET_TONE_NORM = 5.59;
 export const THETA_TONE_NORM = 2.2;
 export const DELTA_TONE_NORM = 2.0;
 export const BETA_TONE_NORM = 2.0;

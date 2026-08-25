@@ -3,7 +3,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
 import type {
-  SimSettings, PatientState, IctalParams, IctalParamsMap, ArtifactParams,
+  SimSettings, PatientState, IctalParams, IctalParamsMap, ArtifactParams, Speed, Sensitivity,
 } from './utils/simTypes';
 import { defaultIctalParamsMap, defaultArtifactParams } from './utils/simTypes';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -20,6 +20,8 @@ const HeadModel3D = lazy(() =>
   import('./components/HeadModel3D').then(m => ({ default: m.HeadModel3D })));
 const SpectrumPanel = lazy(() =>
   import('./components/SpectrumPanel').then(m => ({ default: m.SpectrumPanel })));
+const RightSpectrumPanel = lazy(() =>
+  import('./components/RightSpectrumPanel').then(m => ({ default: m.RightSpectrumPanel })));
 
 const PanelLoading = ({ label }: { label: string }) => (
   <div className="w-full h-full flex items-center justify-center bg-[#1e2a1e] text-xs text-slate-500">
@@ -37,6 +39,8 @@ const STATE_LOCKED_PATTERNS: Record<string, { target: PatientState; compatible: 
   'spindles':  { target: 'n2', compatible: ['n2'] },
   'wicket':    { target: 'drowsy', compatible: ['drowsy'] },
   'rmtd':      { target: 'drowsy', compatible: ['drowsy'] },
+  '14-6-pos':  { target: 'drowsy', compatible: ['drowsy', 'n1', 'n2'] },
+  'bets':      { target: 'drowsy', compatible: ['drowsy', 'n1', 'n2'] },
   // Activation procedures need an awake, cooperative patient: you cannot ask a
   // sleeping one to overbreathe, and a driving response is judged on an awake
   // background. Drowsiness is tolerated because patients do drift during a
@@ -47,8 +51,8 @@ const STATE_LOCKED_PATTERNS: Record<string, { target: PatientState; compatible: 
 
 export default function App() {
   const [montageId,    setMontageId]    = useState<string>('bipolar-ap');
-  const [speed,        setSpeed]        = useState<15 | 30 | 60>(30);
-  const [sensitivity,  setSensitivity]  = useState<5 | 7 | 10 | 15>(7);
+  const [speed,        setSpeed]        = useState<Speed>(30);
+  const [sensitivity,  setSensitivity]  = useState<Sensitivity>(7);
   const [patientState, setPatientState] = useState<PatientState>('awake');
   const [activePatterns, setActivePatterns] = useState<Set<string>>(new Set());
   const [ictalParams, setIctalParams] = useState<IctalParamsMap>(defaultIctalParamsMap());
@@ -66,6 +70,7 @@ export default function App() {
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [graphHover, setGraphHover] = useState(true);
   const [showSpectrum, setShowSpectrum] = useState(false);
+  const [showRightSpectrum, setShowRightSpectrum] = useState(false);
   const [freezeYAxis, setFreezeYAxis] = useState(false);
   const [quizMode, setQuizMode] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
@@ -141,6 +146,7 @@ export default function App() {
           showAnnotations={showAnnotations} setShowAnnotations={setShowAnnotations}
           graphHover={graphHover} setGraphHover={setGraphHover}
           showSpectrum={showSpectrum} setShowSpectrum={setShowSpectrum}
+          showRightSpectrum={showRightSpectrum} setShowRightSpectrum={setShowRightSpectrum}
           setQuizMode={setQuizMode} setTutorialMode={setTutorialMode}
           dataBuffer={dataBuffer} timeBuffer={timeBuffer}
           show3DPanel={show3DPanel} setShow3DPanel={setShow3DPanel}
@@ -187,6 +193,21 @@ export default function App() {
                       montage={MONTAGES[montageId]}
                       headOpacity={headOpacity}
                       brainOpacity={brainOpacity}
+                    />
+                  </Suspense>
+                </Panel>
+              </>
+            )}
+            {showRightSpectrum && (
+              <>
+                <PanelResizeHandle className="w-2 bg-[#2e4a2e] hover:bg-[#3e5a3e] cursor-col-resize transition-colors flex items-center justify-center">
+                  <div className="w-1 h-8 bg-slate-500 rounded-full" />
+                </PanelResizeHandle>
+                <Panel id="rightSpectrum" order={3} defaultSize={22} minSize={12}>
+                  <Suspense fallback={<PanelLoading label="band panel" />}>
+                    <RightSpectrumPanel
+                      dataBuffer={dataBuffer}
+                      montage={MONTAGES[montageId]}
                     />
                   </Suspense>
                 </Panel>

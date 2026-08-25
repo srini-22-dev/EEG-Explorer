@@ -22,7 +22,7 @@ import { HopfOscillator, MU_WARP, SLOW_WAVE_WARP, type PhaseWarp } from './oscil
 import { BurstyOscillator } from './bursts';
 import { VigilanceState } from './state';
 import {
-  buildLeadfield, sourceUnder, backgroundPatches,
+  buildLeadfield, sourceUnder, backgroundPatches, CORTICAL_SHELL,
   type SourceSpec, type Leadfield,
 } from './forward';
 import {
@@ -97,6 +97,13 @@ export type EngineOptions = {
   artifacts?: boolean;
   /** Set false to omit the amplifier/sensor chain. */
   recordingChain?: boolean;
+  /**
+   * Seconds of pipeline to run and discard at construction so the recording
+   * chain's causal high-passes reach their settled baseline before the first
+   * emitted sample. Default 0 (cold start) — the display path opts in; direct
+   * callers that assert exact sample statistics leave it off.
+   */
+  warmup?: number;
 };
 
 /** Per-sample ground truth, for the structured sidecar §14 asks for from step 1. */
@@ -165,6 +172,65 @@ const STATE_GAINS: Record<PatientState, Record<Band, number>> = {
   n2:     { background: 1.35, alpha: 0.04, mu: 0.05, theta: 1.30, delta: 1.60, beta: 0.30 },
   n3:     { background: 1.60, alpha: 0.02, mu: 0.02, theta: 0.90, delta: 3.20, beta: 0.20 },
 };
+
+// Sensorimotor beta burst shape (betaL/betaR/betaF). `ampSigma` is the log-SD of
+// the log-normal burst-amplitude tail: at the 0.6 default it threw occasional
+// bursts 3-4x the median, standing proud of the awake background as sharp central
+// packets a learner could misread as muscle or an epileptiform transient. 0.4
+// narrows the tail so beta reads as a low, even admixture; total beta power is
+// unchanged (the oscillator recalibrates its RMS to `rms`). Exported so the
+// crest-factor bound in validateEngine §6e guards the value the engine ships.
+// `rms` is per-subject and supplied at construction.
+export const BETA_BURST_OPTS = {
+  freq: 20, freqSpread: 3, medianDuration: 0.15, meanInterval: 0.7, ampSigma: 0.4,
+} as const;
+
+// Posterior-dominant-rhythm (pdrL/pdrR) envelope depth. The HopfOscillator drives
+// its waxing/waning with a log-normal multiplier exp(depth * modulator); at the
+// 0.55 constructor default the tallest alpha bursts reached ~3.7x the in-band RMS,
+// which lands referentially (O1/O2-AVG) as ~120-180 uV p2p in the top decile of
+// bursts — above the 100 uV ceiling for a normal awake PDR (LEARNINGEEG §1) and
+// sharp enough that a learner could misread a waxing alpha burst as an
+// epileptiform transient. 0.42 narrows the tail while keeping enough waxing for a
+// log-normal envelope (skewness stays within the §11.2 bound) and its long-range
+// correlation (DFA); mean alpha power is unchanged (the oscillator recalibrates its
+// RMS to `rms`). Exported so the crest-factor bound in validateEngine guards the
+// value the engine ships. Not applied to mu, which is already lower-amplitude and
+// central. See INFORMING-KNOWLEDGE IK-031.
+export const PDR_ENVELOPE_DEPTH = 0.42;
+
+// Antero-posterior gradient of the aperiodic background (LEARNINGEEG §3: "faster,
+// lower amplitude frequencies towards the front... slower, higher amplitude
+// frequencies in the back").
+//
+// The background patches used to be built with one `rms` and one `exponent` each,
+// so the broadband floor - which carries most of the scalp variance - was spatially
+// uniform, and the gradient was left entirely to the alpha sources. Those are far
+// too focal to make one: measured on the production display transform the baseline
+// ran O > C > F > P > Fp, i.e. parietal was the quietest region on the head, and the
+// midline ran Fz > Cz > Pz, backwards.
+//
+// Two knobs, both applied per patch from its position on the A-P axis
+// (z = +1 anterior .. -1 posterior; see `backgroundPatches` in forward.ts):
+//
+//   AP_AMPLITUDE_TILT  posterior:anterior broadband amplitude ratio - the "higher
+//     amplitude in the back" half of the gradient.
+//   AP_EXPONENT_TILT   half-range of the per-patch 1/f exponent shift. A steeper
+//     exponent posteriorly puts relatively more power at low frequency (reads
+//     slower); a flatter one anteriorly puts relatively more at high frequency
+//     (reads faster) - the "faster towards the front" half, which nothing in the
+//     engine modelled at all. AperiodicSource renormalises to its target rms, so
+//     this redistributes power across frequency without changing how much of it
+//     there is.
+//
+// Both are applied mean-preserving over the patch set: the amplitude weights are
+// normalised to unit RMS and the exponent shift is centred on the subject's own
+// exponent. Total head power and the subject's mean spectral slope are therefore
+// unchanged - only their spatial distribution - which is what keeps the absolute
+// amplitude bounds (10-100 uV, LEARNINGEEG §1) where they were. Exported so the
+// A-P gradient checks in validateEngine guard the values the engine ships.
+export const AP_AMPLITUDE_TILT = 4.0;
+export const AP_EXPONENT_TILT = 0.20;
 
 /** Baseline vigilance for each state, feeding the slow drift in `state.ts`. */
 const STATE_VIGILANCE: Record<PatientState, number> = {
@@ -248,6 +314,7 @@ export class EegEngine {
       backgroundPatchCount = 16,
       artifacts = true,
       recordingChain = true,
+      warmup = 0,
     } = opts;
 
     this.fs = fs;
@@ -273,6 +340,15 @@ export class EegEngine {
       // T5-O1/T6-O2 stay strong, while C-P retains a smaller share — the clinical
       // topography. Extent is the plain smearing width; the inferior offset, not a
       // broadened patch, is what shapes the gradient.
+      //
+      // Widening this patch to lift the parietal amplitude was tried and reverted:
+      // at 1.5x it took P4-O2 / C4-P4 alpha power from 1.77 to 0.53 (floor 1.2) —
+      // i.e. it moved the PDR off the posterior link and onto C4-P4, the exact
+      // defect IK-006 exists to prevent — and at the largest width that keeps that
+      // ratio legal (1.25x with the offset deepened to -0.55) it raised
+      // (P3+P4)/(C3+C4) by only 0.950 -> 0.974. Widening leaks alpha forward, and
+      // "forward" is where it must not go. The parietal shortfall is a background
+      // problem, addressed by AP_AMPLITUDE_TILT instead.
       sourceUnder('pdrL', ['O1'], { extent: S.smearing, offset: [0, -0.4, 0] }),
       sourceUnder('pdrR', ['O2'], { extent: S.smearing, offset: [0, -0.4, 0] }),
       // Radial (default orientation): a tangential field is zero at its own
@@ -314,16 +390,25 @@ export class EegEngine {
 
     // ---- neural generators ----
     this.neural = [];
-    // Background patches share a spectral exponent but are independent processes,
-    // so neighbouring electrodes see overlapping mixtures rather than identical or
-    // wholly unrelated noise.
+    // Background patches are independent processes, so neighbouring electrodes see
+    // overlapping mixtures rather than identical or wholly unrelated noise. Their
+    // amplitude and spectral slope are tilted along the antero-posterior axis to
+    // produce the A-P gradient - see AP_AMPLITUDE_TILT / AP_EXPONENT_TILT above for
+    // what that models and why it is mean-preserving.
+    const apZ = bgPatches.map(sp => sp.pos[2] / CORTICAL_SHELL);  // +1 anterior .. -1 posterior
+    const apZMean = apZ.reduce((a, b) => a + b, 0) / apZ.length;
+    const apW = apZ.map(z => Math.pow(AP_AMPLITUDE_TILT, -z / 2));
+    const apWNorm = Math.sqrt(apW.reduce((a, b) => a + b * b, 0) / apW.length);
     for (let i = 0; i < bgPatches.length; i++) {
+      // Clamped below aperiodic.ts's BANK_MAX_EXPONENT so the tilt can never flip a
+      // single patch onto the integrator path while its neighbours stay on the bank.
+      const exponent = Math.min(S.exponent - AP_EXPONENT_TILT * (apZ[i] - apZMean), 1.85);
       this.neural.push({
         kind: 'aperiodic',
         band: 'background',
         src: new AperiodicSource(deriveSeed(seed, `bg${i}`), this.dt, {
-          exponent: S.exponent,
-          rms: S.backgroundRms,
+          exponent,
+          rms: S.backgroundRms * (apW[i] / apWNorm),
         }),
       });
     }
@@ -332,12 +417,14 @@ export class EegEngine {
       kind: 'hopf', band: 'alpha', baseRms: S.alphaRms,
       src: new HopfOscillator(deriveSeed(seed, 'pdrL'), this.dt, {
         freq: S.iaf, rms: S.alphaRms, freqWander: 0.55, damping: -2.6,
+        envelopeDepth: PDR_ENVELOPE_DEPTH,
       }),
     });
     this.neural.push({
       kind: 'hopf', band: 'alpha', baseRms: S.alphaRms * 0.92,
       src: new HopfOscillator(deriveSeed(seed, 'pdrR'), this.dt, {
         freq: S.iaf + hemisphereOffset, rms: S.alphaRms * 0.92, freqWander: 0.55, damping: -2.6,
+        envelopeDepth: PDR_ENVELOPE_DEPTH,
       }),
     });
     for (const [id, warp] of [['muL', MU_WARP], ['muR', MU_WARP]] as [string, PhaseWarp][]) {
@@ -352,7 +439,7 @@ export class EegEngine {
       this.neural.push({
         kind: 'burst', band: 'beta', baseRms: S.betaRms,
         src: new BurstyOscillator(deriveSeed(seed, id), this.dt, {
-          freq: 20, freqSpread: 3, medianDuration: 0.15, meanInterval: 0.7, rms: S.betaRms,
+          ...BETA_BURST_OPTS, rms: S.betaRms,
         }),
       });
     }
@@ -410,6 +497,23 @@ export class EegEngine {
     this.ecgChannel = new EcgGenerator(deriveSeed(seed, 'ecgChannel'), this.dt);
 
     this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1 };
+
+    // Warm-up. The recording chain's high-passes start cold (prevIn=prevOut=0) with
+    // a 0.25 Hz corner (time constant ~0.64 s), so without this the first ~2 s of
+    // output rides a decaying baseline transient — which exaggerates the recovery
+    // overshoot of any early blink or slow artifact and is what makes the very
+    // first blink look distorted. Running the whole pipeline for `warmup` seconds
+    // and discarding it settles the filters (and leaves every source mid-stream, as
+    // a real record already is when you start reading it) before the first visible
+    // sample. The sample clock is rewound so display time still starts at zero; the
+    // settled filter/oscillator/generator states are what carry forward.
+    if (warmup > 0) {
+      const scratch = new Float64Array(this.electrodes.length);
+      const warmupSamples = Math.round(warmup * this.fs);
+      for (let i = 0; i < warmupSamples; i++) this.next(scratch);
+      this.sampleIndex = 0;
+      this.groundTruth = { t: 0, vigilance: this.vigilance.value, blinking: false, betaBursting: false, popChannel: -1 };
+    }
   }
 
   /** Advance one sample, filling `out` with electrode potentials in microvolts. */
