@@ -78,6 +78,17 @@ export type OscillatorOptions = {
   envelopeDepth?: number;
   /** Waveform shape. */
   warp?: PhaseWarp;
+  /**
+   * Optional two-pole output low-pass corner, Hz. The oscillator is driven by white
+   * noise, so its output carries a random-walk tail falling only as 1/f^2 above its
+   * centre frequency. For a slow oscillator at slow-wave amplitudes that tail is
+   * visible: in N3 it put 20-45 Hz "fuzz" on every row, lifting that band above the
+   * awake record's (F3-C3 2.49 vs 1.94 uV RMS) when NREM should have LESS fast power
+   * than wake. The aperiodic background already supplies the real 1/f floor, so the
+   * tail is a double count; this removes it. Calibration runs through it, so `rms`
+   * still holds.
+   */
+  outputLowPassHz?: number;
 };
 
 /** The drive modulator is slow, so it runs on a decimated clock to keep cost down. */
@@ -106,6 +117,9 @@ export class HopfOscillator {
   private warp: PhaseWarp;
   private scale = 1;
   private currentRms = 1;
+  private lpA = 0;
+  private lp1 = 0;
+  private lp2 = 0;
 
   /** Instantaneous envelope |z| of the most recent sample — ground truth (§14). */
   amplitude = 0;
@@ -119,7 +133,9 @@ export class HopfOscillator {
       freqWanderTau = 2.5,
       envelopeDepth = 0.55,
       warp = NO_WARP,
+      outputLowPassHz,
     } = opts;
+    if (outputLowPassHz != null) this.lpA = 1 - Math.exp(-2 * Math.PI * outputLowPassHz * dt);
 
     if (damping >= 0) {
       throw new Error('HopfOscillator: damping must be < 0 (a >= 0 gives a limit cycle, not a rhythm)');
@@ -172,9 +188,16 @@ export class HopfOscillator {
     this.currentRms = rms;
   }
 
+  /**
+   * Additive frequency offset in Hz, applied from the next sample. 0 leaves the
+   * oscillator exactly as configured. Used for the PDR's transient quickening after
+   * eye closure ("alpha squeak", engine.ts ALPHA_SQUEAK_HZ).
+   */
+  freqOffset = 0;
+
   next(): number {
     // 1. frequency jitter
-    let omega = this.omega;
+    let omega = this.omega + 2 * Math.PI * this.freqOffset;
     if (this.wanderSd > 0) {
       this.wanderState = this.wanderA * this.wanderState + this.wanderQ * this.g.next();
       omega += 2 * Math.PI * this.wanderSd * this.wanderState;
@@ -214,7 +237,11 @@ export class HopfOscillator {
     const sinPhi = this.y / A;
     const cosPhi = this.x / A;
     const d = this.warp.b1 * sinPhi + 2 * this.warp.b2 * sinPhi * cosPhi;
-    return (this.x * Math.cos(d) - this.y * Math.sin(d)) * this.scale;
+    const out = (this.x * Math.cos(d) - this.y * Math.sin(d)) * this.scale;
+    if (this.lpA === 0) return out;
+    this.lp1 += this.lpA * (out - this.lp1);
+    this.lp2 += this.lpA * (this.lp1 - this.lp2);
+    return this.lp2;
   }
 
   /** Retarget output RMS, preserving the empirical calibration from construction. */

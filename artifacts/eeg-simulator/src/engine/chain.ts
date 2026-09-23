@@ -39,6 +39,20 @@ export const CLINICAL_LFF_HZ = 0.25;
  * touched: |H(f)| = f/sqrt(f^2 + fc^2) is 0.89 at 0.5 Hz and 0.97 at 1 Hz, so N3 slow
  * waves, FIRDA and ictal clonic slowing all survive.
  */
+/*
+ * Note on this class vs `AmplifierLowPass` below. This one keeps the
+ * non-prewarped form `a = rc/(rc+dt)`, which is the same class of approximation
+ * the low-pass was fixed for — and it is left deliberately. The approximation
+ * degrades only as the corner approaches the sample rate, and this filter runs at
+ * the opposite end of the spectrum: at the production operating point
+ * (CLINICAL_LFF_HZ = 0.25 Hz, fs = 250 Hz) `2*pi*fc*dt` is 0.0063, and the
+ * measured response is -3.02 dB at the corner — 0.02 dB from ideal. It stays
+ * negligible across every LFF a clinical amplifier offers (at 1 Hz, the ACNS
+ * ceiling, the product is still only 0.025). Measured error becomes visible
+ * (~1 dB) only at fc/fs ratios like 5 Hz at 64 Hz, which this engine never runs.
+ * Rewriting it would change blink morphology, which IK-001 asserts on, for no
+ * clinical gain.
+ */
 export class AmplifierHighPass {
   private a: number;
   private prevIn = 0;
@@ -55,16 +69,42 @@ export class AmplifierHighPass {
   }
 }
 
-/** Simple one-pole anti-alias / low-pass, standing in for the amplifier's roll-off. */
+/**
+ * First-order anti-alias / low-pass, standing in for the amplifier's roll-off.
+ *
+ * Bilinear-transformed with frequency prewarping, so its -3 dB point is `cornerHz`
+ * by construction at any sample rate. It previously used the impulse-invariant
+ * pole `a = exp(-2*pi*fc*dt)` with no feed-forward zero, which only approximates
+ * an `fc` corner while `2*pi*fc*dt << 1`. At this engine's fs = 250 Hz and the
+ * default fc = 100 Hz that product is **2.51**, not << 1, and the filter was
+ * effectively a pass-through: measured -0.4 dB at 40 Hz, -0.9 at 70, -1.3 at 100
+ * and only -1.4 dB at Nyquist, with its true -3 dB point above the representable
+ * band. A filter labelled "100 Hz low-pass" was removing essentially nothing, which
+ * mattered because the EMG generator puts real power above 70 Hz.
+ *
+ * The bilinear form fixes that: unity gain at DC, a zero at Nyquist (so it actually
+ * rolls off), and -3 dB at fc exactly. `k = tan(pi*fc*dt)` is the prewarp;
+ * `b = k/(1+k)` and `a = (1-k)/(1+k)`, and note b == (1-a)/2.
+ */
 export class AmplifierLowPass {
   private a: number;
-  private state = 0;
+  private b: number;
+  private prevIn = 0;
+  private prevOut = 0;
   constructor(dt: number, cornerHz = 100) {
-    this.a = Math.exp(-dt * 2 * Math.PI * cornerHz);
+    // tan diverges as fc approaches Nyquist, so clamp just below it. A corner at
+    // or above Nyquist is meaningless anyway — there is nothing up there to remove.
+    const nyquist = 0.5 / dt;
+    const fc = Math.min(cornerHz, nyquist * 0.98);
+    const k = Math.tan(Math.PI * fc * dt);
+    this.a = (1 - k) / (1 + k);
+    this.b = k / (1 + k);
   }
   next(x: number): number {
-    this.state = this.a * this.state + (1 - this.a) * x;
-    return this.state;
+    const y = this.b * (x + this.prevIn) + this.a * this.prevOut;
+    this.prevIn = x;
+    this.prevOut = y;
+    return y;
   }
 }
 

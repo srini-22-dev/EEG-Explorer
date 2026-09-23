@@ -25,7 +25,7 @@
  * decorrelate for free without any extra bookkeeping here.
  */
 
-import { sourceUnder, tangentialAt } from '../forward';
+import { sourceUnder } from '../forward';
 import { Gaussian } from '../rng';
 import { TransientSource } from './transient';
 import {
@@ -60,13 +60,24 @@ function stepOU(g: Gaussian, prev: number, dt: number, tau: number): number {
 // Mu rhythm — an arch-shaped ("arciform") 8-12 Hz idling rhythm of the
 // sensorimotor cortex, bilateral over the central regions, attenuated by
 // movement or tactile stimulation of the contralateral hand. It is generated
-// by cortex lining the central sulcus (a sulcal wall, not a gyral crown), so
-// — like engine.ts's own background mu sources — its scalp projection is
-// genuinely TANGENTIAL: a bipolar field straddling C3/C4, not the radial
-// monopolar blob most sources in this file use. This variant is the
-// prominent, clearly-arciform mu a learner is asked to identify; the
-// engine's smoother, lower-amplitude background mu keeps running underneath
-// it, and the two summing is intentional — not a duplicate.
+// by cortex lining the central sulcus. That tempts a TANGENTIAL projection,
+// and this source was built that way; it was wrong, for the same reason
+// engine.ts:356 gives for the background mu. A tangential source is zero at
+// its own anchor by construction, so the toggle rendered a rhythm maximal at
+// F3/F4 with a phase reversal at C3/C4 — measured 1.00 at F3, 0.00 at C3.
+// That is not mu. It contradicts this toggle's own annotation ("arciform
+// 8-12 Hz at C3/C4"), IK-006, and every description a learner will read.
+//
+// The sulcal-wall argument is a real fact about the generator, but it is an
+// idealisation: sensorimotor cortex contributes gyral-crown surface as well as
+// sulcal wall, the central sulcus is oblique rather than a clean plane, and the
+// recorded fact — the one this simulator has to reproduce — is a C3/C4 maximum.
+// So this is RADIAL, like the background mu. Per CLAUDE.md §3, the observable
+// wins over the tidier account of the generator.
+//
+// This variant is the prominent, clearly-arciform mu a learner is asked to
+// identify; the engine's smoother, lower-amplitude background mu keeps running
+// underneath it, and the two summing is intentional — not a duplicate.
 //
 // The arch shape comes from `arciformSignal` (see morphology.ts): a sharp
 // phase and a rounded phase per cycle, which is what "arch-shaped" means
@@ -86,7 +97,7 @@ function muSide(id: string, electrode: string): PatternSourceDescriptor {
   return {
     id,
     toggles: ['mu-rhythm'],
-    spec: { ...geom, orientation: tangentialAt(geom.pos, [0, 0, 1]) },
+    spec: geom,
     make(seed, dt) {
       const g = new Gaussian(seed);
       const env: MuEnvelope = { slow: 0, fast: 0 };
@@ -126,7 +137,7 @@ function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
     id,
     toggles: ['wicket'],
     states: ['drowsy'],
-    spec: sourceUnder(id, [electrode], { extent: 0.35 }),
+    spec: sourceUnder(id, [electrode], { extent: 0.30 }),
     make(seed, dt) {
       const ts = new TransientSource<WicketEvent>(seed, dt, {
         schedule: { kind: 'periodic', period: 3.5, jitterFrac: 0.43 }, // legacy 2-5 s
@@ -363,20 +374,20 @@ const betsR = betsSide('bets-r', 'T4');
 // to move instead. Its persistence through eye opening is precisely one of the
 // features that separates it from posterior alpha (IK-006/IK-007), so gating mu
 // alongside alpha would erase that discriminator — a learner would watch a
-// central rhythm block for the wrong reason. Modelled purely as a `bandGate`
-// attenuator on alpha, no source voltage of its own — same shape as `gen-slowing`
-// in nonEpileptiform.ts. Attenuates rather than abolishes (0.35, vs. gen-slowing's
-// more severe 0.15) since this is normal reactive physiology, not pathology.
+// central rhythm block for the wrong reason.
+//
+// The attenuation itself is applied by the ENGINE (engine.ts, EYES_OPEN_ALPHA_GAIN),
+// not by a bandGate here, because the `eye-opening` maneuver must block the same
+// rhythm over its open interval and the two must not disagree; the engine also gives
+// the transition its latency instead of a one-sample step. This descriptor exists so
+// the toggle has a source (CLAUDE.md §8) and draws nothing of its own.
 // ---------------------------------------------------------------------------
 const eyesOpen: PatternSourceDescriptor = {
   id: 'eyes-open',
   toggles: ['eyes-open'],
   spec: sourceUnder('eyes-open', ['Cz'], { extent: 0.5 }),
   make() {
-    return {
-      next: () => 0,
-      bandGate: () => ({ alpha: 0.35 }),
-    };
+    return { next: () => 0 };
   },
 };
 

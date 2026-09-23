@@ -52,3 +52,14 @@ graphify-out/
 # Raw imaging source data (large, not redistributable) — see scripts/src/processColinMesh.ts
 # and processHeadMesh.ts for the same convention.
 scripts/raw/
+
+# Ad-hoc renders from renderTrace / renderClinicalPage (`--out x.png` run from scripts/).
+# Reproducible from the command that made them; reference figures live under
+# scripts/read-lab/corpus/ with their own ignore rules.
+scripts/*.png
+
+# Throwaway investigation scripts (prefix with an underscore to keep one out of git).
+scripts/src/_*.ts
+
+# Per-user Claude Code settings (the shared .claude/settings.json stays tracked).
+.claude/settings.local.json

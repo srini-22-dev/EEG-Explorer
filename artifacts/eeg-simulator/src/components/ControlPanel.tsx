@@ -101,8 +101,9 @@ const PRIMARY_MONTAGE_IDS = new Set<string>(['bipolar-ap', 'reference-car']);
 // `matches` is the set of engine states the button represents.
 const PATIENT_STATES: { value: PatientState; label: string; desc: string; matches?: PatientState[] }[] = [
   { value: 'awake',  label: 'Awake',   desc: 'Posterior-predominant alpha PDR (9-11 Hz); frontal low-amplitude beta; AP gradient preserved.' },
-  { value: 'drowsy', label: 'Drowsy',  desc: 'Posterior theta (5-6 Hz) replaces alpha; diffuse slowing; >50% of page shows theta posteriorly.' },
-  { value: 'n2',     label: 'Sleep',   desc: 'NREM sleep: theta/delta background with the sleep graphoelements — vertex waves, K-complexes and sleep spindles (12-15 Hz) over central leads, and POSTS posteriorly. Selecting one of those patterns tunes the exact stage.', matches: ['n1', 'n2', 'n3'] },
+  { value: 'drowsy', label: 'Drowsy',  desc: 'Drowsiness: diffuse attenuation and perhaps mild slowing of the background; the PDR is still there but comes and goes; fewer blinks; slow roving lateral eye movements at F7/F8. When theta replaces the PDR for most of the page, that is N1.' },
+  { value: 'n2',     label: 'Sleep',   desc: 'NREM sleep, shown as N2: a low-amplitude theta background with sleep spindles and K-complexes, plus the vertex waves and POSTS that began in N1. The Sleep Architecture toggles move between the stages — POSTS or vertex waves to N1, spindles or K-complexes to N2, Slow-Wave Sleep to N3.', matches: ['n1', 'n2', 'n3'] },
+  { value: 'rem',    label: 'REM',     desc: 'Paradoxical sleep: diffusely attenuated, low-voltage mixed-frequency background that resembles N1 — the background alone does not identify it. What does: rapid eye movements (sharply contoured, opposing at the lateral frontal leads, faster upslope than downslope) and near-absent muscle tone.' },
 ];
 
 export function ControlPanel({

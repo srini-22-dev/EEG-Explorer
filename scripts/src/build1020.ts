@@ -33,7 +33,7 @@
  *   4. Circumference through Fpz, T3, Oz, T4. Measured as fractions of the
  *      Fpz->Oz half: Fp1 10%, F7 30%, T3 50%, T5 70%, O1 90% (equivalently
  *      5/15/25/35/45% of the full circumference), mirrored on the right.
- *   5. F3 midway along the forehead arc F7->Fz; F4, P3, P4 likewise.
+ *   5. Parasagittal arc, Fp1 -> C3 -> O1: F3 25%, P3 75%; mirrored on the right.
  *
  * Symmetry. MNI152_T1_1mm is a template averaged over 152 real heads, but the
  * average is not perfectly symmetric, and taking positions from it directly
@@ -150,34 +150,95 @@ if (signedVolume(skin) < 0) {
     + `(signed volume now ${signedVolume(skin).toFixed(3)}) — see comment above; not written to disk.`);
 }
 
-// Fiducials, set BY HAND against the Jasper diagram and the rendered head.
-// The former "height of greatest mid-sagittal AP extent" heuristic mislocated
-// these on the face-bearing MNI152 mesh: the nose and occiput inflate the AP
-// extent at one low plane (~y=-0.22), and forcing nasion, inion AND the
-// preauricular points onto that single plane rode the coronal arc (T3/C3) up.
-// Each landmark now has its own height, cast independently. Tune THESE three
-// numbers, not the electrodes — the arc construction below derives all 21.
-const Y_NASION = 0.00;         // nasion: nose-root / glabella level
-const Y_INION = -0.22;         // inion: occipital protuberance
-const Y_PREAURICULAR = -0.35;  // preauricular: ear-canal level (lateral extremes)
-
+// Fiducials, found ON THE MESH. They used to be three heights set by eye against
+// the Jasper diagram, and all three were too high — nasion by 5.1 cm, the
+// preauricular points by 2.8 cm, inion by 2.2 cm. Because every position here is
+// a fraction of an arc *between* fiducials, that did not shift the array, it
+// shrank it: the arcs spanned only the upper cranium, so the whole 10-20 layout
+// rode up onto the vault. Fp1 sat mid-forehead instead of above the eyebrow and
+// T3 sat 5 cm above the ear instead of 3 cm. Eyeballed numbers are exactly what
+// the header says this script exists to remove, so they are now derived:
+//
+//   nasion       the mid-sagittal notch between glabella and nose. A real
+//                concavity — the only one on that profile — so it is findable
+//                as the minimum of anterior extent over the range that brackets it.
+//   preauricular the external auditory meatus, found as the deepest medial dip
+//                on the lateral surface just anterior to the pinna.
+//   inion        MNI152 is averaged over 152 heads, which smooths the external
+//                occipital protuberance away — there is no bump left to find.
+//                But the procedure itself supplies the missing constraint: a
+//                technician measures Cz twice, once at 50% of nasion->inion and
+//                once at 50% of the preauricular arc, and the two must land on
+//                the same spot. With the other two fiducials fixed that pins the
+//                inion, so solve for it rather than guess it.
 const ORIGIN: Vec3 = [0, 0, 0];
 const Cz0 = cast(skin, ORIGIN, [0, 1, 0])!;
+
+function scanMin(lo: number, hi: number, f: (y: number) => number | null): number {
+  let bestY = lo, best = Infinity;
+  for (let y = lo; y <= hi; y += 0.005) {
+    const v = f(y);
+    if (v !== null && v < best) { best = v; bestY = y; }
+  }
+  return bestY;
+}
+const Y_NASION = scanMin(-0.72, -0.40, y => cast(skin, [0, y, 0], [0, 0, 1])?.[2] ?? null);
+// `x * LEFT` so "most medial" means the same thing whichever way the frame runs.
+const Y_PREAURICULAR = scanMin(-0.78, -0.35, y => {
+  const h = cast(skin, [2 * LEFT, y, -0.10], [-LEFT, 0, 0], 'near');
+  return h ? h[0] * LEFT : null;
+});
+
 const Nz = cast(skin, [0, Y_NASION, 0], [0, 0, 1])!;
-const Iz = cast(skin, [0, Y_INION, 0], [0, 0, -1])!;
 const LPA = cast(skin, [0, Y_PREAURICULAR, 0], [LEFT, 0, 0])!;
 const RPA = cast(skin, [0, Y_PREAURICULAR, 0], [-LEFT, 0, 0])!;
-console.log(`fiducials  Nz=${Nz.map(n=>n.toFixed(2))}  Iz=${Iz.map(n=>n.toFixed(2))}`
+
+// Bisect on the signed AP offset between the two Cz estimates: raising the inion
+// pushes the sagittal 50% point forward, lowering it pushes it back, monotonically.
+const CzCoronal = place(skin, LPA, RPA, Cz0, [0.5])[0];
+const czGap = (yi: number) => place(skin, Nz, cast(skin, [0, yi, 0], [0, 0, -1])!, Cz0, [0.5])[0][2] - CzCoronal[2];
+let loI = -0.30, hiI = -0.60;
+for (let i = 0; i < 10; i++) {
+  const mid = (loI + hiI) / 2;
+  if (czGap(mid) > 0) loI = mid; else hiI = mid;
+}
+const Y_INION = (loI + hiI) / 2;
+const Iz = cast(skin, [0, Y_INION, 0], [0, 0, -1])!;
+
+console.log(`fiducials (derived)  Y_NASION=${Y_NASION.toFixed(3)}  Y_INION=${Y_INION.toFixed(3)}`
+  + `  Y_PREAURICULAR=${Y_PREAURICULAR.toFixed(3)}`);
+console.log(`  Nz=${Nz.map(n=>n.toFixed(2))}  Iz=${Iz.map(n=>n.toFixed(2))}`
   + `  LPA=${LPA.map(n=>n.toFixed(2))}  vertex=${Cz0[1].toFixed(3)}`);
+console.log(`  Cz agreement sagittal vs coronal: ${(Math.abs(czGap(Y_INION)) * 9.5).toFixed(2)} cm`);
 
 const [Fpz, Fz, Cz, Pz, Oz] = place(skin, Nz, Iz, Cz0, [0.10, 0.30, 0.50, 0.70, 0.90]);
 const [T3, C3, C4, T4] = place(skin, LPA, RPA, Cz0, [0.10, 0.30, 0.70, 0.90]);
 const [Fp1, F7, , T5, O1] = place(skin, Fpz, Oz, T3, [0.10, 0.30, 0.50, 0.70, 0.90]);
 const [Fp2, F8, , T6, O2] = place(skin, Fpz, Oz, T4, [0.10, 0.30, 0.50, 0.70, 0.90]);
-const [F3] = place(skin, F7, Fz, ORIGIN, [0.5], 'short');
-const [F4] = place(skin, F8, Fz, ORIGIN, [0.5], 'short');
-const [P3] = place(skin, T5, Pz, ORIGIN, [0.5], 'short');
-const [P4] = place(skin, T6, Pz, ORIGIN, [0.5], 'short');
+// Step 5 — the parasagittal measurement. F3/P3 are marked on the arc that runs
+// Fp1 -> C3 -> O1, at 25% and 75%; F4/P4 likewise on Fp2 -> C4 -> O2. This is a
+// measurement in its own right in the standard procedure, not a by-product of
+// the coronal ones, and it is the measurement that makes the four steps of a
+// parasagittal bipolar chain equal.
+//
+// These used to be placed midway along the F7->Fz and T5->Pz coronal arcs. That
+// rule puts F3 and P3 in roughly the right neighbourhood — it kept F7-F3 5.33 vs
+// F3-Fz 5.27 cm — but it says nothing about where they land *along* the chain,
+// and on this scalp they landed badly: Fp1-F3 4.15, F3-C3 8.33, C3-P3 8.38,
+// P3-O1 4.13 cm, a 1:2:2:1 chain. The two coronal arcs it divides are much
+// shorter than the ear-to-ear arc that fixes C3 (F7->Fz is ~10.6 cm of scalp,
+// LPA->Cz ~14.4), so halving them pulls F3 and P3 toward the ends of the chain
+// and strands C3 in the middle, 7.6 cm from its three nearest neighbours where
+// every other electrode sits ~5 cm from its own.
+//
+// That is not cosmetic. A bipolar chain compares adjacent links, and an
+// electrode twice as far from its chain neighbours as they are from theirs is a
+// local extremum of any smooth scalp field, so the two links sharing it deflect
+// against each other — a phase reversal at C3/C4 in an ordinary awake
+// background, which reads as a bilateral central focus that no generator put
+// there.
+const [F3, P3] = place(skin, Fp1, O1, C3, [0.25, 0.75]);
+const [F4, P4] = place(skin, Fp2, O2, C4, [0.25, 0.75]);
 
 // Ear electrodes. A1/A2 go on the ear lobule — the soft, cartilage-free
 // inferior tip of the pinna — used as a (near-)neutral reference. skin.bin
@@ -262,6 +323,21 @@ fs.writeFileSync(
 console.log('wrote electrodePositions3D.ts');
 console.log('circumference heights:', ['Fp1', 'F7', 'T3', 'T5', 'O1']
   .map(k => `${k}=${positions[k][1].toFixed(3)}`).join('  '));
+
+// Chain uniformity. The 10-20 system divides every arc it measures into equal
+// steps, so each bipolar chain should show four comparable links; a chain that
+// does not is a placement error that the montage will read as a field gradient.
+const CM = 9.5;
+const step = (a: string, b: string) =>
+  Math.hypot(...positions[a].map((v, i) => v - positions[b][i])) * CM;
+for (const chain of [
+  ['Fp1', 'F3', 'C3', 'P3', 'O1'], ['Fp2', 'F4', 'C4', 'P4', 'O2'],
+  ['Fp1', 'F7', 'T3', 'T5', 'O1'], ['Fp2', 'F8', 'T4', 'T6', 'O2'],
+]) {
+  const ds = chain.slice(1).map((n, i) => step(chain[i], n));
+  console.log(`  ${chain.join('-').padEnd(20)} ${ds.map(d => d.toFixed(2)).join('  ')} cm`
+    + `   max/min ${(Math.max(...ds) / Math.min(...ds)).toFixed(2)}`);
+}
 
 // Odd electrodes must overlie the left hemisphere mesh and even ones the right.
 // This is the property the numbering means, so assert it rather than trusting the

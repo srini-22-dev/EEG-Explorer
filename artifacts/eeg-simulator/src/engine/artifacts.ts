@@ -34,26 +34,110 @@ import type { SourceSpec, Vec3 } from './forward';
  * automatically. That makes this block the one place a frame change has to be applied
  * by hand — so state the frame: **+x is anatomically LEFT**, +y up, +z anterior
  * (scripts/src/processColinMesh.ts). Hence the L entries carry positive x.
+ *
+ * WHY THE BLINK NEEDS TWO SOURCES PER EYE. A single `radial` source weights every
+ * electrode by a Gaussian in straight-line 3-D distance, which is monotone: an electrode
+ * farther from the orbit must see less. From the true orbit F3 is FARTHER than F7
+ * (8.1 cm vs 5.6 cm), yet a clinical blink shows F3 at least as large as F7 (read off
+ * learningeeg's blink figures, 2026-09-14: F7 0.10-0.31 of Fp1, F3 0.25-0.33 — this said
+ * "roughly 40-50%" for both until then, with no source). Getting there from Fp1 needs a
+ * steep drop over the short Fp1->F7 step and no further drop over the longer F7->F3
+ * step — the shorter step needs the bigger fall, which no
+ * monotone function of distance can produce at any `extent`. Widening `extent` to lift F3
+ * raises F7 faster and inverts the Fp1-F7 > F7-T3 gradient instead.
+ *
+ * The missing ingredient is angular structure, and `tangential` already supplies it: the
+ * forward model's tangential gain is a derivative-of-Gaussian, i.e. a dipole. So the eye
+ * is modelled as a vertical dipole plus a monopole, co-fired in equal parts (see
+ * `OCULAR_DIPOLE_SHARE` and its use in engine.ts). The dipole term carries the
+ * up-down asymmetry that lifts F3 relative to F7; the monopole term restores the broad
+ * bifrontal spread onto Fz/Cz that a pure dipole nulls out.
  */
 export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
-  eyeL:        { id: 'eyeL',        pos: [ 0.30, 0.28, 0.86], orientation: { kind: 'radial' }, extent: 0.40 },
-  eyeR:        { id: 'eyeR',        pos: [-0.30, 0.28, 0.86], orientation: { kind: 'radial' }, extent: 0.40 },
+  // Orbit measured off skin.bin, not estimated: scanning anterior surface depth over
+  // the face finds a trough running x 0.15..0.45 at y ~= -0.66, with the brow rising
+  // above it and the malar eminence below. Its ends are the medial canthus (1.4 cm
+  // from midline) and the lateral orbital rim (4.3 cm) — both adult norms — so its
+  // midpoint x = 0.30 is the pupil, 1.3 cm below the nasion (y = -0.540), and the ocular
+  // sources keep that x. Their height and depth are NOT the pupil's: see HEIGHT below.
+  //
+  // Two co-fired terms per eye — see WHY THE BLINK NEEDS TWO SOURCES PER EYE above.
+  //
+  // The dipole is VERTICAL (dir [0,1,0]): the lid sweeps down and back up across the
+  // cornea, and the resulting scalp field is strongest above the orbit and reverses
+  // below it. Note this is the lid-sweep account, not Bell's globe rotation — a Bell's
+  // rotation about the globe centre would tilt the dipole out of vertical. The fit is
+  // shallow between about 70 and 90 degrees of tilt, so the observable cannot tell those
+  // two mechanisms apart; vertical is chosen as the simpler of the pair. IK-001 lists
+  // Bell's as explicitly non-binding for exactly this reason.
+  //
+  // The two terms take DIFFERENT extents. The monopole keeps 0.25, the principled
+  // value for an EXTRACRANIAL source: its field reaches the scalp without crossing
+  // the skull, so it does not get the skull-smearing width that neural sources do
+  // (and must not track S.smearing if that is ever recalibrated). The dipole's gain peaks not at the source but at +/-sigma from it, so it
+  // must be wider to reach the frontal electrodes at all; 0.675 is fitted.
+  //
+  // HEIGHT: the blink's EQUIVALENT source sits at the upper lid / brow (y = -0.44), 2.3 cm
+  // above the pupil and just under the skin there (skin.bin surface z = 0.859 at x 0.30,
+  // y -0.44; source at 0.84). It used to sit at the pupil (y -0.68, z 0.75), and there the
+  // eye is almost as close to F7 (5.6 cm) as to Fp1 (4.8 cm): the blink field put F7 at
+  // 0.57 of Fp1, so F7-T3 deflected 0.95 as far as Fp1-F7 and every blink on the temporal
+  // chain looked like two stacked frontopolar blinks (reported by the user, 2026-09-14).
+  // learningeeg's blink figures, read row by row at 4x (5 blinks on two records, 2026-09-14),
+  // give F7-T3 / Fp1-F7 0.07-0.32 (median 0.14), and summed back from O1 a field of F7
+  // 0.10-0.31, F3 0.25-0.33, T3 0.04-0.09, C3 0.06-0.10 of Fp1 — F7 no larger than F3.
+  // No orientation, tilt or extent fits that at the pupil (best F7 0.37); raising the source
+  // does, with every other parameter unchanged: F7 0.26, F3 0.30, T3 0.06, C3 0.10, Fz
+  // 0.28, Cz 0.09, F7-T3 / Fp1-F7 0.28, Fp1-F7 / Fp1-F3 1.06. Physically this stands in
+  // for what the homogeneous-sphere model leaves out — the lid is a conductor carrying the
+  // corneal potential to the skin ABOVE the eye (Lins et al. 1993; Iwasaki et al. 2005:
+  // lid movement, not eyeball rotation, dominates the blink potential), and the bony
+  // lateral orbital rim and temporalis lie between the orbit and F7. So read the height as
+  // a fitted equivalent position inside the periorbital skin, not as an anatomical claim.
+  eyeL:        { id: 'eyeL',        pos: [ 0.30,-0.44, 0.84], orientation: { kind: 'tangential', dir: [0, 1, 0] }, extent: 0.58 },
+  eyeR:        { id: 'eyeR',        pos: [-0.30,-0.44, 0.84], orientation: { kind: 'tangential', dir: [0, 1, 0] }, extent: 0.58 },
+  eyeMonoL:    { id: 'eyeMonoL',    pos: [ 0.30,-0.44, 0.84], orientation: { kind: 'radial' }, extent: 0.25 },
+  eyeMonoR:    { id: 'eyeMonoR',    pos: [-0.30,-0.44, 0.84], orientation: { kind: 'radial' }, extent: 0.25 },
   // Horizontal gaze is a left-right dipole: tangential, so F7 and F8 move in
   // opposite directions, which is the diagnostic feature of a lateral eye movement.
-  gaze:        { id: 'gaze',        pos: [ 0.00, 0.26, 0.82], orientation: { kind: 'tangential', dir: [-1, 0, 0] }, extent: 0.55 },
+  // A horizontal rotation pivots about the globe CENTRE, ~1.3 cm behind the cornea.
+  gaze:        { id: 'gaze',        pos: [ 0.00,-0.68, 0.61], orientation: { kind: 'tangential', dir: [-1, 0, 0] }, extent: 0.55 },
   temporalisL: { id: 'temporalisL', pos: [ 0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
   temporalisR: { id: 'temporalisR', pos: [-0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
-  frontalis:   { id: 'frontalis',   pos: [ 0.00, 0.50, 0.78], orientation: { kind: 'radial' }, extent: 0.45 },
+  // Frontalis is the FOREHEAD muscle, spanning brow to hairline. It was at
+  // y = +0.50, which is Fz's height (y = 0.5155) — the vertex, roughly 8 cm too
+  // high, a leftover from the pre-mesh electrode frame. Anchored between the
+  // nasion (y = -0.540, from build1020's mesh-derived fiducials) and Fp1/Fp2
+  // (y = -0.222): y = -0.38 is mid-forehead, z = 0.90 just inside the skin.
+  frontalis:   { id: 'frontalis',   pos: [ 0.00,-0.38, 0.90], orientation: { kind: 'radial' }, extent: 0.45 },
   // The heart is far enough away that its field across the scalp is broad and
   // shallow, with the mild lateralisation §8 notes. It sits left of midline.
   heart:       { id: 'heart',       pos: [ 0.55, -2.60, 0.20], orientation: { kind: 'radial' }, extent: 3.2 },
-  sweatFrontal:{ id: 'sweatFrontal',pos: [ 0.00, 0.45, 0.62], orientation: { kind: 'radial' }, extent: 0.55 },
+  // Sweat artifact is a skin-potential shift in frontal scalp skin, so it shares
+  // the forehead with frontalis and was misplaced at the vertex the same way.
+  // Slightly deeper and broader: it is a diffuse skin phenomenon, not a compact
+  // muscle belly.
+  sweatFrontal:{ id: 'sweatFrontal',pos: [ 0.00,-0.38, 0.86], orientation: { kind: 'radial' }, extent: 0.55 },
   // Posterior cervical (nuchal) muscles: behind and below the occipital
   // electrodes, which is why neck tone obscures the posterior dominant rhythm
   // and can mimic posterior sharp transients. Broad extent because the muscle
   // sheet is wide and bilateral, unlike the compact temporalis bellies.
-  nuchal:      { id: 'nuchal',      pos: [ 0.00,-0.35,-0.85], orientation: { kind: 'radial' }, extent: 0.50 },
+  // These attach along the superior nuchal line, at and BELOW the inion, and run
+  // down the neck — so the belly centre sits well below it. y = -0.35 put it
+  // ABOVE the inion (Iz y = -0.446), i.e. on the occiput itself, which made neck
+  // tone read as an occipital-electrode artifact rather than one arriving from
+  // below. y = -0.80 is ~3.4 cm below the inion, z = -0.80 behind it.
+  nuchal:      { id: 'nuchal',      pos: [ 0.00,-0.80,-0.80], orientation: { kind: 'radial' }, extent: 0.50 },
 };
+
+/**
+ * How the ocular drive splits between the dipole term (`eyeL`/`eyeR`) and the monopole
+ * term (`eyeMonoL`/`eyeMonoR`). Every source column is normalised to unit peak gain by
+ * `buildLeadfield`, so the split has to be applied where the sources are driven rather
+ * than baked into the specs. 0.4 is a fitted number, chosen against the published bifrontal
+ * topography, not measured off the head mesh the way the orbit position was.
+ */
+export const OCULAR_DIPOLE_SHARE = 0.4;
 
 /**
  * Minimum interval between consecutive blink onsets, seconds. Set to the longest
@@ -62,6 +146,26 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
  */
 const BLINK_REFRACTORY_SEC = 0.4;
 
+/**
+ * Lead time (s) to the FIRST event after an ocular toggle is switched on. Without
+ * it the first blink/saccade/eye-opening is a full inter-event interval away
+ * (seconds), so the toggle looks dead for a beat before anything happens. Making
+ * the first event prompt is a UI-responsiveness fix; the ongoing event RATE — the
+ * physiological quantity — is untouched. Shared by the three ocular event
+ * generators below (mirrors `FIRST_EVENT_LEAD` for pattern sources in transient.ts).
+ */
+export const OCULAR_FIRST_EVENT_LEAD_SEC = 0.3;
+
+/**
+ * Inter-event timing jitter, as a fraction of the nominal interval, for the ocular
+ * event generators. A pure exponential (Poisson) schedule has CV = 1: its most
+ * likely gap is near-zero and long gaps are common, so events clump and skip
+ * rather than tracking the set rate. A small symmetric jitter (interval =
+ * mean·[1 ± FRAC]) keeps the long-run rate exactly at ratePerMin while making each
+ * interval hug the nominal spacing — the artifact then "follows the rate".
+ */
+const OCULAR_JITTER_FRAC = 0.2;
+
 /** Blink: a smooth monophasic lid-movement deflection, 200-400 ms (§8). */
 export class BlinkGenerator {
   private g: Gaussian;
@@ -69,30 +173,46 @@ export class BlinkGenerator {
   private elapsed = -1;
   private length = 0;
   private amp = 1;
+  private enabled = false;
   active = false;
 
   constructor(seed: number, private dt: number, private ratePerMin = 16) {
     this.g = new Gaussian(seed);
-    this.schedule(1);
   }
   /** Blink rate is clinically informative in itself — it rises with anxiety and falls with drowsiness. */
   setRatePerMin(r: number) { this.ratePerMin = r; }
   private schedule(rateScale: number) {
     const mean = 60 / Math.max(this.ratePerMin * rateScale, 0.5);
-    // Blink refractory period. A pure exponential (Poisson) schedule has its mode
-    // at zero, so its single most likely inter-blink gap is a near-zero one — two
-    // blinks then start within one blink's 0.22-0.40 s lid deflection of each
-    // other and render as a single jagged "double". That is non-physiological:
-    // the orbicularis/levator cannot re-fire instantly, and spontaneous blinks
-    // hold a minimum inter-blink interval of ~0.3-0.5 s. BLINK_REFRACTORY_SEC is a
-    // hard floor on the gap (also >= the max lid-deflection length, so consecutive
-    // blinks never overlap). Subtracting it from the exponential mean leaves the
-    // long-run rate at ratePerMin instead of lowering it by the dead time.
-    const remaining = Math.max(this.dt, mean - BLINK_REFRACTORY_SEC);
-    this.samplesToNext = Math.round((BLINK_REFRACTORY_SEC + this.g.exponential(remaining)) / this.dt);
+    // Low-variance schedule: symmetric jitter around the nominal interval keeps the
+    // long-run rate at ratePerMin, floored at the refractory period so two blinks
+    // can never start within one lid deflection (0.22-0.40 s) of each other and
+    // render as a single jagged "double" — non-physiological, since the
+    // orbicularis/levator cannot re-fire instantly (~0.3-0.5 s minimum gap).
+    const interval = Math.max(
+      BLINK_REFRACTORY_SEC,
+      mean * (1 + (this.g.uniform() - 0.5) * 2 * OCULAR_JITTER_FRAC),
+    );
+    this.samplesToNext = Math.max(1, Math.round(interval / this.dt));
   }
-  /** `rateScale` lets the vigilance state cluster blinks rather than spacing them uniformly. */
-  next(rateScale = 1): number {
+  /**
+   * Advance one sample. `enabled` is the blink toggle. On its rising edge the first
+   * blink is scheduled promptly (OCULAR_FIRST_EVENT_LEAD_SEC) so the toggle has an
+   * immediate visible effect; while disabled the generator is silent and does not
+   * advance, so re-enabling restarts it cleanly. `rateScale` lets the vigilance
+   * state modulate the rate (drowsiness lowers it, anxiety raises it).
+   */
+  next(enabled: boolean, rateScale = 1): number {
+    if (!enabled) {
+      this.enabled = false;
+      this.elapsed = -1;
+      this.active = false;
+      return 0;
+    }
+    if (!this.enabled) {
+      this.enabled = true;
+      this.elapsed = -1;
+      this.samplesToNext = Math.max(1, Math.round(OCULAR_FIRST_EVENT_LEAD_SEC / this.dt));
+    }
     if (--this.samplesToNext <= 0) {
       this.elapsed = 0;
       this.length = Math.round(this.g.range(0.22, 0.40) / this.dt);
@@ -142,16 +262,32 @@ export class EyeOpeningGenerator {
   private openLen = 0;
   private closeLen = 0;
   private amp = 1;
+  private enabled = false;
+  /**
+   * True from the start of the opening sweep until the closing sweep begins —
+   * the interval in which the eyes are open. The engine blocks the posterior
+   * alpha rhythm over it (IK-007): an eye-opening artifact with the PDR running
+   * straight through it is the one picture reactivity says cannot happen.
+   */
+  isOpen = false;
 
   constructor(seed: number, private dt: number, private ratePerMin = 5) {
     this.g = new Gaussian(seed);
-    this.schedule();
   }
   private schedule() {
+    // Symmetric jitter around the nominal interval (low variance) keeps the
+    // long-run maneuver rate at ratePerMin instead of the wide Poisson spread.
     const mean = 60 / Math.max(this.ratePerMin, 0.2);
-    this.samplesToNext = Math.max(1, Math.round(this.g.exponential(mean) / this.dt));
+    const interval = mean * (1 + (this.g.uniform() - 0.5) * 2 * OCULAR_JITTER_FRAC);
+    this.samplesToNext = Math.max(1, Math.round(interval / this.dt));
   }
-  next(): number {
+  next(enabled: boolean): number {
+    if (!enabled) { this.enabled = false; this.elapsed = -1; this.isOpen = false; return 0; }
+    if (!this.enabled) {
+      this.enabled = true;
+      this.elapsed = -1;
+      this.samplesToNext = Math.max(1, Math.round(OCULAR_FIRST_EVENT_LEAD_SEC / this.dt));
+    }
     if (--this.samplesToNext <= 0) {
       this.elapsed = 0;
       // Eyes are held open for a few seconds between opening and closing.
@@ -162,14 +298,15 @@ export class EyeOpeningGenerator {
       this.amp = this.g.logNormal(1, 0.25);
       this.schedule();
     }
-    if (this.elapsed < 0) return 0;
+    if (this.elapsed < 0) { this.isOpen = false; return 0; }
     const i = this.elapsed;
     this.elapsed++;
-    if (i >= this.length) { this.elapsed = -1; return 0; }
+    if (i >= this.length) { this.elapsed = -1; this.isOpen = false; return 0; }
+    const startClose = this.length - this.closeLen;
+    this.isOpen = i < startClose;
     // Opening: upward -> negative transient at the start of the maneuver.
     if (i < this.openLen) return -this.amp * lidShape(i / this.openLen);
     // Closing: downward -> positive transient at the end, smaller than the open.
-    const startClose = this.length - this.closeLen;
     if (i >= startClose) return 0.7 * this.amp * lidShape((i - startClose) / this.closeLen);
     // Eyes held open: baseline.
     return 0;
@@ -189,17 +326,32 @@ export class SaccadeGenerator {
   private target = 0;
   private spikeLeft = 0;
   private spikeAmp = 0;
+  private enabled = false;
 
   constructor(seed: number, private dt: number, private ratePerMin = 25) {
     this.g = new Gaussian(seed);
-    this.schedule(1);
   }
   setRatePerMin(r: number) { this.ratePerMin = r; }
   private schedule(rateScale: number) {
+    // Symmetric jitter around the nominal interval (low variance) keeps the
+    // long-run saccade rate at ratePerMin instead of the wide Poisson spread.
     const mean = 60 / Math.max(this.ratePerMin * rateScale, 0.5);
-    this.samplesToNext = Math.max(1, Math.round(this.g.exponential(mean) / this.dt));
+    const interval = mean * (1 + (this.g.uniform() - 0.5) * 2 * OCULAR_JITTER_FRAC);
+    this.samplesToNext = Math.max(1, Math.round(interval / this.dt));
   }
-  next(rateScale = 1): number {
+  next(enabled: boolean, rateScale = 1): number {
+    if (!enabled) {
+      // Reset gaze so re-enabling starts from primary position, not a stale angle.
+      this.enabled = false;
+      this.level = 0;
+      this.target = 0;
+      this.spikeLeft = 0;
+      return 0;
+    }
+    if (!this.enabled) {
+      this.enabled = true;
+      this.samplesToNext = Math.max(1, Math.round(OCULAR_FIRST_EVENT_LEAD_SEC / this.dt));
+    }
     if (--this.samplesToNext <= 0) {
       this.target = this.g.range(-1, 1);
       this.spikeLeft = Math.max(1, Math.round(0.02 / this.dt));
@@ -328,21 +480,37 @@ export class ElectrodePopGenerator {
     this.decay = Math.exp(-dt / 0.35);
     this.schedule();
   }
+  /**
+   * Toggle-on edge: bring the next automatic pop forward to `leadSec`. The renewal
+   * interval (45 s mean) is right for how rare pops are, but it meant a learner who
+   * switched the toggle on usually waited most of a minute to see one. Only the wait
+   * for the first pop is shortened; later pops keep the renewal schedule.
+   */
+  startSoon(leadSec: number) {
+    if (isFinite(this.meanInterval)) this.samplesToNext = Math.max(1, Math.round(leadSec / this.dt));
+  }
   /** Confine pops to one electrode (teaching a single bad lead) or -1 for any. */
   setTarget(ch: number) { this.target = ch; }
-  setMeanInterval(sec: number) { this.meanInterval = Math.max(0.5, sec); }
+  /** A non-positive interval turns AUTOMATIC popping off; a decaying pop still rings out. */
+  setMeanInterval(sec: number) {
+    const wasOff = !isFinite(this.meanInterval);
+    if (!(sec > 0) || !isFinite(sec)) { this.meanInterval = Infinity; this.samplesToNext = Infinity; return; }
+    this.meanInterval = Math.max(0.5, sec);
+    if (wasOff) this.schedule(); // re-arm after having been off
+  }
   /**
-   * Fire a pop on `ch` right now, outside the renewal schedule. Used when the
-   * user deliberately breaks an electrode's contact: the pop *is* the moment the
-   * junction fails, so it must be a definite event rather than something to wait
-   * for.
+   * Fire a pop right now, outside the renewal schedule (`ch < 0` -> a random
+   * electrode). Used when the user deliberately breaks an electrode's contact —
+   * the pop *is* the moment the junction fails — or presses the manual Pop button,
+   * so it must be a definite event rather than something to wait for.
    */
   trigger(ch: number) {
-    this.channel = ch;
+    this.channel = ch >= 0 ? ch : Math.floor(this.g.uniform() * this.nChannels);
     this.level = this.g.logNormal(1.3, 0.3) * (this.g.uniform() < 0.5 ? -1 : 1);
     this.decay = Math.exp(-this.dt / this.g.range(0.25, 0.5));
   }
   private schedule() {
+    if (!isFinite(this.meanInterval)) { this.samplesToNext = Infinity; return; }
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(this.meanInterval) / this.dt));
   }
   next(): number {
@@ -418,6 +586,8 @@ export class MovementGenerator {
     this.schedule();
   }
   setMeanInterval(sec: number) { this.meanInterval = Math.max(1, sec); }
+  /** Toggle-on edge: first movement after `leadSec` instead of a 70-90 s mean wait (see ElectrodePopGenerator.startSoon). */
+  startSoon(leadSec: number) { this.samplesToNext = Math.max(1, Math.round(leadSec / this.dt)); }
   private schedule() {
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(this.meanInterval) / this.dt));
   }

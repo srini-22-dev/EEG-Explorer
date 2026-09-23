@@ -7,15 +7,20 @@
  * scalars (band power, correlations, envelopes). That is not what a reader looks
  * at. The trace on the page is the **montage-derived** channel
  * (`computeChannelVoltage` + `commonAverage`) painted **negative-up**
- * (`y = centerY + v`), calibrated in µV/mm and mm/s. Morphology, polarity and the
- * spatial gradient — the things the eye judges — live entirely in that display
- * transform, which the validator never exercises.
+ * (`traceY`: `y = centerY + v * scale`, from `displayGeometry.ts` — the ECG row
+ * is the one exception, via `ecgScale`'s negated scale), calibrated in µV/mm and
+ * mm/s. Morphology, polarity and the spatial gradient — the things the eye
+ * judges — live entirely in that display transform, which the validator never
+ * exercises.
  *
  * This module closes that gap. It drives the *real* engine through the *real*
- * display transform (the exact geometry of `EEGCanvas.tsx`) and rasterises the
- * result to a PNG you can open. It adds no dependency — the PNG is encoded with
- * Node's built-in `zlib` — so any agent can run it and any reviewer can look at
- * the same picture the app draws.
+ * display transform — importing `PX_PER_MM_X`, `MM_PER_ROW`, `pxPerMmFromHeight`,
+ * `pxPerUV`, `ecgScale` and `traceY` from `../../artifacts/eeg-simulator/src/
+ * utils/displayGeometry.ts` rather than re-deriving them, so this renderer and
+ * `EEGCanvas.tsx` are guaranteed to agree, not merely believed to — and
+ * rasterises the result to a PNG you can open. It adds no dependency — the PNG
+ * is encoded with Node's built-in `zlib` — so any agent can run it and any
+ * reviewer can look at the same picture the app draws.
  *
  * Run:
  *   pnpm --filter @workspace/scripts exec tsx ./src/renderTrace.ts \
@@ -24,8 +29,9 @@
  * or import `renderTrace(opts)` and read the returned per-channel summary.
  */
 
-import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
+
+import { Raster, encodePNG, hexToRgb, type RGB } from './raster';
 
 import { SimulationSource } from '../../artifacts/eeg-simulator/src/engine/adapter';
 import { MONTAGES, GROUP_COLORS, type Montage } from '../../artifacts/eeg-simulator/src/utils/montages';
@@ -34,11 +40,22 @@ import {
   defaultArtifactParams, defaultIctalParamsMap,
   type SimSettings, type PatientState, type ArtifactParams, type IctalParamsMap,
 } from '../../artifacts/eeg-simulator/src/utils/simTypes';
+import {
+  PX_PER_MM_X,
+  MM_PER_ROW,
+  MINOR_GRID_PX,
+  pxPerMmFromHeight,
+  pxPerUV as calcPxPerUV,
+  ecgScale,
+  traceY,
+} from '../../artifacts/eeg-simulator/src/utils/displayGeometry';
 
-// ── Geometry constants, copied verbatim from EEGCanvas.tsx ───────────────────
-const PX_PER_MM_X = 4;    // horizontal pixels per mm
-const MM_PER_ROW  = 10;   // each channel row is 10 mm tall
-const GAP_UNITS   = 0.40; // fractional row-height gap between chain groups
+// ── Geometry: PX_PER_MM_X / MM_PER_ROW / pxPerMmFromHeight / pxPerUV /
+// ecgScale / traceY all come from displayGeometry.ts — the single definition
+// shared with EEGCanvas.tsx, not a copy. That sharing is the point: it is
+// what lets validateEngine.ts assert on production geometry through this
+// renderer instead of through a hand-synced constant. ─────────────────────
+const GAP_UNITS = 0.40; // fractional row-height gap between chain groups
 const FS = 250;
 
 // ── Montage row layout, copied verbatim from EEGCanvas.buildLayout ───────────
@@ -60,37 +77,6 @@ function buildLayout(montage: Montage): RowLayout[] {
     cum += frac;
     return layout;
   });
-}
-
-// ── Minimal RGB raster with Bresenham lines (no font libs, no image deps) ────
-type RGB = [number, number, number];
-class Raster {
-  data: Uint8Array;
-  constructor(readonly w: number, readonly h: number, bg: RGB = [250, 250, 246]) {
-    this.data = new Uint8Array(w * h * 3);
-    for (let i = 0; i < w * h; i++) { this.data[i * 3] = bg[0]; this.data[i * 3 + 1] = bg[1]; this.data[i * 3 + 2] = bg[2]; }
-  }
-  px(x: number, y: number, c: RGB) {
-    x |= 0; y |= 0;
-    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
-    const i = (y * this.w + x) * 3;
-    this.data[i] = c[0]; this.data[i + 1] = c[1]; this.data[i + 2] = c[2];
-  }
-  hline(x0: number, x1: number, y: number, c: RGB) { for (let x = x0; x <= x1; x++) this.px(x, y, c); }
-  vline(x: number, y0: number, y1: number, c: RGB) { for (let y = y0; y <= y1; y++) this.px(x, y, c); }
-  line(x0: number, y0: number, x1: number, y1: number, c: RGB) {
-    x0 |= 0; y0 |= 0; x1 |= 0; y1 |= 0;
-    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
-    let err = dx + dy;
-    for (;;) {
-      this.px(x0, y0, c);
-      if (x0 === x1 && y0 === y1) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
-    }
-  }
 }
 
 // A tiny 3×5 digit font, just enough to number the rows so a reviewer can map a
@@ -117,53 +103,6 @@ function drawNum(r: Raster, x: number, y: number, n: number, c: RGB) {
   }
 }
 
-// ── PNG encode (RGB, filter 0, zlib via built-in deflate) ────────────────────
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(buf: Uint8Array): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-function chunk(type: string, data: Uint8Array): Uint8Array {
-  const typeBytes = Uint8Array.from(type, ch => ch.charCodeAt(0));
-  const body = new Uint8Array(typeBytes.length + data.length);
-  body.set(typeBytes); body.set(data, typeBytes.length);
-  const len = data.length;
-  const out = new Uint8Array(4 + body.length + 4);
-  out[0] = (len >>> 24) & 255; out[1] = (len >>> 16) & 255; out[2] = (len >>> 8) & 255; out[3] = len & 255;
-  out.set(body, 4);
-  const crc = crc32(body);
-  const o = 4 + body.length;
-  out[o] = (crc >>> 24) & 255; out[o + 1] = (crc >>> 16) & 255; out[o + 2] = (crc >>> 8) & 255; out[o + 3] = crc & 255;
-  return out;
-}
-function encodePNG(w: number, h: number, rgb: Uint8Array): Uint8Array {
-  const raw = new Uint8Array(h * (w * 3 + 1));
-  for (let y = 0; y < h; y++) {
-    raw[y * (w * 3 + 1)] = 0; // filter: none
-    raw.set(rgb.subarray(y * w * 3, (y + 1) * w * 3), y * (w * 3 + 1) + 1);
-  }
-  const idat = deflateSync(raw, { level: 6 });
-  const ihdr = new Uint8Array(13);
-  ihdr[0] = (w >>> 24) & 255; ihdr[1] = (w >>> 16) & 255; ihdr[2] = (w >>> 8) & 255; ihdr[3] = w & 255;
-  ihdr[4] = (h >>> 24) & 255; ihdr[5] = (h >>> 16) & 255; ihdr[6] = (h >>> 8) & 255; ihdr[7] = h & 255;
-  ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0; // 8-bit, truecolor RGB
-  const sig = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const parts = [sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', new Uint8Array(0))];
-  const total = parts.reduce((s, p) => s + p.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0; for (const p of parts) { out.set(p, off); off += p.length; }
-  return out;
-}
-
 // ── Public API ───────────────────────────────────────────────────────────────
 export interface RenderOpts {
   montage?: string;                    // MONTAGES key, default 'bipolar-ap'
@@ -171,6 +110,13 @@ export interface RenderOpts {
   patterns?: string[];                 // active toggle ids
   seconds?: number;                    // default 6
   seed?: number;                       // default 42 (deterministic)
+  // Seconds to advance the engine through and DISCARD before capturing. The
+  // record varies enormously moment to moment — a burst, a waxing alpha run or a
+  // quiet stretch can each dominate an eight-second window — so judging a change
+  // from one window of one seed is judging one draw from a wide distribution.
+  // This makes "same subject, different moment" samplable, which together with
+  // varying `seed` ("different subject") is what an honest visual check needs.
+  skipSeconds?: number;                // default 0
   sensitivity?: SimSettings['sensitivity']; // µV/mm, default 7
   speed?: SimSettings['speed'];        // mm/s, default 30
   pxPerMm?: number;                    // vertical px per mm, default 4
@@ -196,6 +142,13 @@ export interface RenderResult {
   pxPerSec: number;  // horizontal: speed(mm/s) * PX_PER_MM_X
   pxPerMm: number;   // vertical: px per mm of paper (screen/raster density)
   pxPerUV: number;   // vertical: pxPerMm / sensitivity(µV/mm) — the µV-to-px scale
+  // What a reader of the IMAGE has to estimate, given exactly — so an image-reading
+  // method (scripts/read-lab) can be scored against the page it was run on rather
+  // than against a re-derivation of it. Indexed like `channels`.
+  labelStripPx: number;     // x at which the trace field starts
+  baselineY: number[];      // px, each row's zero line
+  fs: number;               // sample rate of `data`
+  data: Float64Array[];     // the display-space µV actually drawn, one array per channel
 }
 
 export function renderTrace(opts: RenderOpts = {}): RenderResult {
@@ -208,7 +161,7 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
   const seed = opts.seed ?? 42;
   const sensitivity = opts.sensitivity ?? 7;
   const speed = opts.speed ?? 30;
-  const pxPerMm = opts.pxPerMm ?? 4;
+  const targetPxPerMm = opts.pxPerMm ?? 4;
   const out = opts.out ?? `trace-${montageId}-${state}.png`;
 
   const settings: SimSettings = {
@@ -220,6 +173,9 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
 
   // ── Drive the real engine through the real display transform ──
   const src = new SimulationSource(seed, FS);
+  const skip = Math.max(0, Math.floor((opts.skipSeconds ?? 0) * FS));
+  let t0 = 0;
+  for (let i = 0; i < skip; i++) src.next(settings);
   const nCh = montage.channels.length;
   const n = Math.floor(seconds * FS);
   const data: Float64Array[] = montage.channels.map(() => new Float64Array(n));
@@ -228,17 +184,31 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
     const allV = src.next(settings);
     const avg = commonAverage(allV);
     for (let c = 0; c < nCh; c++) data[c][i] = computeChannelVoltage(montage.channels[c], src.t, allV, avg);
-    times[i] = src.t;
+    // Relative to the first CAPTURED sample, not to engine time zero. `skipSeconds`
+    // advances the engine before capture, and x is drawn as `times[j] * pxPerSec`,
+    // so storing absolute time would place the whole trace off the right edge —
+    // which it did, rendering an empty grid, until this was fixed.
+    if (i === 0) t0 = src.t;
+    times[i] = src.t - t0;
   }
 
-  // ── Geometry (identical to EEGCanvas) ──
+  // ── Geometry (shared with EEGCanvas via displayGeometry.ts) ──
   const layout = buildLayout(montage);
   const totalRowUnits = layout.reduce((s, r) => s + (r.channelIndex < 0 ? GAP_UNITS : 1), 0);
   const lblW = 70;
-  const H = Math.round(totalRowUnits * MM_PER_ROW * pxPerMm);
+  // Pick a raster height from the requested px/mm, exactly as EEGCanvas's
+  // live canvas height implies a px/mm. Then — instead of trusting
+  // targetPxPerMm to be what actually gets drawn — read the px/mm back OUT
+  // of that height through the same pxPerMmFromHeight() EEGCanvas calls
+  // every frame. Math.round(H) can make the two differ by a fraction of a
+  // pixel; using the read-back value (not targetPxPerMm) for every
+  // downstream calculation is what makes this renderer's numbers the actual
+  // production formula rather than a value merely close to it.
+  const H = Math.round(totalRowUnits * MM_PER_ROW * targetPxPerMm);
   const pxPerSec = speed * PX_PER_MM_X;
   const W = lblW + Math.round(seconds * pxPerSec);
-  const pxPerUV = pxPerMm / sensitivity;
+  const pxPerMm = pxPerMmFromHeight(H, totalRowUnits);
+  const pxPerUV = calcPxPerUV(pxPerMm, sensitivity);
 
   const r = new Raster(W, H);
   const GRID_MINOR: RGB = [232, 230, 220];
@@ -251,11 +221,15 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
     const y = Math.round(mm * pxPerMm);
     r.hline(lblW, W - 1, y, mm % 5 === 0 ? GRID_MAJOR : GRID_MINOR);
   }
-  // Vertical time grid (0.2 s minor / 1 s major)
-  for (let s = 0; s * 0.2 <= seconds; s++) {
-    const t = s * 0.2;
-    const x = Math.round(lblW + t * pxPerSec);
-    r.vline(x, 0, H - 1, s % 5 === 0 ? GRID_MAJOR : GRID_MINOR);
+  // Vertical grid: minor every 5 mm (MINOR_GRID_PX), major every 1 s — the same
+  // rule EEGCanvas draws. This used to step in 0.2 s, which made the grid square
+  // a different physical size here than on the page (24 px vs 20 px at 30 mm/s,
+  // 8 px vs 20 px at 10 mm/s) and inverted the sign of the error between speeds.
+  for (let px = 0; px <= W - lblW; px += MINOR_GRID_PX) {
+    r.vline(Math.round(lblW + px), 0, H - 1, GRID_MINOR);
+  }
+  for (let s = 0; s <= seconds; s++) {
+    r.vline(Math.round(lblW + s * pxPerSec), 0, H - 1, GRID_MAJOR);
   }
 
   // Label strip
@@ -264,13 +238,18 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
 
   // Traces + per-channel summary
   const channels: ChannelSummary[] = [];
+  const baselineY: number[] = new Array(nCh).fill(NaN);
   for (const row of layout) {
     if (row.channelIndex < 0) continue;
     const i = row.channelIndex;
     const ch = montage.channels[i];
     const isECG = ch.active === 'ECG';
     const centerY = row.centerFrac * H;
-    const scale = isECG ? pxPerMm * 10 / 1000 : pxPerUV; // ECG supplied in mV
+    baselineY[i] = centerY;
+    // ECG is a limb lead, not a scalp derivation — negative-up does not
+    // apply to it, so ecgScale() returns the negated scale (see its doc
+    // comment: this is what puts the R wave up). ECG source is in mV.
+    const scale = isECG ? ecgScale(pxPerMm) : pxPerUV;
     const color = hexToRgb(GROUP_COLORS[ch.group]);
 
     r.hline(lblW, W - 1, Math.round(centerY), BASELINE);
@@ -282,7 +261,7 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
       const v = data[i][j];
       if (!isECG) { sumSq += v * v; if (Math.abs(v) > Math.abs(peak)) { peak = v; peakAt = times[j]; } }
       const x = lblW + times[j] * pxPerSec;
-      const y = centerY + v * scale; // NEGATIVE-UP: +v renders downward
+      const y = traceY(centerY, v, scale); // shared with EEGCanvas.tsx via displayGeometry.ts
       if (px >= 0) r.line(px, py, x, y, color);
       px = x; py = y;
     }
@@ -303,12 +282,10 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
   }
 
   writeFileSync(out, encodePNG(W, H, r.data));
-  return { file: out, width: W, height: H, channels, pxPerSec, pxPerMm, pxPerUV };
-}
-
-function hexToRgb(hex: string): RGB {
-  const m = hex.replace('#', '');
-  return [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
+  return {
+    file: out, width: W, height: H, channels, pxPerSec, pxPerMm, pxPerUV,
+    labelStripPx: lblW, baselineY, fs: FS, data,
+  };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -323,6 +300,7 @@ function parseArgs(argv: string[]): RenderOpts {
       case '--patterns': o.patterns = next().split(',').map(s => s.trim()).filter(Boolean); break;
       case '--seconds': o.seconds = Number(next()); break;
       case '--seed': o.seed = Number(next()); break;
+      case '--skip': o.skipSeconds = Number(next()); break;
       case '--sensitivity': o.sensitivity = Number(next()) as SimSettings['sensitivity']; break;
       case '--speed': o.speed = Number(next()) as SimSettings['speed']; break;
       case '--out': o.out = next(); break;

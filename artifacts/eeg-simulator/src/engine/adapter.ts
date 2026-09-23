@@ -66,6 +66,12 @@ export class SimulationSource {
       saccade: ap.has('eye-movement'),
       emg: ap.has('muscle'),
       pop: ap.has('electrode-pop'),
+      // Pre-existing bad electrodes. Gated like every other artifact, which
+      // it was not until 2026-09-02: defects applied unconditionally and hit
+      // 84% of subjects, so the default record had two rows in grass with
+      // every toggle off. A learner who has turned everything off should see
+      // a clean record -- that is what the toggles mean.
+      defects: ap.has('bad-electrodes'),
       sweat: ap.has('sweat'),
       line: ap.has('50hz'),
       // Cardiac scalp contamination is distinct from the ECG display channel at

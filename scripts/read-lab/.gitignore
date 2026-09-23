@@ -1,0 +1,18 @@
+# Third-party figures and the pages they were cut from. learningeeg.com images are
+# copyrighted; the AES atlas (NCBI Bookshelf NBK390343) is CC BY-NC-SA. Neither may be
+# pushed. corpus/online.json records where each came from so they can be re-fetched.
+corpus/online/
+
+# Raw provenance from session 6a96b6eb, including crops and overlays made FROM the
+# third-party figures above. Anything needed for scoring is promoted out of here.
+corpus/archive-6a96b6eb/
+
+# Generated engine corpora are reproducible from readCorpus.ts + their manifest.
+corpus/engine/
+corpus/blind/
+corpus/blind-truth/
+
+__pycache__/
+
+# Reactivity corpus (readCorpus.ts --reactivity), reproducible and ~MBs of samples.
+corpus/reactivity/

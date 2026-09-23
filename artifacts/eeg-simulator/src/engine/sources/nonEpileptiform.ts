@@ -12,6 +12,7 @@
 
 import { sourceUnder } from '../forward';
 import { HopfOscillator } from '../oscillator';
+import { BurstyOscillator } from '../bursts';
 import { deriveSeed, Gaussian } from '../rng';
 import { TransientSource } from './transient';
 import {
@@ -29,43 +30,89 @@ const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
 });
 
 // ---------------------------------------------------------------------------
-// Generalised slowing (encephalopathy, sedating medications). Two facts define
-// it clinically and must both be modelled: (1) diffuse theta + delta appear
-// everywhere, and (2) the normal posterior alpha rhythm (the PDR) is LOST — a
-// record with preserved alpha is not "slowed". So this is not additive-only: the
-// added slow rhythms REPLACE the alpha, which is what `bandGate` expresses.
+// Generalised slowing (encephalopathy, sedating medications) — MODERATE grade.
 //
-// The slow activity is generated with the engine's own Hopf oscillators (the
-// same primitive that produces the background rhythms) rather than fixed tones,
-// so it wanders in frequency and amplitude the way real polymorphic slowing does
-// instead of reading as a metronomic sine. One broad central source with a large
-// extent gives the near-uniform, diffuse topography of generalised slowing.
+// What a reader sees, per learningeeg's Non-Epileptiform chapter: the background
+// loses its organisation. The PDR slows (mild: 6-7 Hz; moderate: only fragments,
+// no faster than ~5 Hz), theta and then delta build up across the WHOLE head, the
+// A-P gradient is lost, and the page stays synchronous and symmetric. Grades run
+// mild (slow PDR, excess theta) -> moderate (mostly theta) -> severe (delta, with
+// reduced reactivity and discontinuity). This toggle is the moderate grade.
+//
+// It used to be ONE radial patch under Cz. However wide its extent, one coherent
+// patch projects hardest to the electrode above it, so the field was a vertex
+// focus: isolated 1-8 Hz amplitude at Cz was 3.5x the median electrode and 2.1x
+// along the midline, while the check that should have caught it divided every
+// region by Cz and so could not see a peak AT Cz (IK-024, corrected 2026-09-11).
+//
+// Now: independent theta+delta patches under every 10-20 site, left, right and
+// midline alike, so each region carries its own slow activity at comparable size
+// and neighbouring electrodes share it through overlapping fields. Theta leads
+// delta (moderate, "mostly theta"); both wander in frequency and amplitude, as
+// polymorphic slowing does, rather than reading as a sine. The normal alpha PDR
+// and mu are gated down and beta damped (`bandGate`, carried by one patch only so
+// it applies once), and the posterior rhythm reappears as slowed ~5 Hz fragments
+// (`slowPdr` below) — the "fragments of a PDR" a reader finds in moderate slowing.
 // ---------------------------------------------------------------------------
-const genSlowing: PatternSourceDescriptor = {
-  id: 'gen-slowing',
-  toggles: ['gen-slowing'],
-  spec: sourceUnder('gen-slowing', ['Cz'], { extent: 0.85 }),
-  make(seed, dt) {
-    // Delta dominates over theta in moderate–marked slowing; both wander.
-    const theta = new HopfOscillator(deriveSeed(seed, 'theta'), dt, {
-      freq: 5.0, rms: 22, freqWander: 0.8, damping: -2.2,
-    });
-    const delta = new HopfOscillator(deriveSeed(seed, 'delta'), dt, {
-      freq: 1.6, rms: 34, freqWander: 0.5, damping: -1.2,
-    });
-    return {
-      // Advance the oscillators every sample for phase continuity, but only emit
-      // (and only suppress the alpha PDR) while the pattern is enabled.
-      next: (ctx) => {
-        const v = theta.next() + delta.next();
-        return ctx.enabled ? v : 0;
-      },
-      // Abolish the posterior alpha rhythm and its central mu counterpart; damp
-      // beta. Consulted only while enabled (see engine `next()`).
-      bandGate: () => ({ alpha: 0.15, mu: 0.15, beta: 0.5 }),
-    };
-  },
-};
+const GS_SITES = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz'];
+export const GS_EXTENT = 0.35;
+export const GS_THETA_RMS = 14;
+export const GS_DELTA_RMS = 10;
+export const GS_SLOW_PDR_RMS = 12;
+
+function genSlowingPatch(site: string, carriesGate: boolean): PatternSourceDescriptor {
+  const id = `gen-slowing-${site}`;
+  return {
+    id,
+    toggles: ['gen-slowing'],
+    spec: sourceUnder(id, [site], { extent: GS_EXTENT }),
+    make(seed, dt) {
+      const theta = new HopfOscillator(deriveSeed(seed, 'theta'), dt, {
+        freq: 5.0, rms: GS_THETA_RMS, freqWander: 0.8, damping: -2.2,
+      });
+      const delta = new HopfOscillator(deriveSeed(seed, 'delta'), dt, {
+        freq: 1.8, rms: GS_DELTA_RMS, freqWander: 0.5, damping: -1.2,
+      });
+      return {
+        // Advance every sample for phase continuity; emit only while enabled.
+        next: (ctx) => {
+          const v = theta.next() + delta.next();
+          return ctx.enabled ? v : 0;
+        },
+        // Abolish the normal-frequency PDR and mu; damp beta. Band gates compose
+        // multiplicatively across patterns, so exactly one patch carries it.
+        ...(carriesGate ? { bandGate: () => ({ alpha: 0.15, mu: 0.15, beta: 0.5 }) } : {}),
+      };
+    },
+  };
+}
+
+// The slowed posterior rhythm: ~5 Hz fragments over each occipital region, bursty
+// rather than continuous, placed like the PDR it replaces (engine.ts pdrL/pdrR).
+function slowPdr(side: 'L' | 'R', el: 'O1' | 'O2'): PatternSourceDescriptor {
+  const id = `gen-slowing-pdr${side}`;
+  return {
+    id,
+    toggles: ['gen-slowing'],
+    spec: sourceUnder(id, [el], { extent: 0.3, offset: [0, -0.1, 0] }),
+    make(seed, dt) {
+      const b = new BurstyOscillator(deriveSeed(seed, 'frag'), dt, {
+        freq: 5.0, freqSpread: 0.5, medianDuration: 1.5, meanInterval: 3.0, rms: GS_SLOW_PDR_RMS,
+      });
+      return {
+        next: (ctx) => {
+          const v = b.next();
+          return ctx.enabled ? v : 0;
+        },
+      };
+    },
+  };
+}
+
+const GEN_SLOWING: PatternSourceDescriptor[] = [
+  ...GS_SITES.map((site, i) => genSlowingPatch(site, i === 0)),
+  slowPdr('L', 'O1'), slowPdr('R', 'O2'),
+];
 
 // ---------------------------------------------------------------------------
 // FIRDA — Frontal Intermittent Rhythmic Delta Activity. Bursts of rhythmic,
@@ -300,5 +347,5 @@ const lpeds: PatternSourceDescriptor = {
 };
 
 export const NON_EPILEPTIFORM_SOURCES: PatternSourceDescriptor[] = [
-  genSlowing, firda, focalDeltaTemporal, triphasic, triphasicPosterior, gpeds, lpeds,
+  ...GEN_SLOWING, firda, focalDeltaTemporal, triphasic, triphasicPosterior, gpeds, lpeds,
 ];

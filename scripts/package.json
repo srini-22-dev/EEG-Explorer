@@ -14,6 +14,9 @@
     "compress-meshes": "tsx ./src/compressMeshes.ts",
     "build-1020": "tsx ./src/build1020.ts",
     "validate": "tsx ./src/validateEngine.ts",
+    "render-trace": "tsx ./src/renderTrace.ts",
+    "render-clinical-page": "tsx ./src/renderClinicalPage.ts",
+    "measure-field": "tsx ./src/measureField.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

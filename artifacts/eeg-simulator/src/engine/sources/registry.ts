@@ -103,7 +103,13 @@ export type PatternSourceDescriptor = {
   /** Geometry for the leadfield column (build with `sourceUnder`). */
   spec: SourceSpec;
   /** Factory: build the stateful generator. `seed` is already derived from `id`. */
-  make(seed: number, dt: number): PatternGenerator;
+  /**
+   * `seed` is this source's own stream (derived from the subject seed and `id`).
+   * `subjectSeed` is the subject's seed itself, for the rare pair of sources that
+   * must share a schedule while keeping independent noise (chewing: both jaw
+   * muscles close on the same chew, each with its own motor units).
+   */
+  make(seed: number, dt: number, subjectSeed: number): PatternGenerator;
 };
 
 import { SLEEP_SOURCES } from './sleep';

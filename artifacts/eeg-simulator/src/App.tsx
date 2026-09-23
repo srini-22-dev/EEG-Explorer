@@ -33,10 +33,14 @@ const PanelLoading = ({ label }: { label: string }) => (
 // `target` is the state selecting the pattern jumps Background State to;
 // `compatible` is every state the pattern is allowed to keep rendering in.
 const STATE_LOCKED_PATTERNS: Record<string, { target: PatientState; compatible: PatientState[] }> = {
-  'posts':     { target: 'n1', compatible: ['drowsy', 'n1', 'n2'] },
-  'v-waves':   { target: 'n2', compatible: ['n1', 'n2'] },
-  'k-complex': { target: 'n2', compatible: ['n2'] },
-  'spindles':  { target: 'n2', compatible: ['n2'] },
+  // All four persist into slow-wave sleep, less organised (learningeeg; AASM notes
+  // spindles may persist in N3, and a K-complex that is slow and big enough IS a
+  // slow wave), so N3 keeps them. Vertex waves and POSTS first appear in N1.
+  'posts':      { target: 'n1', compatible: ['drowsy', 'n1', 'n2', 'n3'] },
+  'v-waves':    { target: 'n1', compatible: ['n1', 'n2', 'n3'] },
+  'k-complex':  { target: 'n2', compatible: ['n2', 'n3'] },
+  'spindles':   { target: 'n2', compatible: ['n2', 'n3'] },
+  'slow-waves': { target: 'n3', compatible: ['n3'] },
   'wicket':    { target: 'drowsy', compatible: ['drowsy'] },
   'rmtd':      { target: 'drowsy', compatible: ['drowsy'] },
   '14-6-pos':  { target: 'drowsy', compatible: ['drowsy', 'n1', 'n2'] },
@@ -122,6 +126,20 @@ export default function App() {
   // source the moment its enabled flag drops (transient schedules clear, scripted
   // patterns reset their clocks), so there is no separate generator state to reset.
   const clearAll = () => setActivePatterns(new Set());
+
+  // The quiz sets its pattern directly, bypassing `togglePattern`'s state jump. A pattern
+  // bound to a stage must be shown in that stage — otherwise the state-gated sources (wicket,
+  // RMTD, 14 & 6, BETS) render nothing and Slow-Wave Sleep shows an awake record — and
+  // anything else is shown on an awake background rather than whatever the last question left.
+  const selectQuizPatterns = (p: Set<string>) => {
+    let state: PatientState = 'awake';
+    for (const id of p) {
+      const lock = STATE_LOCKED_PATTERNS[id];
+      if (lock) state = lock.target;
+    }
+    setPatientState(state);
+    setActivePatterns(p);
+  };
 
   const settings: SimSettings = {
     speed, sensitivity, patientState, activePatterns, ictalParams, artifactParams,
@@ -228,10 +246,10 @@ export default function App() {
         </div>
         
         {quizMode && (
-          <QuizMode 
+          <QuizMode
             onClose={() => setQuizMode(false)}
             setPatientState={setPatientState}
-            setActivePatterns={setActivePatterns}
+            setActivePatterns={selectQuizPatterns}
             setFreeze={setIsFrozen}
           />
         )}

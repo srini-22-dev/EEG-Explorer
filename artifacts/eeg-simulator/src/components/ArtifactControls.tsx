@@ -28,23 +28,24 @@ const EMG_REGIONS: { id: EmgRegion; label: string; hint: string }[] = [
 const LABEL_CLASS = 'text-[10px] text-slate-500 uppercase tracking-wider';
 
 function Slider({
-  label, value, min, max, step, unit, onChange,
+  label, value, min, max, step, unit, onChange, disabled = false, offAtMin = false,
 }: {
   label: string; value: number; min: number; max: number; step: number;
-  unit: string; onChange: (v: number) => void;
+  unit: string; onChange: (v: number) => void; disabled?: boolean; offAtMin?: boolean;
 }) {
   return (
-    <div className="space-y-1">
+    <div className={`space-y-1 ${disabled ? 'opacity-40' : ''}`}>
       <div className="flex justify-between items-center">
         <Label className={LABEL_CLASS}>{label}</Label>
         <span className="text-[10px] font-mono text-orange-400">
-          {step < 1 ? value.toFixed(step < 0.1 ? 2 : 1) : Math.round(value)}{unit}
+          {offAtMin && value <= min ? 'off'
+            : `${step < 1 ? value.toFixed(step < 0.1 ? 2 : 1) : Math.round(value)}${unit}`}
         </span>
       </div>
       <input
-        type="range" min={min} max={max} step={step} value={value}
+        type="range" min={min} max={max} step={step} value={value} disabled={disabled}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-full accent-orange-500"
+        className="w-full accent-orange-500 disabled:cursor-not-allowed"
       />
     </div>
   );
@@ -150,10 +151,31 @@ export function ArtifactControls({
               ))}
             </select>
           </div>
+          {/* Automatic popping: an unstable-but-attached electrode firing repeated
+              transients. 0 = off (manual pops still work). Meaningless once the
+              electrode is flat, so it grays out while the selection is detached. */}
           <Slider
-            label="Pop rate" value={params.popRatePerMin} min={0.1} max={6} step={0.1} unit="/min"
+            label="Pop rate" value={params.popRatePerMin} min={0} max={6} step={0.1} unit="/min"
+            offAtMin disabled={isDetached}
             onChange={v => update({ popRatePerMin: v })}
           />
+          {/* Manual pop: one discrete transient on the selected electrode (random
+              if "any"), the electrode staying attached. */}
+          <button
+            disabled={targeted && isDetached}
+            onClick={() => update({ manualPopNonce: params.manualPopNonce + 1 })}
+            className={`w-full py-1 rounded text-[11px] font-mono border transition-colors ${
+              targeted && isDetached
+                ? 'border-slate-800 text-slate-700 cursor-not-allowed'
+                : 'bg-amber-800/40 border-amber-600 text-amber-300 hover:bg-amber-800/60'
+            }`}
+          >
+            {targeted
+              ? isDetached ? `${target} is detached` : `Pop ${target}`
+              : 'Pop random electrode'}
+          </button>
+          {/* Disconnection: contact breaks (one pop) and the channel goes flat until
+              reattached — a different finding from a pop, hence its own button. */}
           <button
             disabled={!targeted}
             onClick={() =>
@@ -167,9 +189,9 @@ export function ArtifactControls({
                   : 'bg-orange-800/40 border-orange-600 text-orange-300 hover:bg-orange-800/60'
             }`}
           >
-            {!targeted ? 'Pick an electrode to detach'
+            {!targeted ? 'Pick an electrode to disconnect'
               : isDetached ? `Reattach ${target}`
-              : `Detach ${target} (pop, then flat)`}
+              : `Disconnect ${target} (pop, then flat)`}
           </button>
           {detached.length > 0 && (
             <div className="space-y-1">
@@ -198,6 +220,14 @@ export function ArtifactControls({
               </p>
             </div>
           )}
+          {/* Reset the whole control: reattach every electrode and restore the
+              default rate and target. */}
+          <button
+            onClick={() => update({ detachedElectrodes: [], popRatePerMin: 1, popTarget: POP_TARGET_ANY })}
+            className="w-full py-1 rounded text-[11px] font-mono border border-slate-700 text-slate-400 hover:bg-slate-800 transition-colors"
+          >
+            Reset
+          </button>
         </>,
       );
     }

@@ -1,0 +1,17 @@
+- [x] in freeze y, make max of y display 2 significant figures only
+- [x] make switching the FFT instant
+- [x] add frequency of ictal discharges to the slider along with amplitude
+- [x] C4-P4 has high alpha currently, it is looking more like P4-O2 (this should have high alpha) (In awake state) (in leads containing O1, O2) (when eyes are closed only) (when eyes are opened, alpha should diminish ) (this is called alpha reactivity, reaction for eye closing and eye opening) (this should be there, because it is the basic alpha principle)
+- [x] add eye opening artifact (open and close), causing upward deflection (with smaller amplitude than the blink artifact)
+- [x] remove n1, n2, n3 just keep awake, drowsy and sleep
+- [x] just keep bipolar antero posterior (double banana montage) and common average, make the others not visible but add a small more button below to reveal them
+- [x] rename normal variants to benign variants
+- [x] put activation procedures at the bottom
+- [x] club together non-epileptiform abnl, interictal epileptiform, and ictal, seizures in the side panel
+- [x] Electrode pop, detached isnt actually detached
+- [x] Make annotations actually universal and useful.
+- [x] When artifacts (or any other epileptiform or sleep architecture (or any toggle)) are enabled, they should appear in the graph quicker
+- [x] make the electrodes draggable in the 3d head
+- [x] currently there are other spikes (which are actually spike waves), there should be spikes, spike waves, sharps and sharp waves.
+- [ ] for mu rhythm, add left and right thumb movement toggles which will attenuate contralateral hemisphere and add it to IK (both toggles are independent)
+

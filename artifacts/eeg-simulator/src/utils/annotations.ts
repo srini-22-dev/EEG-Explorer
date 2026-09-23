@@ -28,10 +28,11 @@ export type AnnotationDef = {
  */
 export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   // ── Sleep architecture ──────────────────────────────────────────────────
-  'posts':      { patternId: 'posts',      targetRegion: 'all',            text: 'POSTS: downward occipital (O1/O2) checkmarks, N1' },
-  'v-waves':    { patternId: 'v-waves',    targetRegion: 'central',        text: 'Vertex wave: sharp Cz-maximal transient (N2)' },
-  'k-complex':  { patternId: 'k-complex',  targetRegion: 'central',        text: 'K-complex: sharp + slow after-wave, Fz/Cz/Pz' },
-  'spindles':   { patternId: 'spindles',   targetRegion: 'central',        text: 'Spindle: 12–15 Hz waxing burst, central-maximal' },
+  'posts':      { patternId: 'posts',      targetRegion: 'all',            text: 'POSTS: occipital sails, UP on P3-O1/T5-O1 (O1 is input 2), 4–6/s runs' },
+  'v-waves':    { patternId: 'v-waves',    targetRegion: 'central',        text: 'Vertex wave: sharp, reverses at Cz and at C3/C4 (N1/N2)' },
+  'k-complex':  { patternId: 'k-complex',  targetRegion: 'central',        text: 'K-complex: sharp negative + slow positive, ≥0.5 s, frontal, diffuse' },
+  'spindles':   { patternId: 'spindles',   targetRegion: 'central',        text: 'Spindle: 11–16 Hz waxing-waning burst, 0.5–2 s, symmetric' },
+  'slow-waves': { patternId: 'slow-waves', targetRegion: 'all',            text: 'N3: >75 µV 0.5–2 Hz delta, diffuse, frontally predominant' },
 
   // ── Benign variants ─────────────────────────────────────────────────────
   'mu-rhythm':  { patternId: 'mu-rhythm',  targetRegion: 'central',        text: 'Mu: arciform 8–12 Hz at C3/C4; blocks with hand movement' },
@@ -49,7 +50,7 @@ export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   'eye-movement': { patternId: 'eye-movement', targetRegion: 'all',          text: 'Lateral gaze: opposite-polarity deflection at F7 vs F8' },
   'eye-opening':  { patternId: 'eye-opening',  targetRegion: 'all',          text: 'Eye opening: upward frontopolar sweep (mirror of a blink)' },
   'muscle':       { patternId: 'muscle',       targetRegion: 'all',          text: 'Muscle: high-frequency fuzz over the contracting muscle' },
-  'chewing':      { patternId: 'chewing',      targetRegion: 'left-temporal', text: 'Chewing: rhythmic 1–2 Hz temporal bursts (masseter)' },
+  'chewing':      { patternId: 'chewing',      targetRegion: 'left-temporal', text: 'Chewing: rhythmic bursts of fast muscle activity, both temporal regions' },
   'electrode-pop':{ patternId: 'electrode-pop', targetRegion: 'all',         text: 'Pop: abrupt step + decay at ONE electrode, no field to neighbours' },
   'sweat':        { patternId: 'sweat',        targetRegion: 'all',          text: 'Sweat: very slow (<0.5 Hz) frontal baseline drift' },
   'ecg-artifact': { patternId: 'ecg-artifact', targetRegion: 'all',          text: 'ECG: regular QRS ~1 Hz; line it up against the ECG trace' },

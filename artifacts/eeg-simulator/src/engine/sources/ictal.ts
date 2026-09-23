@@ -171,7 +171,13 @@ const GTC_DELAY = 6;
 const gtcIctal: PatternSourceDescriptor = {
   id: 'gtc-ictal',
   toggles: ['gtc-ictal'],
-  spec: sourceUnder('gtc-ictal', ['Fz'], { extent: 0.7 }),
+  // Anchored across Fz AND Cz, not Fz alone. A generalised tonic-clonic seizure is
+  // by definition not a focal frontal event, and IK-019 asserts its field reaches
+  // Cz — which a source centred on a single frontal electrode struggles to satisfy.
+  // Widening alone could not fix it: extent 0.7 -> 0.95 gained 0.17 on the Cz ratio
+  // and 0.95 -> 1.10 gained a further 0.007, because Cz/Fz asymptotes as the field
+  // broadens. Moving the anchor is the fix, and it is the more faithful geometry.
+  spec: sourceUnder('gtc-ictal', ['Fz', 'Cz'], { extent: 0.95 }),
   make(seed) {
     const g = new Gaussian(seed);
     let clock = 0;

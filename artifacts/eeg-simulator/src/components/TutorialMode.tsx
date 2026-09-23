@@ -31,7 +31,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: "Sleep Stages: N2",
-    desc: "As the patient falls deeper into sleep, you'll see K-complexes and Sleep Spindles in the central leads.",
+    desc: "As the patient falls deeper into sleep, N2 brings K-complexes — large, frontally maximal waves seen on every chain — and sleep spindles, 11-16 Hz bursts maximal over the central regions.",
     state: 'n2',
     patterns: ['k-complex', 'spindles']
   },

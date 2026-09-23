@@ -1,0 +1,77 @@
+{
+ "ap-gradient": {
+  "verdict": {
+   "present": true,
+   "post_db": 31.377985292660266,
+   "front_db": 0.0,
+   "lr_gap": null,
+   "freq": 11.747662952311487
+  },
+  "central_db": null,
+  "pass_": true,
+  "pitch": 126.35454545454546,
+  "conf": 0.9621212121212122,
+  "pxps": 400.0,
+  "pxps_how": "solid 1 s rules 400 px apart; grid_period returns 80 = the dotted 0.2 s lines"
+ },
+ "term-alpha": {
+  "verdict": {
+   "present": true,
+   "post_db": 19.063377066137967,
+   "front_db": 4.472385967128357,
+   "lr_gap": 0.0605412561812777,
+   "freq": 10.183979727959512
+  },
+  "central_db": 10.07619149140268,
+  "pass_": true,
+  "pitch": 27.636923076923075,
+  "conf": 0.9087730451366814,
+  "pxps": 135.0,
+  "pxps_how": "grid_period 135; ECG R-R ~116 px -> 70 bpm"
+ },
+ "mu": {
+  "verdict": {
+   "present": false,
+   "post_db": 6.723038883431075,
+   "front_db": 1.8623498901529931,
+   "lr_gap": 1.905241945117659,
+   "freq": 9.392231524487794
+  },
+  "central_db": 12.606785170139714,
+  "pass_": true,
+  "pitch": 21.60076923076923,
+  "conf": 0.7437802145973352,
+  "pxps": 104.0,
+  "pxps_how": "grid_period 104; ECG R-R ~77 px -> 81 bpm"
+ },
+ "sws": {
+  "verdict": {
+   "present": false,
+   "post_db": 3.7893473091234937,
+   "front_db": 3.5499738790176254,
+   "lr_gap": 0.11282444998399477,
+   "freq": 9.224721487777378
+  },
+  "central_db": 4.819968621447471,
+  "pass_": true,
+  "pitch": 26.45230769230769,
+  "conf": 0.682040182040182,
+  "pxps": 111.0,
+  "pxps_how": "grid_period 111; ECG R-R ~74 px -> 90 bpm"
+ },
+ "kc-spindles-posts": {
+  "verdict": {
+   "present": false,
+   "post_db": 4.079244364565792,
+   "front_db": 4.501576897116194,
+   "lr_gap": 2.7737400926511278,
+   "freq": 9.150054379827841
+  },
+  "central_db": 3.0990706175279703,
+  "pass_": true,
+  "pitch": 21.85076923076923,
+  "conf": 0.5215571230799657,
+  "pxps": 104.0,
+  "pxps_how": "grid_period 104; ECG R-R ~87 px -> 71 bpm"
+ }
+}

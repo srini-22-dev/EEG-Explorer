@@ -14,6 +14,15 @@ import {
   toggleClickChannel,
   getChannelsUsingElectrode,
 } from '../utils/highlightStore';
+import {
+  PX_PER_MM_X,
+  MM_PER_ROW,
+  MINOR_GRID_PX,
+  pxPerMmFromHeight,
+  pxPerUV as calcPxPerUV,
+  ecgScale,
+  traceY,
+} from '../utils/displayGeometry';
 
 type EEGCanvasProps = {
   montage: Montage;
@@ -32,8 +41,6 @@ type EEGCanvasProps = {
   graphHover?: boolean;
 };
 
-const PX_PER_MM_X = 4;   // horizontal: pixels per mm
-const MM_PER_ROW  = 10;  // each EEG channel = 10 mm vertically
 const GAP_UNITS   = 0.40; // fractional row-height gap between chain groups
 /**
  * Seconds of signal kept behind the sweep.
@@ -142,9 +149,27 @@ export function EEGCanvas({
   const measurePointsRef = useRef<{ a: Point | null, b: Point | null }>({ a: null, b: null });
   const [hasMeasurePoints, setHasMeasurePoints] = useState(false);
 
+  // The engine and each sample's raw electrode voltages outlive a montage change.
+  // A montage only chooses which differences of the same electrodes to draw, so
+  // switching it re-derives every row from the retained frames: the page redraws
+  // the same stretch of EEG in the new montage — as re-montaging a recorded page
+  // does on a real reader — instead of blanking and restarting a new subject.
+  const simRef = useRef<SimulationSource | null>(null);
+  if (!simRef.current) simRef.current = new SimulationSource();
+  const rawFrames = useRef<Record<string, number>[]>([]);
+
   useEffect(() => {
-    dataBuffer.current = montage.channels.map(() => []);
-    timeBuffer.current = [];
+    const frames = rawFrames.current;
+    if (frames.length !== timeBuffer.current.length) {
+      // Buffers out of step (nothing recorded yet): start clean.
+      rawFrames.current = [];
+      timeBuffer.current = [];
+      dataBuffer.current = montage.channels.map(() => []);
+    } else {
+      const avg = frames.map(commonAverage);
+      dataBuffer.current = montage.channels.map(ch =>
+        frames.map((f, k) => computeChannelVoltage(ch, timeBuffer.current[k], f, avg[k])));
+    }
     measurePointsRef.current = { a: null, b: null };
     setHasMeasurePoints(false);
   }, [montage]);
@@ -180,7 +205,7 @@ export function EEGCanvas({
     // Row units are fixed by the montage, so the total is summed once here rather
     // than re-filtering the layout array on every frame.
     const totalRowUnits = layout.reduce((s, r) => s + (r.channelIndex < 0 ? GAP_UNITS : 1), 0);
-    const simSource = new SimulationSource();
+    const simSource = simRef.current!;
 
     const render = (now: number) => {
       const currentSettings = settingsRef.current;
@@ -213,6 +238,8 @@ export function EEGCanvas({
           const allV = simSource.next(currentSettings);
           const avgRef = commonAverage(allV);
           timeBuffer.current.push(lastT);
+          // `next()` reuses its return object, so keep a copy.
+          rawFrames.current.push({ ...allV });
           for (let i = 0; i < montage.channels.length; i++) {
             if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
             dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, allV, avgRef));
@@ -230,6 +257,7 @@ export function EEGCanvas({
         while (evict < tb.length - 2 && tb[evict] < cutoff) evict++;
         if (evict >= EVICT_CHUNK) {
           tb.splice(0, evict);
+          rawFrames.current.splice(0, evict);
           for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i]?.splice(0, evict);
         }
       }
@@ -261,7 +289,7 @@ export function EEGCanvas({
       }
 
       // 3. Amplitude grid (px per mm vertical)
-      const pxPerMm = h / totalRowUnits / MM_PER_ROW;
+      const pxPerMm = pxPerMmFromHeight(h, totalRowUnits);
 
       // Grid lines are batched by style — one path for the 1 mm lines and one for
       // the 5 mm lines — instead of a beginPath/stroke pair per line. At this
@@ -284,10 +312,20 @@ export function EEGCanvas({
       ctx.lineWidth   = 0.55;
       ctx.stroke();
 
-      // 4. Vertical time grid: minor 200 ms, major 1 s
+      // 4. Vertical time grid: minor 5 mm (fixed paper interval), major 1 s.
+      //
+      // Real ruled EEG paper is printed with a fixed physical grid — 5 mm
+      // minor squares — and the TIME each square represents changes with
+      // paper speed, not the reverse. This used to rule minor lines every
+      // 200 ms of elapsed time regardless of speed, which gave the correct
+      // physical spacing only at 25 mm/s and was wrong everywhere else (6.0
+      // mm at 30 mm/s, 2.0 mm at 10 mm/s). `pxOff` below is already a plain
+      // pixel offset (how far the sweep has travelled past the last whole
+      // second), so switching `minorW` from a time-derived quantity to a
+      // fixed physical one needs no other change to the scroll math.
       {
         const secW   = pxPerSec;
-        const minorW = secW * 0.2;
+        const minorW = MINOR_GRID_PX;
         const pxOff  = (currentT % 1) * secW;
         const isMajor = (x: number) => Math.abs((w - x + pxOff) % secW) < 1.8;
 
@@ -305,7 +343,7 @@ export function EEGCanvas({
       }
 
       // 5. Waveform traces
-      const pxPerUV = pxPerMm / currentSettings.sensitivity;
+      const pxPerUV = calcPxPerUV(pxPerMm, currentSettings.sensitivity);
 
       // Index of the leftmost sample still on screen. The buffers now hold up to
       // HISTORY_SEC of signal but only winSec of it is visible, so starting every
@@ -348,7 +386,10 @@ export function EEGCanvas({
         const isHighlighted = highlightedChannels.has(i);
         const dimmed  = anyHighlight && !isHighlighted;
 
-        const scale = isECG ? pxPerMm * 10 / 1000 : pxPerUV;
+        // ECG is a limb lead, not a scalp derivation — negative-up does not
+        // apply to it, so its scale is negated relative to the EEG rows
+        // (see ecgScale's doc comment: this is what puts the R wave up).
+        const scale = isECG ? ecgScale(pxPerMm) : pxPerUV;
 
         if (rowDetached(ch)) {
           ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
@@ -372,7 +413,7 @@ export function EEGCanvas({
         for (let j = firstVisible; j < data.length; j++) {
           const tDist = currentT - timeBuffer.current[j];
           const x = w - tDist * pxPerSec;
-          const v = data[j] * scale;
+          const v = data[j];
           // Real EEG paper and clinical review systems never clip: a
           // high-amplitude event is drawn at its true height and simply
           // overruns into neighbouring channels, which is how reviewers judge
@@ -385,14 +426,17 @@ export function EEGCanvas({
           // drives Fp1/Fp2 positive via Bell's phenomenon — reads as a downward
           // frontopolar deflection (IK-001).
           //
-          // Canvas y grows downward, so negative-up is `centerY + v`, not
-          // `centerY - v`. This previously read `- v`, which inverted every
-          // trace in the app. It looked right only for the patterns whose
-          // morphology had been written pre-inverted to compensate; the ones
-          // stated in true scalp polarity (V-waves, K-complexes, POSTS, lambda,
-          // triphasics, blink) all rendered upside down. Fixing the convention
-          // here is what lets every generator speak plain physiological sign.
-          const y = centerY + v;
+          // Canvas y grows downward, so negative-up is `centerY + v * scale`,
+          // not `centerY - v * scale` — that is what `traceY` (shared with
+          // renderTrace.ts via displayGeometry.ts) encodes. This previously
+          // read `centerY - v`, which inverted every trace in the app. It
+          // looked right only for the patterns whose morphology had been
+          // written pre-inverted to compensate; the ones stated in true scalp
+          // polarity (V-waves, K-complexes, POSTS, lambda, triphasics, blink)
+          // all rendered upside down. Fixing the convention here is what lets
+          // every generator speak plain physiological sign. The ECG row is the
+          // one exception to negative-up (see `scale` above / `ecgScale`).
+          const y = traceY(centerY, v, scale);
           if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
@@ -478,6 +522,7 @@ export function EEGCanvas({
         const stateLabel = {
           awake: 'Awake · PDR α', drowsy: 'Drowsy · θ',
           n1: 'N1 Sleep', n2: 'N2 Sleep · K+Spindles', n3: 'N3 / SWS · δ',
+          rem: 'REM · low-voltage mixed + REMs',
         }[currentSettings.patientState] ?? currentSettings.patientState;
 
         ctx.fillStyle    = currentTheme.stateTextColor;
@@ -604,16 +649,27 @@ export function EEGCanvas({
     const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
     const nSp     = layout.length - nonSp;
     const totalU  = nonSp + nSp * GAP_UNITS;
-    const avgRowH = h / totalU;
-    const pxPerMm = avgRowH / MM_PER_ROW;
-    const pxPerUV = pxPerMm / currentSettings.sensitivity;
-    
+    const pxPerMm = pxPerMmFromHeight(h, totalU);
+    const pxPerUV = calcPxPerUV(pxPerMm, currentSettings.sensitivity);
+
     const centerY = closestRow.centerFrac * h;
-    // Same negative-up mapping the renderer uses (`y = centerY + v`), inverted.
-    // This read `(centerY - y)`, i.e. positive-up: the caliper reported the
-    // opposite sign to the trace it was placed on. The readout shows |Δv| so no
-    // displayed number was wrong, but the stored value was.
-    const clickV = (y - centerY) / pxPerUV;
+    // Invert exactly the mapping the renderer used to draw this row. `traceY` is
+    // `centerY + v * scale`, so the inverse is `(y - centerY) / scale` — and
+    // `scale` must be the SAME one that row was drawn with, or the caliper
+    // measures a curve it did not plot.
+    //
+    // Two bugs lived here. It read `(centerY - y)`, i.e. positive-up, reporting
+    // the opposite sign to the trace it sat on; the readout displays |Δv| so no
+    // number on screen was wrong, but the stored value was. And it applied the
+    // EEG `pxPerUV` to every row including ECG, which is drawn through
+    // `ecgScale` — a different unit conversion (mV, not µV) and, since the ECG
+    // row is a limb lead rather than a scalp derivation, a negated one. Measuring
+    // the ECG row therefore gave both the wrong sign and a magnitude off by
+    // roughly 14x at 7 µV/mm. Branching on the row is the whole fix.
+    const rowIsECG = closestRow.channelIndex >= 0
+      && montage.channels[closestRow.channelIndex]?.label === 'ECG';
+    const clickScale = rowIsECG ? ecgScale(pxPerMm) : pxPerUV;
+    const clickV = (y - centerY) / clickScale;
     
     const point = { x, y, t: clickT, v: clickV };
     

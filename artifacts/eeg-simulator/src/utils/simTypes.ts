@@ -7,7 +7,7 @@
  * and the React UI can depend on them without either importing the other.
  */
 
-export type PatientState = 'awake' | 'drowsy' | 'n1' | 'n2' | 'n3';
+export type PatientState = 'awake' | 'drowsy' | 'n1' | 'n2' | 'n3' | 'rem';
 
 export type IctalHemisphere = 'left' | 'right';
 
@@ -75,8 +75,14 @@ export type ArtifactParams = {
   emgSeverity: number;
   /** Electrode pops are confined to this electrode, or `POP_TARGET_ANY`. */
   popTarget: string;
-  /** Mean number of pops per minute. */
+  /** Mean number of automatic pops per minute; `0` turns automatic popping off. */
   popRatePerMin: number;
+  /**
+   * Monotonic counter for the manual "Pop" button. A pop is a discrete event, not
+   * a state, so it can't be expressed declaratively — the engine fires one pop on
+   * `popTarget` (random if `POP_TARGET_ANY`) each time this value increases.
+   */
+  manualPopNonce: number;
   /**
    * Electrodes whose contact has been broken and not restored. The engine pops
    * the electrode as contact fails, then flattens it until it is removed here.
@@ -104,6 +110,7 @@ export function defaultArtifactParams(): ArtifactParams {
     emgSeverity: 1,
     popTarget: POP_TARGET_ANY,
     popRatePerMin: 1,
+    manualPopNonce: 0,
     detachedElectrodes: [],
     sweatSeverity: 1,
     ecgBpm: 68,
@@ -116,8 +123,19 @@ export function defaultArtifactParams(): ArtifactParams {
 
 /** Selectable paper speeds (mm/s) and display sensitivities (µV/mm). These are
  *  the only values the Display panel offers; the canvas treats both as plain
- *  numeric multipliers, so the sets can change here without touching geometry. */
-export const SPEED_VALUES = [10, 20, 30] as const;
+ *  numeric multipliers, so the sets can change here without touching geometry.
+ *
+ *  Speed set per ACNS Guideline 1 §3.7: "A paper speed of 3 cm/s ... should be
+ *  utilized for routine recordings. A paper speed of 1.5 cm/s ... is sometimes
+ *  used for EEG recordings in newborns or in other special situations."
+ *  - 30 mm/s (3 cm/s) — the routine speed the guideline names.
+ *  - 15 mm/s (1.5 cm/s) — the guideline's only named alternative (neonatal /
+ *    special situations).
+ *  - 10 mm/s — not from Guideline 1; kept for polysomnography-style review of
+ *    the sleep material, where a slower sweep is conventional.
+ *  20 mm/s was dropped: no guideline names it, and it displaced 15 mm/s, the
+ *  speed the standard actually calls for. */
+export const SPEED_VALUES = [10, 15, 30] as const;
 export const SENSITIVITY_VALUES = [1, 3, 5, 7, 10, 15, 30] as const;
 export type Speed = (typeof SPEED_VALUES)[number];
 export type Sensitivity = (typeof SENSITIVITY_VALUES)[number];

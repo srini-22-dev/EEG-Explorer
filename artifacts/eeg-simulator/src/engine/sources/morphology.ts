@@ -28,9 +28,6 @@ export const DELTA_TONES: Tone[] = [
 export const BETA_TONES: Tone[] = [
   { f: 14.2, a: 1.0 }, { f: 16.8, a: 0.9 }, { f: 19.4, a: 0.8 }, { f: 23.1, a: 0.7 },
 ];
-export const SPINDLE_TONES: Tone[] = [
-  { f: 12.3, a: 0.8 }, { f: 13.5, a: 1.0 }, { f: 14.8, a: 0.7 },
-];
 export const MU_TONES: Tone[] = [
   { f: 9.2, a: 0.9 }, { f: 10.1, a: 1.0 }, { f: 11.1, a: 0.8 },
 ];
@@ -60,18 +57,32 @@ export const POS6_TONES: Tone[] = [
 // octave too high — closer to fast alpha than to the temporal 6-7 Hz arciform
 // runs a reader is taught to recognise. These tones cover 6.2-11 Hz so the
 // morphology matches the range the UI names.
+// Wicket spikes span the THETA or alpha range, 6-11 Hz — StatPearls/NCBI
+// (NBK555899), tracing to Reiher & Lebel's original description: "monophasic wave
+// bursts within the theta- or alpha frequency range (6-11 Hz)". learningeeg.com's
+// "usually 7-11 Hz" is a teaching simplification of the same thing, and IK-015 is
+// right to say the band is not confined to alpha.
+//
+// The low end used to be a token presence — 0.5 and 0.7 against a 1.0 peak at
+// 8.8 Hz — which made this an alpha rhythm with a whisper of theta rather than the
+// 6-11 Hz band the sources describe, and left the 6-7.5 Hz power lift 3% short of
+// its floor. The peak stays in the arciform 8-9 Hz region where wickets are most
+// often seen; only the theta shoulder is brought up to something a reader would
+// actually call theta.
 export const WICKET_TONES: Tone[] = [
-  { f: 6.2, a: 0.5 }, { f: 7.0, a: 0.7 }, { f: 8.0, a: 0.9 },
+  { f: 6.2, a: 0.72 }, { f: 7.0, a: 0.90 }, { f: 8.0, a: 0.95 },
   { f: 8.8, a: 1.0 }, { f: 9.6, a: 0.85 }, { f: 10.4, a: 0.6 },
   { f: 11.0, a: 0.35 },
 ];
 
 // Per-tone-set normalisers so a unit-amplitude multiToneSignal peaks near ±1.
-export const WICKET_TONE_NORM = 5.59;
+// Re-measured when the tone amplitudes were rebalanced above (5.59 -> 6.11): this
+// is the peak of the unnormalised arciform sum, so changing any tone's amplitude
+// invalidates it and would silently rescale every wicket burst.
+export const WICKET_TONE_NORM = 6.11;
 export const THETA_TONE_NORM = 2.2;
 export const DELTA_TONE_NORM = 2.0;
 export const BETA_TONE_NORM = 2.0;
-export const SPINDLE_TONE_NORM = 1.6;
 export const MU_TONE_NORM = 1.7;
 export const RMTD_TONE_NORM = 1.3;
 export const POS_BURST_TONE_NORM = 1.6;
