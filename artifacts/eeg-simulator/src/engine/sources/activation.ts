@@ -24,7 +24,8 @@
  * signalling the registry contract deliberately does not have.
  */
 
-import { sourceUnder } from '../forward';
+import { sourceUnder, synchronousPatches } from '../forward';
+import { GENERALIZED_FRONTAL } from './fields';
 import { HopfOscillator } from '../oscillator';
 import { deriveSeed } from '../rng';
 import type { PatternSourceDescriptor } from './registry';
@@ -133,8 +134,11 @@ const photic: PatternSourceDescriptor = {
 //     theta-dominant and only a full response shows prominent delta.
 //  3. It RESOLVES within about a minute of stopping. A normal build-up that
 //     persists well beyond that is itself a finding.
-//  4. In adults it is FRONTALLY predominant and generalised: one broad source
-//     under Fz.
+//  4. In adults it is FRONTALLY predominant and GENERALISED: the generalized
+//     frontal field (fields.ts), on every chain and largest across the frontal
+//     row. It was one broad patch under Fz, which drew the build-up on Fz-Cz and
+//     little elsewhere. The oscillator amplitudes are the earlier 18 and 24 uV
+//     scaled by 1.55 to hold Fz where that patch put it.
 //
 // The slowing is built from the engine's own Hopf oscillators, as `gen-slowing`
 // is, so it wanders in frequency and amplitude instead of reading as a pair of
@@ -154,13 +158,13 @@ const hyperventilation: PatternSourceDescriptor = {
   id: 'hyperventilation',
   toggles: ['hyperventilation'],
   states: ['awake', 'drowsy'],
-  spec: sourceUnder('hyperventilation', ['Fz'], { extent: 0.8 }),
+  spec: synchronousPatches('hyperventilation', GENERALIZED_FRONTAL, { extent: 0.3 }),
   make(seed, dt) {
     const theta = new HopfOscillator(deriveSeed(seed, 'hv-theta'), dt, {
-      freq: 5.0, rms: 18, freqWander: 0.8, damping: -2.2,
+      freq: 5.0, rms: 28, freqWander: 0.8, damping: -2.2,
     });
     const delta = new HopfOscillator(deriveSeed(seed, 'hv-delta'), dt, {
-      freq: 2.5, rms: 24, freqWander: 0.5, damping: -1.4,
+      freq: 2.5, rms: 37, freqWander: 0.5, damping: -1.4,
     });
 
     let clock = 0;

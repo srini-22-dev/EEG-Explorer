@@ -138,6 +138,19 @@ export class RecordingChain {
   private noise: Gaussian[];
   private refNoise: Gaussian;
   private gains: Float64Array;
+  /**
+   * How much of the mains field each electrode picks up, relative to the nominal
+   * amplitude. Interference is a common-mode signal that the differential amplifier
+   * rejects; what reaches the page is the part unequal electrode impedances turn
+   * into a difference, so it is never the same on two electrodes. It used to be
+   * identical on all of them — and therefore cancelled exactly in every bipolar,
+   * average and ear-referenced montage: with the toggle on, the page showed
+   * nothing unless a bad electrode was also present (measured 0.0 uV on all
+   * eighteen double-banana rows, 2026-10-12). No source gives the spread a number;
+   * 0.5-1.5 leaves neighbours differing by a visible fraction of the nominal
+   * amplitude, which is the "uniform thickening of every trace" the toggle names.
+   */
+  private lineCoupling: Float64Array;
   private defects: ChannelDefect[];
   private intermittentOn: boolean[];
   private intermittentLeft: number[];
@@ -165,13 +178,17 @@ export class RecordingChain {
     this.lp = [];
     this.noise = [];
     this.gains = new Float64Array(nChannels);
+    this.lineCoupling = new Float64Array(nChannels);
     this.defects = [];
     this.intermittentOn = [];
     this.intermittentLeft = [];
 
     const g = new Gaussian(deriveSeed(seed, 'chain'));
+    // Own stream, so adding it left every existing subject's gains unchanged.
+    const gLine = new Gaussian(deriveSeed(seed, 'linecoupling'));
     this.refNoise = new Gaussian(deriveSeed(seed, 'refnoise'));
     for (let c = 0; c < nChannels; c++) {
+      this.lineCoupling[c] = gLine.range(0.5, 1.5);
       this.hp.push(new AmplifierHighPass(dt, highPassHz));
       this.lp.push(new AmplifierLowPass(dt, lowPassHz));
       this.noise.push(new Gaussian(deriveSeed(seed, `sensor${c}`)));
@@ -191,6 +208,11 @@ export class RecordingChain {
    */
   setDefect(c: number, d: ChannelDefect) {
     this.defects[c] = d;
+  }
+
+  /** How much of the mains this electrode picks up, relative to the others. */
+  lineCouplingAt(c: number): number {
+    return this.lineCoupling[c];
   }
 
   /**
@@ -222,7 +244,7 @@ export class RecordingChain {
         if (!this.intermittentOn[c]) { v = 0; noiseMul = 3; }
       }
 
-      v = v * this.gains[c] + ref + line * lineAmp * lineMul
+      v = v * this.gains[c] + ref + line * lineAmp * lineMul * this.lineCoupling[c]
         + this.noise[c].next() * this.sensorNoiseRms * noiseMul;
       v = this.hp[c].next(v);
       x[c] = this.lp[c].next(v);

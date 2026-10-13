@@ -102,8 +102,17 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
   // opposite directions, which is the diagnostic feature of a lateral eye movement.
   // A horizontal rotation pivots about the globe CENTRE, ~1.3 cm behind the cornea.
   gaze:        { id: 'gaze',        pos: [ 0.00,-0.68, 0.61], orientation: { kind: 'tangential', dir: [-1, 0, 0] }, extent: 0.55 },
-  temporalisL: { id: 'temporalisL', pos: [ 0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
-  temporalisR: { id: 'temporalisR', pos: [-0.80, 0.10, 0.10], orientation: { kind: 'radial' }, extent: 0.30 },
+  // Temporalis fills the temporal fossa: from behind the orbital rim back to above
+  // the ear, its belly in front of and a little below T3 — between F7 and T3. It was
+  // at y = +0.10, 3.5 cm ABOVE T3 (y = -0.274) and as close to C3 as to T3, a
+  // leftover from the pre-mesh electrode frame like the frontalis below. Measured
+  // there, C3 and C4 carried 85% of the EMG at T3 and T4, and C3-P3 was as fuzzy as
+  // T3-T5 — muscle over the central region, where learningeeg says there is least
+  // ("most commonly found in the frontal or lateral temporal regions ... typically
+  // only minimal myogenic artifact near the vertex"). Here T3 is the maximum, F7
+  // about 0.6 of it, and C3 under 0.1.
+  temporalisL: { id: 'temporalisL', pos: [ 0.78,-0.36, 0.22], orientation: { kind: 'radial' }, extent: 0.30 },
+  temporalisR: { id: 'temporalisR', pos: [-0.78,-0.36, 0.22], orientation: { kind: 'radial' }, extent: 0.30 },
   // Frontalis is the FOREHEAD muscle, spanning brow to hairline. It was at
   // y = +0.50, which is Fz's height (y = 0.5155) — the vertex, roughly 8 cm too
   // high, a leftover from the pre-mesh electrode frame. Anchored between the
@@ -526,7 +535,20 @@ export class ElectrodePopGenerator {
   }
 }
 
-/** Sweat: a very-low-frequency random walk producing large rolling drift (§8). */
+/**
+ * Sweat: a very slow wander of the skin potential under the electrodes (§8).
+ *
+ * An Ornstein-Uhlenbeck process with a 12 s relaxation time and UNIT variance; the
+ * engine sets its size in microvolts (`SWEAT_SKIN_UV`). The amplifier's
+ * low-frequency filter then passes only the faster part of that wander, which is
+ * what a reader sees: a rolling baseline slower than 0.5 Hz (learningeeg,
+ * Artifacts: "very slow (typically less than 0.5 Hz), relatively low amplitude").
+ *
+ * The innovation used to be scaled by (1 - a) rather than sqrt(1 - a^2). At 250 Hz
+ * and a 12 s relaxation that is 3e-4 against 0.026, so the process ran at 0.08 of
+ * a unit instead of 1, and the whole artifact measured 0.4 uV at Fp1 — the toggle
+ * drew nothing (2026-10-12).
+ */
 export class SweatGenerator {
   private g: Gaussian;
   private x = 0;
@@ -536,10 +558,31 @@ export class SweatGenerator {
     this.a = Math.exp(-dt / tau);
   }
   next(): number {
-    this.x = this.a * this.x + (1 - this.a) * this.g.next() * 6;
+    this.x = this.a * this.x + Math.sqrt(1 - this.a * this.a) * this.g.next();
     return this.x;
   }
 }
+
+/**
+ * R wave of the scalp cardiac artifact, microvolts at the heart source's own
+ * maximum. The heart is far from the head, so its field across the scalp is a
+ * shallow gradient and only a fraction of this separates any two electrodes: at 36
+ * the R wave is ~10-15 uV on the ear-referenced rows (where eegpedia says the
+ * artifact is "most prominent") and a few microvolts on the bipolar ones —
+ * learningeeg's "usually relatively low amplitude". No source gives a figure. It
+ * was 9, which left 2 uV at the vertex and 1 uV on the best bipolar row: with the
+ * toggle on, nothing a reader could see (measured 2026-10-12).
+ */
+export const ECG_SCALP_UV = 36;
+
+/**
+ * Standard deviation of the skin-potential wander at the sweat source, microvolts.
+ * The 0.25 Hz low-frequency filter passes about a fifth of a 12 s wander
+ * (sqrt(f0 / (f0 + fc)) with f0 = 1/(2*pi*12 s) = 0.013 Hz: 0.22), so 45 uV here is
+ * ~10 uV of rolling baseline at the frontopolar electrodes — a drift of a few
+ * millimetres at 7 uV/mm, "relatively low amplitude" but plainly there.
+ */
+export const SWEAT_SKIN_UV = 45;
 
 /**
  * Mains interference. §8 is explicit that this is "not a perfect sinusoid":

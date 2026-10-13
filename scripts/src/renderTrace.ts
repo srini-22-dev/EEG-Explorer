@@ -108,6 +108,7 @@ export interface RenderOpts {
   montage?: string;                    // MONTAGES key, default 'bipolar-ap'
   state?: PatientState;                // default 'awake'
   patterns?: string[];                 // active toggle ids
+  patternOptions?: SimSettings['patternOptions']; // e.g. { postsForm: 'trains' }
   seconds?: number;                    // default 6
   seed?: number;                       // default 42 (deterministic)
   // Seconds to advance the engine through and DISCARD before capturing. The
@@ -169,6 +170,7 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
     activePatterns: new Set(opts.patterns ?? []),
     ictalParams: opts.ictalParams ?? defaultIctalParamsMap(),
     artifactParams: { ...defaultArtifactParams(), ...(opts.artifactParams ?? {}) },
+    patternOptions: opts.patternOptions,
   };
 
   // ── Drive the real engine through the real display transform ──
@@ -300,6 +302,9 @@ function parseArgs(argv: string[]): RenderOpts {
       case '--patterns': o.patterns = next().split(',').map(s => s.trim()).filter(Boolean); break;
       case '--seconds': o.seconds = Number(next()); break;
       case '--seed': o.seed = Number(next()); break;
+      case '--posts': o.patternOptions = { ...o.patternOptions, postsForm: next() as 'singles' | 'trains' }; break;
+      case '--focus': o.patternOptions = { ...o.patternOptions, focalPlacement: next() as 'under' | 'between' }; break;
+      case '--muscle': o.patternOptions = { ...o.patternOptions, seizureMuscle: next() === 'on' }; break;
       case '--skip': o.skipSeconds = Number(next()); break;
       case '--sensitivity': o.sensitivity = Number(next()) as SimSettings['sensitivity']; break;
       case '--speed': o.speed = Number(next()) as SimSettings['speed']; break;

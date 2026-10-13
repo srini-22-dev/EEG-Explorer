@@ -2,7 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Montage, ALL_ELECTRODES } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
+import { markRowSizes, markRows } from '../utils/markRows';
 import { SimulationSource } from '../engine/adapter';
+import type { ArtifactMark } from '../engine/engine';
+import { PATTERN_BY_ID } from '../utils/patterns';
 import { THEMES, EEGTheme } from '../utils/themes';
 import { EDUCATIONAL_ANNOTATIONS, PATTERN_COLOR, REGION_ORDER } from '../utils/annotations';
 import { Pause, Play } from 'lucide-react';
@@ -65,6 +68,11 @@ const HISTORY_SEC = 60;
 const EVICT_CHUNK = 250;
 
 /** Index of the first element >= value in a sorted array. */
+// Annotation arrows: an artifact gets one on every row it is plainly on
+// (utils/markRows.ts), and its name once in this many seconds however often it
+// recurs.
+const LABEL_EVERY_S = 2.5;
+
 function lowerBound(arr: number[], value: number): number {
   let lo = 0, hi = arr.length;
   while (lo < hi) {
@@ -155,8 +163,16 @@ export function EEGCanvas({
   // the same stretch of EEG in the new montage — as re-montaging a recorded page
   // does on a real reader — instead of blanking and restarting a new subject.
   const simRef = useRef<SimulationSource | null>(null);
-  if (!simRef.current) simRef.current = new SimulationSource();
+  if (!simRef.current) { simRef.current = new SimulationSource(); simRef.current.useAppMode(); }
   const rawFrames = useRef<Record<string, number>[]>([]);
+  // Artifact onsets reported by the engine, stamped with their sample time, for
+  // the annotation arrows. Times, not rows, so they survive a montage change.
+  const marksRef = useRef<(ArtifactMark & { t: number; labelled: boolean })[]>([]);
+  // When each kind of artifact last had its name written beside an arrow. Every
+  // event gets an arrow, but a name on every chew or heartbeat buries the trace.
+  const lastLabelRef = useRef<Record<string, number>>({});
+  // For an artifact's fields and a montage: its size on each channel.
+  const markRowsRef = useRef(new WeakMap<object, Map<Montage, number[]>>());
 
   useEffect(() => {
     const frames = rawFrames.current;
@@ -164,6 +180,7 @@ export function EEGCanvas({
       // Buffers out of step (nothing recorded yet): start clean.
       rawFrames.current = [];
       timeBuffer.current = [];
+      marksRef.current = [];
       dataBuffer.current = montage.channels.map(() => []);
     } else {
       const avg = frames.map(commonAverage);
@@ -238,6 +255,12 @@ export function EEGCanvas({
           const allV = simSource.next(currentSettings);
           const avgRef = commonAverage(allV);
           timeBuffer.current.push(lastT);
+          for (const m of simSource.groundTruth.marks) {
+            const key = m.label ?? m.id;
+            const labelled = lastT - (lastLabelRef.current[key] ?? -Infinity) >= LABEL_EVERY_S;
+            if (labelled) lastLabelRef.current[key] = lastT;
+            marksRef.current.push({ ...m, t: lastT - (m.ago ?? 0), labelled });
+          }
           // `next()` reuses its return object, so keep a copy.
           rawFrames.current.push({ ...allV });
           for (let i = 0; i < montage.channels.length; i++) {
@@ -259,6 +282,10 @@ export function EEGCanvas({
           tb.splice(0, evict);
           rawFrames.current.splice(0, evict);
           for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i]?.splice(0, evict);
+          const marks = marksRef.current;
+          let gone = 0;
+          while (gone < marks.length && marks[gone].t < tb[0]) gone++;
+          if (gone) marks.splice(0, gone);
         }
       }
 
@@ -447,12 +474,81 @@ export function EEGCanvas({
       // has a cue contributes one line; they are sorted so the stack runs in the
       // same top-to-bottom order as the montage rows they describe, and stacked
       // with a fixed pitch so no two ever overlap however many are on at once.
-      // The cue names its own channels, so this needs no arrow into the trace.
+      // The cue names its own channels; the arrows drawn first are for the things
+      // that come and go — artifacts and the sleep graphoelements — which are
+      // easiest to learn by being pointed at.
       if (annotationsRef.current) {
+        // Arrows. Every artifact and sleep graphoelement the engine reports
+        // (ArtifactMark) gets one on each row it is large on in this montage, at
+        // the moment of its largest excursion on that row. They are anchored to a
+        // sample time, so they scroll with the waves they point at.
+        const tb = timeBuffer.current;
+        const tEnd = tb.length ? tb[tb.length - 1] : -Infinity;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        const rowOfChannel = new Map(layout.filter(r => r.channelIndex >= 0).map(r => [r.channelIndex, r]));
+        for (const m of marksRef.current) {
+          if (m.t + m.dur > tEnd) continue;      // still developing: its peak is not drawn yet
+          if (m.t < currentT - winSec) continue; // scrolled off
+          // The rows this artifact is on, in this montage: every row within reach of
+          // the largest gets an arrow — a blink is on all four frontopolar rows.
+          let byMontage = markRowsRef.current.get(m.fields);
+          if (!byMontage) { byMontage = new Map(); markRowsRef.current.set(m.fields, byMontage); }
+          let sizes = byMontage.get(montage);
+          if (!sizes) { sizes = markRowSizes(m.fields, montage); byMontage.set(montage, sizes); }
+          const channels = markRows(sizes, m.inUv ? currentSettings.sensitivity : undefined);
+          const j0 = lowerBound(tb, m.t);
+          const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
+          const color = PATTERN_COLOR[pid] ?? currentTheme.overlayText;
+          let named = !m.labelled;
+          for (const c of channels) {
+            const row = rowOfChannel.get(c);
+            if (!row) continue;
+            const data = dataBuffer.current[row.channelIndex] ?? [];
+            if (j0 >= data.length) continue;
+            const j1 = Math.min(data.length - 1, lowerBound(tb, m.t + m.dur));
+            let jp = j0;
+            for (let j = j0 + 1; j <= j1; j++) {
+              if (Math.abs(data[j] - data[j0]) > Math.abs(data[jp] - data[j0])) jp = j;
+            }
+            const x = w - (currentT - tb[jp]) * pxPerSec;
+            if (x < lblW + 6 || x > w - 4) continue;
+            const centerY = row.centerFrac * h;
+            const y = traceY(centerY, data[jp], pxPerUV);
+            // Come at the wave from the side it points to: from above for an upward
+            // deflection (and for a continuous artifact, which has no direction),
+            // from below for a downward one.
+            const dir = y <= traceY(centerY, data[j0], pxPerUV) ? -1 : 1;
+            const tip = y + dir * 5, tail = y + dir * 22;
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(x, tail); ctx.lineTo(x, tip + dir * 5);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, tip); ctx.lineTo(x - 4, tip + dir * 7); ctx.lineTo(x + 4, tip + dir * 7);
+            ctx.closePath();
+            ctx.fill();
+            if (named) continue;
+            // The name goes on one arrow of the event, and not on every event.
+            named = true;
+            const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
+            const textW = ctx.measureText(text).width;
+            const ty = tail + dir * 9;
+            ctx.fillStyle = currentTheme.overlayBg;
+            ctx.fillRect(x - textW / 2 - 4, ty - 7, textW + 8, 14);
+            ctx.fillStyle = currentTheme.overlayText;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, ty);
+          }
+        }
+
         const cues = [];
         for (const pattern of currentSettings.activePatterns) {
           const ann = EDUCATIONAL_ANNOTATIONS[pattern];
-          if (ann) cues.push({ text: ann.text, color: PATTERN_COLOR[pattern] ?? currentTheme.overlayText, order: REGION_ORDER[ann.targetRegion] });
+          const between = currentSettings.patternOptions?.focalPlacement === 'between';
+          if (ann) cues.push({ text: (between && ann.textBetween) || ann.text, color: PATTERN_COLOR[pattern] ?? currentTheme.overlayText, order: REGION_ORDER[ann.targetRegion] });
         }
         cues.sort((a, b) => a.order - b.order);
 

@@ -27,18 +27,19 @@ import {
 } from './forward';
 import {
   ARTIFACT_SOURCES, OCULAR_DIPOLE_SHARE, OCULAR_FIRST_EVENT_LEAD_SEC, BlinkGenerator, EyeOpeningGenerator, SaccadeGenerator, EmgGenerator, EcgGenerator,
-  ElectrodePopGenerator, SweatGenerator, LineNoiseGenerator, MovementGenerator,
+  ElectrodePopGenerator, SweatGenerator, SWEAT_SKIN_UV, ECG_SCALP_UV, LineNoiseGenerator, MovementGenerator,
   artifactSeeds,
 } from './artifacts';
-import { RecordingChain, sampleDefects, type ChannelDefect } from './chain';
+import { RecordingChain, sampleDefects, type ChannelDefect, AmplifierHighPass, CLINICAL_LFF_HZ } from './chain';
 import { Gaussian, deriveSeed } from './rng';
 import {
   PATTERN_SOURCES,
   type PatternGenerator, type PatternSourceDescriptor, type SampleContext, type Band,
 } from './sources/registry';
+import { MU_FIELD } from './sources/fields';
 import type {
   PatientState, IctalHemisphere, IctalParams, IctalParamsMap,
-  ArtifactParams, EmgRegion,
+  ArtifactParams, EmgRegion, PatternOptions, PostsForm, FocalPlacement,
 } from '../utils/simTypes';
 import { defaultIctalParamsMap, POP_TARGET_ANY } from '../utils/simTypes';
 
@@ -162,7 +163,12 @@ export function sampleSubject(seed: number): SubjectParams {
     // subsequent parameter for every existing seed.
     // The `mu-rhythm` toggle (sources/variants.ts) still summons mu
     // deliberately in any subject, independent of this draw.
-    muFraction: g.uniform() < 0.34 ? g.range(0.3, 0.5) : 0,
+    // About one subject in seven. Published figures for mu on a routine record run
+    // from 4% (visual review of 100 normal adults, Ain Shams series) to 22% (a
+    // sleep-EEG cohort); Niedermeyer has it in "a minority of subjects". It was one
+    // in three, a figure with no source. The second draw is still taken for every
+    // subject who used to have mu, so no other parameter moves for any seed.
+    muFraction: ((u: number) => (u < 0.34 ? g.range(0.3, 0.5) * (u < MU_PREVALENCE ? 1 : 0) : 0))(g.uniform()),
     // "Can be bilateral but is often predominant on one side or the other", so
     // an exactly symmetric mu is the exception rather than the rule. Left share
     // of the two-sided total: 0.5 symmetric, 0.75 strongly left-predominant.
@@ -198,7 +204,65 @@ export type GroundTruth = {
   popChannel: number;
   /** Alpha-blocking level from eye opening, 0 closed .. 1 open (IK-007). */
   eyesOpen: number;
+  /**
+   * Artifacts that START on this sample, for the display's annotation arrows.
+   * Empty unless `setArtifactMarks(true)` was called, and cleared every sample,
+   * so a consumer copies what it wants to keep.
+   */
+  marks: ArtifactMark[];
 };
+
+/**
+ * One artifact (or sleep graphoelement) event, as the display needs it in order to
+ * point at it: the toggle it belongs to, its own field — how large it is at each
+ * electrode, signed, in relative units — and how long after this sample its
+ * deflection is still developing. The display puts the field through the current
+ * montage with the same arithmetic it draws the trace with (utils/markRows.ts),
+ * and puts an arrow on every row where the artifact is large, at that row's
+ * largest excursion inside the window. `dur` is 0 for something with no peak to
+ * find: the arrow points at the row at that moment.
+ *
+ * `fields` is a list because some artifacts are several independent sources — the
+ * four muscles, a spindle's generators. Those do not cancel one another on a row,
+ * so each is put through the montage on its own and the sizes added; summed into
+ * one field first, a spindle's arrows landed on rows it was not on. `inUv` says
+ * the fields are in microvolts at the artifact's peak, for the two artifacts that
+ * can be under a millimetre (ECG, mains): the display then leaves out the rows
+ * where there is nothing to see. `ago` back-dates a mark that could only be
+ * recognised after the fact (the turning point of a slow drift), in seconds.
+ *
+ * It carried a short list of electrodes until 2026-10-13, and the display pointed
+ * at the first row recording one of them: one arrow for a blink that is on four
+ * rows, and on some montages not the row the artifact was largest on.
+ */
+export type ArtifactMark = { id: string; label?: string; fields: MarkFields; inUv?: boolean; dur: number; ago?: number };
+type MarkFields = readonly Readonly<Record<string, number>>[];
+
+/**
+ * The pattern sources that get an annotation arrow, by toggle. Every event is
+ * marked — every chew, every eye movement, every spindle. `dur` and `minGapS` are
+ * as in `mark()`; `turnUv` is for a slow drift with no onset, marked at each turn
+ * of a swing at least that large (see `markTurn`).
+ */
+const PATTERN_MARKS: readonly { toggle: string; dur: number; minGapS?: number; holdS?: number; turnUv?: number }[] = [
+  // One arrow per chew: its muscle noise is zero between motor-unit potentials.
+  { toggle: 'chewing', dur: 0.3, holdS: 0.1 },
+  { toggle: 'rem-eyes', dur: 0.35 },
+  { toggle: 'roving-eyes', dur: 0, turnUv: 10 },
+  // One arrow per POSTS, or per train of them.
+  { toggle: 'posts', dur: 0.2, minGapS: 1 },
+  { toggle: 'v-waves', dur: 0.3 },
+  { toggle: 'k-complex', dur: 0.6 },
+  { toggle: 'spindles', dur: 0.8 },
+];
+
+// How far a drift must come back from an extreme, as a share of the swing size
+// that earns a mark, before that extreme counts as a turn.
+const TURN_RETREAT = 0.5;
+
+// A continuous artifact (muscle, sweat, mains, a bad electrode) has no events to
+// mark, so it is pointed at this often for as long as it lasts.
+const CONTINUOUS_MARK_S = 1.5;
 
 /**
  * Per-generator runtime enable flags for the engine's own artifact layer (§8,
@@ -523,10 +587,7 @@ export const BLINK_DRIVE_UV = 255;
 export const MU_MAX_RMS = 7;
 
 /** Background mu's cortical field, per side (see the muL/muR sources in the constructor). */
-export const MU_FIELD = {
-  left: { C3: 1, P3: 0.3, Cz: 0.35 },
-  right: { C4: 1, P4: 0.3, Cz: 0.35 },
-};
+export { MU_FIELD };
 
 /** Baseline vigilance for each state, feeding the slow drift in `state.ts`. */
 const STATE_VIGILANCE: Record<PatientState, number> = {
@@ -552,6 +613,8 @@ const STATE_VIGILANCE: Record<PatientState, number> = {
 const STATE_EMG_SCALE: Record<PatientState, number> = {
   awake: 1, drowsy: 1, n1: 1, n2: 1, n3: 1, rem: 0.06,
 };
+
+const MU_PREVALENCE = 0.15;
 
 export class EegEngine {
   readonly electrodes: string[];
@@ -618,6 +681,35 @@ export class EegEngine {
   // `eyeOpening` defaults OFF: it is a command maneuver ("open your eyes ... close
   // them"), not background, and since eye opening blocks the PDR (IK-007) leaving it on
   // held a "resting" record's eyes open ~45% of the time.
+  // Annotation arrows (see ArtifactMark). Off unless the display asks for them: the
+  // gate and the renderers run this same engine and should not pay for bookkeeping
+  // they never read.
+  private marksOn = false;
+  private markState = new Map<string, { on: boolean; last: number; seen: number; v: number; slope: number; prev: number; hp?: AmplifierHighPass }>();
+  private prevSaccadeV = 0;
+  private prevPopV = 0;
+  // Each artifact's fields (see ArtifactMark), built once from the leadfield.
+  private markField: Record<'ocular' | 'gaze' | 'heart' | 'sweat' | 'defects', MarkFields> & { pop: MarkFields[] } =
+    { ocular: [], gaze: [], heart: [], sweat: [], defects: [], pop: [] };
+  private hasDefects = false;
+  // null, not undefined: `undefined` is a value the region list can take (all four).
+  private muscleFieldRegions: unknown = null;
+  private muscleFieldCache: MarkFields = [];
+  private lineCoupling: Record<string, number> = {};
+  private lineFieldAmp = NaN;
+  private lineFieldCache: MarkFields = [];
+  // For each pattern source: its row in PATTERN_MARKS (or -1), and its own field.
+  private patternMark: number[] = [];
+  private patternMarkField: MarkFields[] = [];
+  // See setStateDrivesIntrinsic.
+  private stateDrivesIntrinsic = true;
+  // See setBackgroundMu.
+  private backgroundMu = true;
+  private postsForm: PostsForm = 'singles';
+  private focalPlacement: FocalPlacement = 'under';
+  private seizureMuscle = false;
+  private ictalDelay: number | null = null;
+
   private gates: ArtifactGates = {
     blink: true, eyeOpening: false, saccade: true, emg: true, pop: true, defects: true,
     sweat: true, line: true, ecgScalp: true, movement: true,
@@ -771,6 +863,7 @@ export class EegEngine {
     // Pattern sources sit at the tail of the source list so their leadfield
     // columns form a known contiguous block after the artifact columns.
     this.patternDescriptors = PATTERN_SOURCES;
+    this.patternMark = PATTERN_SOURCES.map(d => PATTERN_MARKS.findIndex(m => m.toggle === d.toggles[0]));
     const patternSpecs = PATTERN_SOURCES.map(d => d.spec);
 
     const allSpecs = [...bgPatches, ...rhythmSpecs, ...artifactSpecs, ...patternSpecs];
@@ -934,12 +1027,35 @@ export class EegEngine {
       this.chain = new RecordingChain(seed, this.dt, this.electrodes.length, this.defects);
     }
 
+    // What each artifact looks like across the head, for the annotation arrows.
+    const perElectrode = (at: (c: number) => number): Record<string, number> =>
+      Object.fromEntries(this.electrodes.map((e, c) => [e, at(c)]));
+    const ix = this.artifactIndex;
+    if (ix.eyeL != null) {
+      const d = OCULAR_DIPOLE_SHARE, m = 1 - OCULAR_DIPOLE_SHARE;
+      // The two eyes move together, so the ocular sources make one field.
+      this.markField.ocular = [this.fieldOf([[ix.eyeL, d], [ix.eyeR, d], [ix.eyeMonoL, m], [ix.eyeMonoR, m]])];
+      this.markField.gaze = [this.fieldOf([[ix.gaze, 1]])];
+      // In microvolts at the R wave, where the generator's own output is 1.
+      this.markField.heart = [this.fieldOf([[ix.heart, ECG_SCALP_UV]])];
+      this.markField.sweat = [this.fieldOf([[ix.sweatFrontal, 1]])];
+    }
+    this.markField.pop = this.electrodes.map((_, c) => [perElectrode(k => (k === c ? 1 : 0))]);
+    const defective = (c: number) => this.defects[c] != null && this.defects[c].kind !== 'ok';
+    this.hasDefects = this.electrodes.some((_, c) => defective(c));
+    this.markField.defects = [perElectrode(c => (defective(c) ? 1 : 0))];
+    // Mains is the same waveform on every electrode, each picking up a little more
+    // or less of it; what reaches a row is the difference between its two.
+    this.lineCoupling = perElectrode(c => this.chain?.lineCouplingAt(c) ?? 1);
+    this.patternMarkField = this.patternDescriptors.map((_, i) =>
+      (this.patternMark[i] >= 0 ? [this.fieldOf([[this.patternIndex[i], 1]])] : []));
+
     // Independent of the `artifacts` flag: the ECG display channel is a first-class
     // recorded trace, not an artifact, so it exists even when scalp artifacts are off.
     // The scalp cardiac artifact reads this same generator (see `ecgRaw`).
     this.ecgChannel = new EcgGenerator(deriveSeed(seed, 'ecgChannel'), this.dt);
 
-    this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: 0 };
+    this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: 0, marks: [] };
 
     // Warm-up. The recording chain's high-passes start cold (prevIn=prevOut=0) with
     // a 0.25 Hz corner (time constant ~0.64 s), so without this the first ~2 s of
@@ -964,7 +1080,7 @@ export class EegEngine {
       for (let i = 0; i < warmupSamples; i++) this.next(scratch);
       this.gates = savedGates;
       this.sampleIndex = 0;
-      this.groundTruth = { t: 0, vigilance: this.vigilance.value, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: this.alphaBlock };
+      this.groundTruth = { t: 0, vigilance: this.vigilance.value, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: this.alphaBlock, marks: [] };
     }
   }
 
@@ -985,13 +1101,17 @@ export class EegEngine {
     const tNow = (this.sampleIndex + 1) * this.dt;
     const baseCtx = {
       t: tNow, dt: this.dt, state: this.patientState, vigilance: this.vigilance.value,
+      postsForm: this.postsForm, focalPlacement: this.focalPlacement, ictalDelay: this.ictalDelay,
+      seizureMuscle: this.seizureMuscle,
     };
+    const marking = this.marksOn;
+    if (marking) this.groundTruth.marks.length = 0;
     let neuralGate = 1;
     // Per-band multipliers on the ongoing background, for patterns that reshape the
     // spectrum (gen-slowing abolishing the alpha PDR). 1 = untouched; band gates
     // from multiple active patterns compose multiplicatively.
     const bandGate: Record<Band, number> = {
-      background: 1, alpha: 1, mu: 1, theta: 1, delta: 1, beta: 1,
+      background: 1, alpha: 1, mu: this.backgroundMu ? 1 : 0, theta: 1, delta: 1, beta: 1,
     };
     for (let i = 0; i < this.patternGens.length; i++) {
       const d = this.patternDescriptors[i];
@@ -999,7 +1119,7 @@ export class EegEngine {
       const stateInList = d.states != null && d.states.includes(this.patientState);
       // See PatternSourceDescriptor.stateIntrinsic for the two gating modes.
       const enabled = d.stateIntrinsic
-        ? toggleOn || stateInList
+        ? toggleOn || (stateInList && this.stateDrivesIntrinsic)
         : toggleOn && (d.states == null || stateInList);
       const ip = this.ictalParams[d.toggles[0]];
       const ctx: SampleContext = {
@@ -1010,7 +1130,17 @@ export class EegEngine {
         ictalHemisphere: ip?.hemisphere ?? 'left',
       };
       const gen = this.patternGens[i];
-      V[this.patternIndex[i]] = gen.next(ctx);
+      const value = gen.next(ctx);
+      V[this.patternIndex[i]] = value;
+      if (marking && this.patternMark[i] >= 0) {
+        // Each source is marked on its own. Both kinds of spindle, and the two jaw
+        // muscles, fire independently of one another, and the arrows belong on the
+        // rows of the one that fired: marked as one, a central spindle was pointed
+        // at on the frontal rows too.
+        const m = PATTERN_MARKS[this.patternMark[i]];
+        if (m.turnUv != null) this.markTurn(m.toggle, enabled, value, m.turnUv, this.patternMarkField[i], d.id);
+        else this.mark(m.toggle, enabled && value !== 0, this.patternMarkField[i], m.dur, { minGapS: m.minGapS, holdS: m.holdS, key: d.id });
+      }
       if (enabled && gen.gate) neuralGate *= gen.gate(ctx);
       if (enabled && gen.bandGate) {
         const bg = gen.bandGate(ctx);
@@ -1109,14 +1239,33 @@ export class EegEngine {
         if (on('frontalis'))   V[ix.frontalis]   += emgFV;
         if (on('nuchal'))      V[ix.nuchal]      += emgNV;
       }
-      const heartV = this.ecgRaw * 9;
+      const heartV = this.ecgRaw * ECG_SCALP_UV;
       if (g.ecgScalp) V[ix.heart] += heartV;
-      const sweatV = this.sweat!.next() * 7 * (p.sweatSeverity ?? 1);
+      const sweatV = this.sweat!.next() * SWEAT_SKIN_UV * (p.sweatSeverity ?? 1);
       if (g.sweat) V[ix.sweatFrontal] += sweatV;
       const mv = this.movement!.next() * 60 * (p.movementSeverity ?? 1);
       if (g.movement) eyes(mv);
       const lineRaw = this.line!.next();
       lineVal = g.line ? lineRaw : 0;
+
+      if (marking) {
+        const F = this.markField;
+        this.mark('blink', this.blink.active, F.ocular, 0.45);
+        // One maneuver, two transients: opening is the negative one, closing the positive.
+        this.mark('eye-opening', openV < 0, F.ocular, 0.55, { label: 'Eye opening' });
+        this.mark('eye-closing', openV > 0, F.ocular, 0.55, { label: 'Eye closing' });
+        // A gaze step: the level is moving. Steps too small to see (under ~6 uV) are not marked.
+        this.mark('eye-movement', g.saccade && Math.abs(saccadeV - this.prevSaccadeV) > 0.9, F.gaze, 0.25, { minGapS: 0.5 });
+        this.prevSaccadeV = saccadeV;
+        this.mark('movement', g.movement && mv !== 0, F.ocular, 0.9);
+        // Every beat, at the upstroke of its R wave.
+        this.mark('ecg-artifact', g.ecgScalp && this.ecgRaw > 0.5, F.heart, 0.08, { inUv: true });
+        // Not in REM: atonia leaves no muscle on the page to point at.
+        this.markEvery('muscle', g.emg && atonia > 0.5 && emgSev > 0, this.muscleField(regions), CONTINUOUS_MARK_S, 0.3);
+        this.markEvery('sweat', g.sweat, F.sweat, CONTINUOUS_MARK_S);
+        this.markEvery('50hz', g.line, this.lineField(), CONTINUOUS_MARK_S, 0, true);
+        this.markEvery('bad-electrodes', g.defects && this.hasDefects, F.defects, CONTINUOUS_MARK_S);
+      }
     }
 
     // project sources to electrodes
@@ -1136,6 +1285,12 @@ export class EegEngine {
       const popV = this.pop.next() * 220;
       const c = this.pop.channel;
       if (this.gates.pop && c >= 0 && c < out.length) out[c] += popV;
+      if (marking) {
+        // A pop only ever decays, so a level that has grown is a new pop.
+        const fresh = this.gates.pop && c >= 0 && c < out.length && Math.abs(popV) > Math.abs(this.prevPopV) + 1;
+        this.mark('electrode-pop', fresh, this.markField.pop[fresh ? c : 0], 0.3);
+        this.prevPopV = popV;
+      }
     }
 
     // A detached electrode does not go dead the instant the pop starts: the pop
@@ -1186,6 +1341,157 @@ export class EegEngine {
    * so a UI checkbox can be toggled mid-recording without resetting any
    * oscillator phase or vigilance state elsewhere in the engine.
    */
+  /** Choices between forms of one pattern (see `PatternOptions`); omitted means the defaults. */
+  setPatternOptions(o?: PatternOptions) {
+    this.postsForm = o?.postsForm ?? 'singles';
+    this.focalPlacement = o?.focalPlacement ?? 'under';
+    this.seizureMuscle = o?.seizureMuscle ?? false;
+  }
+
+  /**
+   * How long after a seizure toggle is switched on the seizure begins; null for
+   * each seizure's own delay. The app sets one short delay for all four: a
+   * learner who switches a seizure on is waiting for it, and 4-6 s of an
+   * unchanged page (longer before a slow build-up shows) read as a dead toggle.
+   */
+  setIctalOnsetDelay(seconds: number | null) { this.ictalDelay = seconds; }
+
+  /** Report artifact onsets in `groundTruth.marks` (off by default; see ArtifactMark). */
+  setArtifactMarks(on: boolean) {
+    this.marksOn = on;
+    if (!on) this.groundTruth.marks.length = 0;
+  }
+
+  /**
+   * Whether a `stateIntrinsic` source runs because of the patient's state (the
+   * default) or only when its toggle is set.
+   *
+   * The app turns this off. It shows the stage's own graphoelements and eye
+   * movements as toggles that are ON — it sets them itself on entering the stage —
+   * so that what the toggles say and what is on the page are the same thing, and
+   * switching one off really removes it. Everything else that drives the engine
+   * (the gate, the renderers) leaves it on and gets a stage complete with its
+   * defining features from the state alone.
+   */
+  setStateDrivesIntrinsic(on: boolean) { this.stateDrivesIntrinsic = on; }
+
+  /**
+   * Whether the subject's own background mu is drawn. About one subject in seven
+   * has one (IK-033) and it needs no toggle — right for a record, wrong for the
+   * app, where nothing is on the page unless its toggle is on: the owner, with
+   * every toggle off but Eyes Open, was shown a left central rhythm and had to
+   * ask what it was (2026-10-13). The app turns this off; mu there is the
+   * `mu-rhythm` toggle and nothing else.
+   */
+  setBackgroundMu(on: boolean) { this.backgroundMu = on; }
+
+  /** The scalp field of one or more sources, each with a weight: electrode -> signed relative size. */
+  private fieldOf(sources: [index: number, weight: number][]): Record<string, number> {
+    const nS = this.leadfield.nSources, G = this.leadfield.gain;
+    return Object.fromEntries(this.electrodes.map((name, e) => {
+      let v = 0;
+      for (const [s, w] of sources) v += w * G[e * nS + s];
+      return [name, v];
+    }));
+  }
+
+  /**
+   * Muscle's fields for the muscles now contracting, each at the amplitude the
+   * artifact block gives it. The four are independent sources (see ArtifactMark).
+   */
+  private muscleField(regions: EmgRegion[] | undefined): MarkFields {
+    if (regions === this.muscleFieldRegions) return this.muscleFieldCache;
+    const ix = this.artifactIndex;
+    const parts: [EmgRegion, number][] = [['temporalisL', 9], ['temporalisR', 9], ['frontalis', 6], ['nuchal', 8]];
+    this.muscleFieldCache = parts.filter(([r]) => regions == null || regions.includes(r))
+      .map(([r, amp]) => this.fieldOf([[ix[r], amp]]));
+    this.muscleFieldRegions = regions;
+    return this.muscleFieldCache;
+  }
+
+  /** Mains at each electrode, in microvolts, at the amplitude now set. */
+  private lineField(): MarkFields {
+    const amp = this.aparams.lineAmpUv ?? this.subject.lineAmp;
+    if (amp !== this.lineFieldAmp) {
+      this.lineFieldCache = [Object.fromEntries(Object.entries(this.lineCoupling).map(([e, k]) => [e, k * amp]))];
+      this.lineFieldAmp = amp;
+    }
+    return this.lineFieldCache;
+  }
+
+  private markStateOf(id: string) {
+    let s = this.markState.get(id);
+    if (!s) { s = { on: false, last: -Infinity, seen: -Infinity, v: 0, slope: 0, prev: 0 }; this.markState.set(id, s); }
+    return s;
+  }
+
+  /**
+   * An artifact that has a beginning: report its rising edge, at most once per
+   * `minGapS`. It has not ended until it has been quiet for `holdS`. `key` keeps
+   * separate track of sources that share an id.
+   */
+  private mark(
+    id: string, active: boolean, fields: MarkFields, dur: number,
+    opt: { minGapS?: number; holdS?: number; label?: string; inUv?: boolean; key?: string } = {},
+  ) {
+    const s = this.markStateOf(opt.key ?? id);
+    if (active) s.seen = this.sampleIndex;
+    else if (opt.holdS != null && (this.sampleIndex - s.seen) * this.dt < opt.holdS) active = true;
+    if (active && !s.on && (this.sampleIndex - s.last) * this.dt >= (opt.minGapS ?? 0)) {
+      this.groundTruth.marks.push({ id, label: opt.label, fields, inUv: opt.inUv, dur });
+      s.last = this.sampleIndex;
+    }
+    s.on = active;
+  }
+
+  /** A continuous artifact: report it when it comes on and every `everyS` after, while it lasts. */
+  private markEvery(id: string, on: boolean, fields: MarkFields, everyS: number, dur = 0, inUv?: boolean) {
+    const s = this.markStateOf(id);
+    if (!on) { s.last = -Infinity; return; }
+    if ((this.sampleIndex - s.last) * this.dt >= everyS) {
+      this.groundTruth.marks.push({ id, fields, inUv, dur });
+      s.last = this.sampleIndex;
+    }
+  }
+
+  /**
+   * A slow drift: report each swing at its turning point, if it is at least
+   * `minUv` from the turn before it. A turn is only known once the drift has come
+   * back from it (by TURN_RETREAT of `minUv`), so the mark is stamped `ago` seconds
+   * in the past, at the extreme itself.
+   *
+   * Turns are found in the drift as the page shows it — through the amplifier's
+   * low-frequency filter, which at these rates moves a peak by a few tenths of a
+   * second and removes any standing offset — and a swing is measured from the last
+   * turn, not from zero, for the same reason: a trough the filter draws well below
+   * the baseline can be barely negative at the source.
+   *
+   * Until 2026-10-13 a turn was any change of slope in the source, kept apart by
+   * a fixed 0.8 s and counted only if 25 uV from zero: a small wobble on the way
+   * down took the mark, and the trough half a second later — the swing a reader
+   * sees — went without one.
+   */
+  private markTurn(id: string, on: boolean, raw: number, minUv: number, fields: MarkFields, key = id) {
+    // Here `v` is the extreme since the last turn, `last` its sample, `prev` the
+    // extreme before it, and `slope` the way the drift is heading (0 until it has
+    // moved far enough to say).
+    const s = this.markStateOf(key);
+    const v = (s.hp ??= new AmplifierHighPass(this.dt, CLINICAL_LFF_HZ)).next(raw);
+    if (!on) { s.on = false; return; }
+    if (!s.on) { s.on = true; s.v = s.prev = v; s.last = this.sampleIndex; s.slope = 0; return; }
+    const back = TURN_RETREAT * minUv;
+    if (s.slope === 0) {
+      if (Math.abs(v - s.v) >= back) { s.slope = Math.sign(v - s.v); s.v = v; s.last = this.sampleIndex; }
+    } else if ((v - s.v) * s.slope > 0) {
+      s.v = v; s.last = this.sampleIndex;
+    } else if ((s.v - v) * s.slope >= back) {
+      if (Math.abs(s.v - s.prev) >= minUv) {
+        this.groundTruth.marks.push({ id, fields, dur: 0, ago: (this.sampleIndex - s.last) * this.dt });
+      }
+      s.prev = s.v; s.slope = -s.slope; s.v = v; s.last = this.sampleIndex;
+    }
+  }
+
   setArtifactGates(gates: Partial<ArtifactGates>) {
     const hadDefects = this.gates.defects;
     const hadPop = this.gates.pop, hadMovement = this.gates.movement;

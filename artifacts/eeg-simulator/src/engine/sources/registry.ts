@@ -16,7 +16,7 @@
  */
 
 import type { SourceSpec } from '../forward';
-import type { PatientState, IctalHemisphere } from '../../utils/simTypes';
+import type { PatientState, IctalHemisphere, PostsForm, FocalPlacement } from '../../utils/simTypes';
 
 /**
  * The rhythm bands the engine's ongoing background is decomposed into. A pattern
@@ -54,6 +54,18 @@ export type SampleContext = {
    * generalised and ignore it.
    */
   ictalHemisphere: IctalHemisphere;
+  /** Which form POSTS take (see `PostsForm`). Only the POSTS generator consults this. */
+  postsForm: PostsForm;
+  /** Where a focal source sits (see `FocalPlacement`). Only the focal-spike and focal-seizure generators consult this. */
+  focalPlacement: FocalPlacement;
+  /**
+   * Seconds between a seizure toggle being switched on and its onset, or null for
+   * each seizure's own (4-6 s, which the gate's time windows are written against).
+   * Only the ictal generators consult this.
+   */
+  ictalDelay: number | null;
+  /** Whether a seizure's muscle artifact is drawn with it (`PatternOptions.seizureMuscle`). */
+  seizureMuscle: boolean;
 };
 
 export interface PatternGenerator {

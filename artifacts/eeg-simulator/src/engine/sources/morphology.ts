@@ -51,35 +51,8 @@ export const POS14_TONES: Tone[] = [
 export const POS6_TONES: Tone[] = [
   { f: 5.7, a: 0.8 }, { f: 6.2, a: 1.0 }, { f: 6.7, a: 0.7 },
 ];
-// Wicket spikes span the full 6-11 Hz mu/alpha band, not just its upper end. The
-// tone set formerly used here (8.4-11.3 Hz, an alpha borrowing) left the lower
-// half of the advertised range unrepresented, so wicket bursts rendered a full
-// octave too high — closer to fast alpha than to the temporal 6-7 Hz arciform
-// runs a reader is taught to recognise. These tones cover 6.2-11 Hz so the
-// morphology matches the range the UI names.
-// Wicket spikes span the THETA or alpha range, 6-11 Hz — StatPearls/NCBI
-// (NBK555899), tracing to Reiher & Lebel's original description: "monophasic wave
-// bursts within the theta- or alpha frequency range (6-11 Hz)". learningeeg.com's
-// "usually 7-11 Hz" is a teaching simplification of the same thing, and IK-015 is
-// right to say the band is not confined to alpha.
-//
-// The low end used to be a token presence — 0.5 and 0.7 against a 1.0 peak at
-// 8.8 Hz — which made this an alpha rhythm with a whisper of theta rather than the
-// 6-11 Hz band the sources describe, and left the 6-7.5 Hz power lift 3% short of
-// its floor. The peak stays in the arciform 8-9 Hz region where wickets are most
-// often seen; only the theta shoulder is brought up to something a reader would
-// actually call theta.
-export const WICKET_TONES: Tone[] = [
-  { f: 6.2, a: 0.72 }, { f: 7.0, a: 0.90 }, { f: 8.0, a: 0.95 },
-  { f: 8.8, a: 1.0 }, { f: 9.6, a: 0.85 }, { f: 10.4, a: 0.6 },
-  { f: 11.0, a: 0.35 },
-];
 
 // Per-tone-set normalisers so a unit-amplitude multiToneSignal peaks near ±1.
-// Re-measured when the tone amplitudes were rebalanced above (5.59 -> 6.11): this
-// is the peak of the unnormalised arciform sum, so changing any tone's amplitude
-// invalidates it and would silently rescale every wicket burst.
-export const WICKET_TONE_NORM = 6.11;
 export const THETA_TONE_NORM = 2.2;
 export const DELTA_TONE_NORM = 2.0;
 export const BETA_TONE_NORM = 2.0;
@@ -105,18 +78,35 @@ export function multiToneSignal(
 }
 
 // Mu, wicket spikes, and 14 & 6 positive bursts are all "arciform" (arch- or
-// comb-shaped): one phase of each cycle is sharp and pointed, the other rounded.
+// comb-shaped): one side of each cycle is sharp and pointed, the other rounded.
 // The obvious way to draw that — Math.abs() of a sine — is wrong twice over.
 // Rectifying a sine turns every half-cycle into its own hump, so a 10 Hz mu
 // carrier renders as a 20 Hz train; and because the result never goes negative,
 // the rhythm sits off-baseline on a DC offset instead of oscillating about it.
-// Summing a second harmonic onto the fundamental gives the genuine asymmetry
-// (sharp one way, rounded the other) while preserving both the stated frequency
-// and a zero mean.
-export function arciformSignal(t: number, tones: Tone[], norm: number, freqOffset = 0): number {
-  const fundamental = multiToneSignal(t, tones, norm, freqOffset, 1);
-  const harmonic = multiToneSignal(t, tones, norm, freqOffset, 2);
-  return fundamental + 0.35 * harmonic;
+//
+// A fundamental and its second harmonic IN COSINE PHASE give the arch: their
+// peaks coincide on one side (1 + 0.35, pointed) and oppose on the other (-1 +
+// 0.35, a broad rounded trough), at the stated frequency and with zero mean.
+// Until 2026-10-13 the two were summed in sine phase, which is a different
+// shape — a tilted wave, fast up and slow down, equally sharp top and bottom —
+// so nothing built on this was an arch. The spectrum is the same either way;
+// only the relative phase of the harmonic differs.
+//
+// `sharp` says which side is the pointed one: -1 surface-negative (mu and
+// wickets: IFCN glossary, "arch-shaped waves", "spike-like monophasic surface
+// negative ... waves"), +1 surface-positive (the 14 & 6 positive bursts, named
+// for it). The phase offset starts every tone at a zero crossing, so a burst
+// built on this begins without a step.
+const ARCH_ZERO_PHASE = Math.acos((-1 + Math.sqrt(1.98)) / 1.4);
+export function arciformSignal(
+  t: number, tones: Tone[], norm: number, freqOffset = 0, sharp: 1 | -1 = -1,
+): number {
+  let s = 0;
+  for (const { f, a } of tones) {
+    const th = 2 * Math.PI * (f + freqOffset) * t + ARCH_ZERO_PHASE;
+    s += a * (Math.cos(th) + 0.35 * Math.cos(2 * th));
+  }
+  return sharp * s / norm;
 }
 
 // Evolving frequency is the single most important feature of an ictal rhythm, and
@@ -138,19 +128,37 @@ export function gaussian(x: number, mu: number, sigma: number): number {
 // Every generator in this app returns a TRUE SCALP POTENTIAL: positive means
 // surface-positive, and the canvas renders it negative-up (see EEGCanvas). An
 // epileptiform spike is surface-NEGATIVE — that is what makes it phase-reverse
-// the way readers are taught to look for — so the sharp component is negative
-// and the after-going slow wave positive.
+// the way readers are taught to look for — and the slow wave that follows it has
+// the SAME polarity: on a referential montage both point up.
+//   IFCN glossary (Kane et al. 2017), "Sharp wave": the main component "is
+//   generally negative relative to other areas, and may be followed by slow wave
+//   of the same polarity".
+//   learningeeg, Montages: "this upward going spike and wave at F3 is a negative
+//   F3 maximal discharge".
+// Until 2026-10-13 the slow wave here was surface-POSITIVE, and IK-012 asserted
+// it: the complex drew as a spike up and a long sag down. The signs had been
+// flipped once before, as a whole, when the canvas's inverted convention was
+// fixed — which kept the two lobes opposed, the one thing wrong with them.
 //
-// The signs here were formerly the other way round. That was a second error
-// cancelling the canvas's inverted convention: two wrongs that made spikes look
-// right while every correctly-signed pattern in the app rendered upside down.
-// With the canvas fixed, these have to state the real polarity. The complex is
-// negated as a whole, so the spike:slow-wave shape and ratio the original author
-// tuned are untouched — only the space they are expressed in changes.
+// Timing, from learningeeg's own example (Epileptiform, "The same spike with its
+// after-going slow wave highlighted"). Its box around spike and wave together is
+// 0.345 s wide against the figure's 1 s grid (110 px at 319 px/s), margins
+// included. Inside it the slow wave follows the spike at once; where it peaks was
+// read twice and the readings differ — 0.09 s after the spike by eye against the
+// 0.2 s grid, 0.16 s by tracing the F8-T4 row pixel by pixel — so it is put at
+// 0.12 s, with a 0.24 s base, and spike and wave together run 0.27 s. That is one
+// figure of one discharge, not a rule: the IFCN glossary asks only that a slow
+// wave be longer than 1/8 s. The slow wave here used to peak 0.40 s after the
+// spike and last 0.7 s, with no source for either. The spike itself was 94 ms at
+// its base, which IK-012 calls a sharp wave; it is now 60 ms. The slow:spike
+// ratio the callers pass is unchanged (learningeeg: the slow wave "may be higher
+// amplitude than the preceding sharp or spike").
+const SLOW_WAVE_SIGMA = 0.055; // a 0.24 s base at 10% of its peak
+const SLOW_WAVE_LAG = 0.12;    // its peak, after the spike's
 export function spikeSlowWave(dt: number, ampSpike: number, ampSlow: number): number {
   if (dt < 0 || dt > 0.9) return 0;
-  const spike = -ampSpike * gaussian(dt, 0.05, 0.022);
-  const slow = ampSlow * gaussian(dt, 0.45, 0.16);
+  const spike = -ampSpike * gaussian(dt, 0.04, 0.014);
+  const slow = -ampSlow * gaussian(dt, 0.04 + SLOW_WAVE_LAG, SLOW_WAVE_SIGMA);
   return spike + slow;
 }
 
@@ -161,32 +169,53 @@ export function spikeSlowWave(dt: number, ampSpike: number, ampSlow: number): nu
 //     peak for a Gaussian is 4.29*sigma, so sigmaSharp 0.007 s gives a ~30 ms
 //     spike (clinical 20-70 ms) and 0.025 s a ~107 ms sharp wave (70-200 ms).
 //   - The AFTER-GOING SLOW WAVE is what adds "-and-slow-wave": ampSlow > 0 adds
-//     the surface-positive slow wave at 450 ms; ampSlow = 0 leaves a bare spike
-//     or sharp wave with no slow wave.
-// Surface-negative transient, positive slow wave — same polarity convention as
-// spikeSlowWave above, for the same reason.
+//     the slow wave, surface-negative like the transient it follows and 0.24 s
+//     long, peaking 0.12 s after a spike and a little later (0.16 s) after a
+//     sharp wave, whose own second half it would otherwise sit under (see
+//     spikeSlowWave for the source); ampSlow = 0 leaves a bare spike or sharp
+//     wave with no slow wave.
+// Same polarity convention as spikeSlowWave above, for the same reason.
 export function epileptiformTransient(
   dt: number, ampSharp: number, sigmaSharp: number, ampSlow: number,
 ): number {
   if (dt < 0 || dt > 0.9) return 0;
   const sharp = -ampSharp * gaussian(dt, 0.06, sigmaSharp);
-  const slow = ampSlow > 0 ? ampSlow * gaussian(dt, 0.45, 0.16) : 0;
+  // 0.007 s is the spike the lag was read for; a broader transient pushes the wave
+  // back by the half-width it adds.
+  const slowAt = 0.06 + SLOW_WAVE_LAG + 2.15 * (sigmaSharp - 0.007);
+  const slow = ampSlow > 0 ? -ampSlow * gaussian(dt, slowAt, SLOW_WAVE_SIGMA) : 0;
   return sharp + slow;
 }
 
-// spikeSlowWave() places its slow-wave trough at 450 ms and runs for 900 ms, which
-// is right for an isolated interictal discharge but far too slow for a rhythmic
-// run: at 3 Hz the whole spike + slow-wave complex has to fit inside one ~333 ms
-// cycle. Scaling the morphology to the cycle length keeps the correct shape at
-// whatever frequency the burst is currently running.
+// spikeSlowWave() is one isolated discharge of a fixed length. A rhythmic run
+// needs the complex to fill its cycle exactly, whatever the rate: one ~333 ms
+// cycle at 3 Hz, twice that at 1.5 Hz. Scaling the morphology to the cycle
+// length keeps the correct shape at whatever frequency the burst is currently
+// running.
+//
+// One cycle is a positive trough, the spike rising out of it, and then the
+// negative slow wave (the "dome") 110 ms after the spike — spike and wave both
+// up, as in spikeSlowWave. The slow wave is one full sine per cycle rather than
+// a one-sided bump, for two reasons. A run of one-sided complexes has a large
+// mean (over half the spike's height once both lobes are negative), which the
+// amplifier's low-frequency filter turns into a sag at onset and a slow swing
+// back after offset — and an absence has to end with nothing after it (IK-017).
+// And a recorded spike-wave run is AC-coupled: it swings about the baseline,
+// troughs below it and domes above. The sine is zero at both ends of the cycle,
+// so a run starts, ends and changes rate without a step.
+//
+// `ampSpike` and `ampSlow` keep the meaning the callers fitted them with: the
+// complex's peak-to-peak is their sum, as it was when the two lobes opposed each
+// other. Riding on the trough, the spike no longer adds its whole height to the
+// swing, so the raw shape comes out 0.81 of that for the 0.6-0.7 slow:spike
+// ratios in use, and SPIKE_WAVE_GAIN puts it back.
+const SPIKE_WAVE_GAIN = 1.23;
 export function rhythmicSpikeWave(dt: number, cycleLen: number, ampSpike: number, ampSlow: number): number {
   if (dt < 0 || dt > cycleLen) return 0;
   const k = cycleLen / 0.333;
-  // Surface-negative sharp component, positive after-going slow wave — same
-  // polarity convention as spikeSlowWave above, for the same reason.
-  const spike = -ampSpike * gaussian(dt, 0.055 * k, 0.020 * k);
-  const slow = ampSlow * gaussian(dt, 0.190 * k, 0.075 * k);
-  return spike + slow;
+  const spike = -ampSpike * gaussian(dt, 0.140 * k, 0.020 * k);
+  const slow = ampSlow * Math.sin(2 * Math.PI * dt / cycleLen);
+  return SPIKE_WAVE_GAIN * (spike + slow);
 }
 
 export function triphasicWave(dt: number, amp: number): number {

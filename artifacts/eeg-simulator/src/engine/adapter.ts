@@ -16,6 +16,10 @@
 import { EegEngine } from './engine';
 import type { PatientState, SimSettings } from '../utils/simTypes';
 
+// Long enough that the onset arrives on a page that already shows two seconds of
+// the record it interrupts; short enough that the toggle does not seem dead.
+const APP_ICTAL_ONSET_DELAY_S = 2;
+
 export class SimulationSource {
   private engine: EegEngine;
   private buf: Float64Array;
@@ -42,6 +46,19 @@ export class SimulationSource {
     if (state === this.state) return;
     this.state = state;
     this.engine.setPatientState(state);
+  }
+
+  /**
+   * Run as the app does: the toggles alone decide what is on the page (see
+   * `EegEngine.setStateDrivesIntrinsic` and `setBackgroundMu`), and artifact onsets
+   * are reported for the annotation arrows. The scripts that share this class do
+   * not call it.
+   */
+  useAppMode() {
+    this.engine.setStateDrivesIntrinsic(false);
+    this.engine.setBackgroundMu(false);
+    this.engine.setIctalOnsetDelay(APP_ICTAL_ONSET_DELAY_S);
+    this.engine.setArtifactMarks(true);
   }
 
   /**
@@ -93,6 +110,7 @@ export class SimulationSource {
     // epileptiform, ictal, chewing) is a pattern source inside the engine.
     this.engine.setActivePatterns(ap);
     this.engine.setIctalParams(settings.ictalParams);
+    this.engine.setPatternOptions(settings.patternOptions);
 
     this.engine.next(this.buf);
     this.t += this.dt;

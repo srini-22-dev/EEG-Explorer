@@ -30,7 +30,7 @@
  */
 
 import { synchronousPatches } from '../forward';
-import { Gaussian } from '../rng';
+import { Gaussian, deriveSeed } from '../rng';
 import { TransientSource } from './transient';
 import { gaussian } from './morphology';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
@@ -81,8 +81,20 @@ function spindleBurst(t: number, dur: number, freq: number, phase: number): numb
 // positive wave before and after the large negative one). AASM: sharply
 // contoured, < 0.5 s, maximal centrally. LE: bilateral, phase-reversing over the
 // central regions, alone or in runs of varying amplitude and morphology; its
-// figure caption puts the wave over the parasagittal AND central chains. Adult
-// amplitude is usually 100-150 uV (Niedermeyer, as cited by SP-derived texts).
+// figure caption puts the wave over the parasagittal AND central chains.
+//
+// Amplitude. Teaching references give 50-150 uV, rarely over 250 (the NVKNF
+// grapho-element sheet and a benign-variants teaching set; search excerpts,
+// 2026-10-12). It was 115 uV here, on "adults usually 100-150 uV", a figure
+// attributed to Niedermeyer at second hand: ~100 uV at Cz-A1 and a full row
+// (10 mm at 7 uV/mm) on Fz-Cz, every wave. The owner's reading (2026-10-12) is
+// that they should be about half that — what 15 uV/mm showed is what 7 should.
+// 65 uV puts the median at ~56 uV at Cz-A1 and ~4 mm on Fz-Cz: the floor of the
+// published range rather than under it (a strict 7/15 would be 47 uV).
+// For whoever revisits this: on learningeeg's "Vertex waves I" figure the largest
+// wave stands 0.9 of a row pitch and 2.0-2.7x its row's background — about what
+// the engine drew BEFORE this change. That figure states no sensitivity, so it is
+// a row-pitch comparison, not a microvolt one.
 //
 // Morphology: the negative wave is a skewed Gaussian, rise sigma 26 ms and fall
 // 33 ms — a 10%-of-peak base of ~127 ms and a half-amplitude width of ~69 ms,
@@ -96,7 +108,7 @@ function spindleBurst(t: number, dur: number, freq: number, phase: number): numb
 // ---------------------------------------------------------------------------
 type VEvent = { onsets: number[]; amps: number[]; widths: number[] };
 
-const VWAVE_PEAK_UV = 115;
+const VWAVE_PEAK_UV = 65;
 const VWAVE_MAX_RUN = 3;
 
 function vertexElement(t: number, amp: number, w: number): number {
@@ -271,18 +283,34 @@ const spindleSlow = spindleSource('spindle-slow',
 // LE: "sail-like", singly or in runs, from stage I on; its figure shows them on
 // the last link of each posterior chain (P3-O1, T5-O1, P4-O2, T6-O2).
 //
-// The old source fired one tall identical transient every ~2 s — never a train —
-// from a single broad patch whose field put 67% of the P3-O1 deflection onto
-// C3-P3. Now: a patch under each occiput, trains or singles, and a triangular
-// element with a sharp apex (each leg a power 1.3 curve).
+// The old source fired one tall identical transient every ~2 s from a single
+// broad patch whose field put 67% of the P3-O1 deflection onto C3-P3. Now: a
+// patch under each occiput and a triangular element with a sharp apex (each leg
+// a power 1.3 curve), each one its own size and width.
+//
+// One at a time by default (owner's decision, 2026-10-12). NPK describes both forms
+// and from 2026-09-11 the source drew both, half and half; a train of five
+// 40-55 uV triangles read on the page as a run of spikes and was the most
+// conspicuous thing on an N1 record. learningeeg's POSTS figure shows them one
+// after another at irregular intervals, modest against their background. So:
+// singles only, more than 1 s apart and at no fixed interval, 24-46 uV at the
+// source (~20-38 uV at O1-A1, the lower half of NPK's 20-75; it was 25-55 with a
+// further +-25% on each). Trains are the other form, chosen with the POSTS option
+// (`PostsForm`, 2026-10-13): the same elements, 2-6 of them at 4-6 per second, in
+// place of the singles — one form or the other, so each can be looked at alone.
 //
 // Polarity is montage-dependent (CLAUDE.md §4): positive at O1/O2, so DOWN in a
 // referential montage, but UP on the double banana, where O1/O2 is input 2.
 // ---------------------------------------------------------------------------
-type PostsEvent = { onsets: number[]; amps: number[]; durs: number[]; negs: number[] };
+type PostsEvent = { amp: number; dur: number; neg: number };
+type PostsTrain = { onsets: number[]; amps: number[]; durs: number[]; negs: number[] };
 
+// The longest element: 0.16 s, and its negative afterwave when it has one (x1.6).
+const POSTS_EVENT_S = 0.27;
+// A train: 2-6 elements at 4-6 per second, "lasting about a second" (NPK). The
+// window holds the longest: six at 4 per second and the last one's afterwave.
 const POSTS_MAX_TRAIN = 6;
-const POSTS_EVENT_S = 1.6;
+const POSTS_TRAIN_S = 1.7;
 
 function postsElement(t: number, amp: number, dur: number, neg: number): number {
   if (t < 0) return 0;
@@ -301,20 +329,31 @@ const posts: PatternSourceDescriptor = {
   stateIntrinsic: true,
   spec: synchronousPatches('posts', { O1: 1, O2: 1 }, { extent: 0.3 }),
   make(seed, dt) {
-    const ts = new TransientSource<PostsEvent>(seed, dt, {
-      // The next event is scheduled this long after the previous one's 1.6 s
-      // window closes, so singles are always > 1 s apart, as NPK requires.
-      schedule: { kind: 'periodic', period: 1.8, jitterFrac: 0.5 },
+    const singles = new TransientSource<PostsEvent>(seed, dt, {
+      // The next one is scheduled 1.1-3.7 s after this one's window closes: always
+      // more than 1 s apart, and at no fixed interval ("without periodicity").
+      schedule: { kind: 'periodic', period: 2.4, jitterFrac: 0.55 },
       duration: POSTS_EVENT_S,
+      onset: (g) => ({
+        amp: between(g, 24, 46),
+        dur: between(g, 0.09, 0.16),
+        neg: g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0,
+      }),
+      morphology: (t, e) => postsElement(t, e.amp, e.dur, e.neg),
+    });
+    // The other form. Its own stream, so choosing it leaves the singles' untouched.
+    const trains = new TransientSource<PostsTrain>(deriveSeed(seed, 'trains'), dt, {
+      schedule: { kind: 'periodic', period: 2.4, jitterFrac: 0.55 },
+      duration: POSTS_TRAIN_S,
       onset: (g) => {
-        // Singles and trains "just as often".
-        const n = g.uniform() < 0.45 ? 1 : 2 + Math.floor(g.uniform() * (POSTS_MAX_TRAIN - 1));
+        const n = 2 + Math.floor(g.uniform() * (POSTS_MAX_TRAIN - 1));
         const rate = between(g, 4, 6);
-        const base = between(g, 25, 55);
+        // One size for the train, each element a little off it.
+        const base = between(g, 24, 46);
         const onsets: number[] = [], amps: number[] = [], durs: number[] = [], negs: number[] = [];
         for (let k = 0; k < n; k++) {
           onsets.push(k === 0 ? 0 : onsets[k - 1] + jit(g, 1 / rate, 0.1));
-          amps.push(jit(g, base, 0.25));
+          amps.push(jit(g, base, 0.2));
           durs.push(between(g, 0.09, 0.16));
           negs.push(g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0);
         }
@@ -326,7 +365,12 @@ const posts: PatternSourceDescriptor = {
         return v;
       },
     });
-    return asGenerator(ts);
+    return {
+      next(ctx) {
+        const inTrains = ctx.postsForm === 'trains';
+        return singles.next(ctx.enabled && !inTrains) + trains.next(ctx.enabled && inTrains);
+      },
+    };
   },
 };
 
@@ -377,6 +421,7 @@ const slowWaves: PatternSourceDescriptor = {
 // ---------------------------------------------------------------------------
 const ROVING_CORNER_HZ = 0.3;
 const ROVING_PEAK_UV = 42;
+const ROVING_EASE_S = 1;
 
 const rovingEyes: PatternSourceDescriptor = {
   id: 'roving-eyes',
@@ -406,13 +451,18 @@ const rovingEyes: PatternSourceDescriptor = {
     const CAL = 20000;
     for (let i = 0; i < CAL; i++) { const v = step(); sum += v; sumSq += v * v; }
     const sd = Math.sqrt(sumSq / CAL - (sum / CAL) ** 2) || 1;
+    let onFor = 0;
     return {
       next(ctx) {
-        // Keep filtering even when disabled so the drift has no startup step
-        // when the state changes mid-record.
+        // Keep filtering even when disabled, so the drift is already under way
+        // when the state changes mid-record — and ease it in over a second. It is
+        // mid-swing at that moment, and switched on at full size it began with a
+        // step of up to 40 uV at the source (71 uV on F8-T4 in one record,
+        // 2026-10-13): an eye movement faster than any roving one, with no arrow.
         const v = step();
-        if (!ctx.enabled) return 0;
-        return ROVING_PEAK_UV * (v / sd);
+        if (!ctx.enabled) { onFor = 0; return 0; }
+        onFor += dt;
+        return ROVING_PEAK_UV * (v / sd) * Math.min(1, onFor / ROVING_EASE_S);
       },
     };
   },

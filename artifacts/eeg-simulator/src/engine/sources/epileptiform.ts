@@ -11,7 +11,9 @@
  * the peak-electrode amplitude survives, unattenuated.
  */
 
-import { sourceUnder } from '../forward';
+import { sourceUnder, sourceBetween, synchronousPatches, type SourceSpec } from '../forward';
+import type { FocalPlacement } from '../../utils/simTypes';
+import { GENERALIZED_FRONTAL } from './fields';
 import { Gaussian } from '../rng';
 import { TransientSource } from './transient';
 import {
@@ -35,7 +37,8 @@ const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
 // followed by an obligatory slow wave (the after-going slow wave reflects the
 // hyperpolarisation that terminates the paroxysmal depolarising shift). Not a
 // seizure — an interictal marker of an epileptogenic focus. `spikeSlowWave`
-// supplies that fixed morphology (spike at 50 ms, slow-wave trough at 450 ms).
+// supplies that fixed morphology (a 60 ms spike and, 0.12 s after it, a 0.24 s
+// slow wave, both surface-negative).
 //
 // LT (left temporal, mesial/lateral temporal lobe epilepsy) peaks at T3, RT
 // mirrors it at T4, LF (frontal lobe epilepsy) peaks at F3. The legacy FIELD
@@ -47,14 +50,20 @@ const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
 // ---------------------------------------------------------------------------
 type FocalSpikeEvent = { amp: number; dur: number };
 
-function focalSpikeSource(
-  id: string, toggle: string, electrodes: string[], extent: number,
+// Each focus comes in two placements (`FocalPlacement`), which are two sources: one
+// under the named electrode, which is what gives the phase reversal there, and
+// one midway between that electrode and its neighbour up the chain, which gives
+// the other localising picture — the link spanning the two goes flat (an
+// isopotential) and the links either side deflect opposite ways (IK-003 case b).
+// Only the chosen one fires.
+function focalSpikeSources(
+  id: string, toggle: string, electrode: string, neighbour: string, extent: number,
   intervalLo: number, intervalHi: number, ampSpike: number, ampSlow: number,
-): PatternSourceDescriptor {
-  return {
-    id,
+): PatternSourceDescriptor[] {
+  const at = (srcId: string, spec: SourceSpec, focus: FocalPlacement): PatternSourceDescriptor => ({
+    id: srcId,
     toggles: [toggle],
-    spec: sourceUnder(id, electrodes, { extent }),
+    spec,
     make(seed, dt) {
       const ts = new TransientSource<FocalSpikeEvent>(seed, dt, {
         // Legacy nextEventTime(key, t, a, b) -> periodic(period=(a+b)/2, jitterFrac=(b-a)/(a+b)).
@@ -72,13 +81,18 @@ function focalSpikeSource(
         // different spike/slow-wave width the way real interictal spikes vary.
         morphology: (t, e) => e.amp * spikeSlowWave(t / e.dur, ampSpike, ampSlow),
       });
-      return asGenerator(ts);
+      return { next: (ctx) => ts.next(ctx.enabled && ctx.focalPlacement === focus) };
     },
-  };
+  });
+  return [
+    at(id, sourceUnder(id, [electrode], { extent }), 'under'),
+    at(`${id}-between`, sourceBetween(`${id}-between`, neighbour, electrode, extent), 'between'),
+  ];
 }
 
-const focalSpikesLt = focalSpikeSource(
-  'focal-spikes-lt', 'focal-spikes-lt', ['T3'], 0.25, 3, 7, 185, 130,
+// Between F7 and T3: F7-T3 goes flat, Fp1-F7 and T3-T5 oppose.
+const focalSpikesLt = focalSpikeSources(
+  'focal-spikes-lt', 'focal-spikes-lt', 'T3', 'F7', 0.25, 3, 7, 185, 130,
 );
 
 // ---------------------------------------------------------------------------
@@ -125,11 +139,12 @@ const iedSpike     = morphologySource('ied-spike',      SPIKE_SIGMA, 160, 0);
 const iedSpikeWave = morphologySource('ied-spike-wave', SPIKE_SIGMA, 160, 110);
 const iedSharp     = morphologySource('ied-sharp',      SHARP_SIGMA, 150, 0);
 const iedSharpWave = morphologySource('ied-sharp-wave', SHARP_SIGMA, 150, 110);
-const focalSpikesRt = focalSpikeSource(
-  'focal-spikes-rt', 'focal-spikes-rt', ['T4'], 0.25, 3, 7, 185, 130,
+const focalSpikesRt = focalSpikeSources(
+  'focal-spikes-rt', 'focal-spikes-rt', 'T4', 'F8', 0.25, 3, 7, 185, 130,
 );
-const focalSpikesLf = focalSpikeSource(
-  'focal-spikes-lf', 'focal-spikes-lf', ['F3'], 0.3, 4, 8, 165, 120,
+// Between F3 and C3: F3-C3 goes flat, Fp1-F3 and C3-P3 oppose.
+const focalSpikesLf = focalSpikeSources(
+  'focal-spikes-lf', 'focal-spikes-lf', 'F3', 'C3', 0.3, 4, 8, 165, 120,
 );
 
 // ---------------------------------------------------------------------------
@@ -144,13 +159,20 @@ const focalSpikesLf = focalSpikeSource(
 // the discharge frequency itself wanders slightly cycle to cycle (2.8-3.2 Hz,
 // not a metronome), and the burst does not stop abruptly — amplitude tapers
 // over roughly its last second as the discharge terminates.
+//
+// Field: `GENERALIZED_FRONTAL` (fields.ts) — on every chain, largest across the
+// frontal row. It was one patch under Fz, which drew a frontal-midline focus:
+// Fz-Cz carried it, the frontopolar and parasagittal rows a third of that and
+// the temporal chains a tenth. Amplitudes are the legacy 200 and 180 uV scaled
+// by 1.65, which holds Fz where the single patch put it (~170 uV against
+// infinity) now that the field's return term takes a larger share.
 // ---------------------------------------------------------------------------
 type GswBurstEvent = { dur: number; freq: number };
 
 const gsw3hz: PatternSourceDescriptor = {
   id: '3hz-gsw',
   toggles: ['3hz-gsw'],
-  spec: sourceUnder('3hz-gsw', ['Fz'], { extent: 0.7 }),
+  spec: synchronousPatches('3hz-gsw', GENERALIZED_FRONTAL, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<GswBurstEvent>(seed, dt, {
       schedule: { kind: 'periodic', period: 5, jitterFrac: 0.4 }, // legacy nextEventTime(3,7)
@@ -162,7 +184,7 @@ const gsw3hz: PatternSourceDescriptor = {
         const dt = burstDt % cycleLen;
         // Linear amplitude taper over the final second as the burst terminates.
         const env = burstDt > e.dur - 1.0 ? 1.0 - (burstDt - (e.dur - 1.0)) : 1.0;
-        const amp = 200 * env; // frontal-maximal peak amplitude
+        const amp = 330 * env; // at the source's own maximum; see the field note above
         return rhythmicSpikeWave(dt, cycleLen, amp, amp * 0.65);
       },
     });
@@ -185,7 +207,7 @@ type PolyspikeBurstEvent = { count: number; amp: number };
 const polyspikeWave: PatternSourceDescriptor = {
   id: 'polyspike-wave',
   toggles: ['polyspike-wave'],
-  spec: sourceUnder('polyspike-wave', ['Fz'], { extent: 0.7 }),
+  spec: synchronousPatches('polyspike-wave', GENERALIZED_FRONTAL, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<PolyspikeBurstEvent>(seed, dt, {
       schedule: { kind: 'periodic', period: 6, jitterFrac: 1 / 3 }, // legacy nextEventTime(4,8)
@@ -195,22 +217,34 @@ const polyspikeWave: PatternSourceDescriptor = {
         amp: jit(g, 1, 0.25),
       }),
       morphology: (burstDt, e) => {
-        // The inter-complex interval lengthens as the burst runs — the discharge
-        // decelerating towards its terminal slow wave rather than holding a fixed rate.
-        const cycleLen = 0.35 + burstDt * 0.05;
+        // One complex is a positive trough with the polyspikes rising out of it,
+        // then the negative slow wave: polyspikes and wave both up (see
+        // rhythmicSpikeWave in morphology.ts, whose layout this is). Its length
+        // grows with the number of polyspikes, 40 ms apiece, so the slow wave
+        // always has room — at a fixed 0.35 s, four or five polyspikes left the
+        // slow wave cut off at full height where the next complex began — and it
+        // lengthens a little as the burst runs, the discharge decelerating rather
+        // than holding a fixed rate.
+        const cycle0 = 0.27 + e.count * 0.04;
+        const cycleLen = cycle0 + burstDt * 0.05;
         const dt = burstDt % cycleLen;
-        const amp = 180 * e.amp; // frontal-maximal peak amplitude
+        // The burst window is a fixed 3 s; fade over its last half second so it
+        // does not stop part-way up a wave.
+        // 405 uV at the source's own maximum (see the 3 Hz field note above). It
+        // was 300 when the slow wave opposed the polyspikes; x1.35 holds the
+        // complex's peak-to-peak where that put it.
+        const amp = 405 * e.amp * Math.min(1, (3 - burstDt) / 0.5);
+        // The last polyspike sits just before the trough turns into the dome.
+        const first = 0.45 * cycle0 - (e.count - 1) * 0.04;
         let v = 0;
         for (let i = 0; i < e.count; i++) {
           // hashUnit, not per-sample jitter: each polyspike needs ONE amplitude that
           // differs from its neighbours', fixed for its own gaussian bump — a stream
           // re-rolled every sample would scribble noise across the burst instead.
-          // Surface-negative polyspikes, positive after-going slow wave — the
-          // same polarity convention as spikeSlowWave (see morphology.ts).
-          v -= amp * (0.65 + 0.35 * hashUnit(i + 1)) * gaussian(dt, 0.03 + i * 0.04, 0.015);
+          v -= amp * (0.65 + 0.35 * hashUnit(i + 1)) * gaussian(dt, first + i * 0.04, 0.015);
         }
-        // The obligatory slow wave following the last polyspike.
-        v += amp * 0.7 * gaussian(dt, 0.03 + e.count * 0.04 + 0.1, 0.07);
+        // Trough first, then the slow wave that follows the last polyspike.
+        v += amp * 0.7 * Math.sin(2 * Math.PI * dt / cycleLen);
         return v;
       },
     });
@@ -294,6 +328,17 @@ const burstSuppression: PatternSourceDescriptor = {
 // each firing on its own schedule, so spikes appear chaotically at shifting
 // locations rather than synchronised everywhere at once. Every descriptor
 // below shares the one 'hypsarrhythmia' toggle so they turn on/off together.
+//
+// Amplitude. learningeeg (Pediatric): "extremely high amplitude", shown at 50 and
+// 70 uV/mm because "on the usual reading sensitivity of 7 uV/mm, all the activity
+// here would be so high amplitude as to be unreadable". The legacy amplitudes
+// (delta 120-150 uV, spikes 150-300 uV) drew rows of 215-270 uV peak to peak — on
+// the 200 uV floor of the definition (PMC7023485: ">200 microvolts") and still
+// readable at 7 uV/mm. They are scaled by 1.6 here.
+//
+// Background. "No organised background" has to include the posterior alpha rhythm
+// the awake state otherwise keeps drawing underneath, so the frontal delta source
+// also gates alpha and mu down, as generalised slowing does.
 // ---------------------------------------------------------------------------
 
 // -- (a) Desynchronised diffuse delta, one broad generator per scalp region.
@@ -304,9 +349,9 @@ const burstSuppression: PatternSourceDescriptor = {
 type HypsDeltaRegion = { id: string; electrodes: string[]; amp: number; freqOffset: number; freqScale: number };
 
 const HYPS_DELTA_REGIONS: HypsDeltaRegion[] = [
-  { id: 'hyps-delta-frontal', electrodes: ['Fz', 'Fp1', 'Fp2'], amp: 150, freqOffset: 0, freqScale: 1 },
-  { id: 'hyps-delta-posterior', electrodes: ['O1', 'O2', 'P3', 'P4'], amp: 150, freqOffset: 0.2, freqScale: 1.1 },
-  { id: 'hyps-delta-central', electrodes: ['Cz', 'T3', 'T4'], amp: 120, freqOffset: -0.15, freqScale: 0.95 },
+  { id: 'hyps-delta-frontal', electrodes: ['Fz', 'Fp1', 'Fp2'], amp: 240, freqOffset: 0, freqScale: 1 },
+  { id: 'hyps-delta-posterior', electrodes: ['O1', 'O2', 'P3', 'P4'], amp: 240, freqOffset: 0.2, freqScale: 1.1 },
+  { id: 'hyps-delta-central', electrodes: ['Cz', 'T3', 'T4'], amp: 190, freqOffset: -0.15, freqScale: 0.95 },
 ];
 
 const hypsDeltaSources: PatternSourceDescriptor[] = HYPS_DELTA_REGIONS.map((r): PatternSourceDescriptor => ({
@@ -318,14 +363,16 @@ const hypsDeltaSources: PatternSourceDescriptor[] = HYPS_DELTA_REGIONS.map((r): 
       next: (ctx) => ctx.enabled
         ? r.amp * multiToneSignal(ctx.t, DELTA_TONES, DELTA_TONE_NORM, r.freqOffset, r.freqScale)
         : 0,
+      // Carried by one source only, so it applies once.
+      ...(r.id === 'hyps-delta-frontal' ? { bandGate: () => ({ alpha: 0.15, mu: 0.15 }) } : {}),
     };
   },
 }));
 
 // -- (b) Multifocal spikes: independent generators at scattered electrodes,
 // each an ordinary spike + slow wave firing on its own seeded schedule, with
-// its own seeded amplitude drawn fresh each time (150-300 uV, matching the
-// legacy per-electrode draw) — independence across sites is what produces the
+// its own seeded amplitude drawn fresh each time (240-480 uV: the legacy 150-300
+// scaled with the delta above) — independence across sites is what produces the
 // shifting, chaotic, asynchronous appearance.
 type HypsSpikeEvent = { amp: number };
 
@@ -341,7 +388,7 @@ const hypsSpikeSources: PatternSourceDescriptor[] = HYPS_SPIKE_ELECTRODES.map((e
       const ts = new TransientSource<HypsSpikeEvent>(seed, dt, {
         schedule: { kind: 'periodic', period: 2.35, jitterFrac: 0.489 }, // legacy nextEventTime(1.2, 3.5)
         duration: 0.95,
-        onset: (g) => ({ amp: g.range(150, 300) }),
+        onset: (g) => ({ amp: g.range(240, 480) }),
         morphology: (t, e) => spikeSlowWave(t, e.amp, e.amp * 0.5),
       });
       return asGenerator(ts);
@@ -350,9 +397,9 @@ const hypsSpikeSources: PatternSourceDescriptor[] = HYPS_SPIKE_ELECTRODES.map((e
 });
 
 export const EPILEPTIFORM_SOURCES: PatternSourceDescriptor[] = [
-  focalSpikesLt,
-  focalSpikesRt,
-  focalSpikesLf,
+  ...focalSpikesLt,
+  ...focalSpikesRt,
+  ...focalSpikesLf,
   iedSpike,
   iedSpikeWave,
   iedSharp,

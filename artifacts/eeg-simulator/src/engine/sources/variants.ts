@@ -25,13 +25,13 @@
  * decorrelate for free without any extra bookkeeping here.
  */
 
-import { sourceUnder } from '../forward';
+import { sourceUnder, synchronousPatches } from '../forward';
+import { GENERALIZED_POSTERIOR, MU_FIELD, OCCIPITAL, POSTERIOR_TEMPORAL } from './fields';
 import { Gaussian } from '../rng';
 import { TransientSource } from './transient';
 import {
   gaussian, arciformSignal, multiToneSignal,
   MU_TONES, MU_TONE_NORM,
-  WICKET_TONES, WICKET_TONE_NORM,
   RMTD_TONES, RMTD_TONE_NORM,
   PSWY_TONES, PSWY_TONE_NORM,
   POS14_TONES, POS6_TONES, POS_BURST_TONE_NORM,
@@ -89,11 +89,17 @@ function stepOU(g: Gaussian, prev: number, dt: number, tau: number): number {
 // waxing/waning amplitude rather than a metronomic one — real mu rhythm is
 // not a sustained pure tone. Each side draws its own OU pair from its own
 // seed, so the two hemispheres wax and wane independently, as real mu does.
+//
+// Field: `MU_FIELD` (fields.ts), the one the background mu uses — central
+// maximum with a share at the parietal electrode behind it and at the vertex,
+// learningeeg's "centroparietal regions along the parasagittal chains". It was a
+// single patch under C3/C4 (extent 0.22) that gave P3/P4 1% of the central
+// electrode: mu on the toggle sat on a narrower field than mu in the background.
 // ---------------------------------------------------------------------------
 type MuEnvelope = { slow: number; fast: number };
 
-function muSide(id: string, electrode: string): PatternSourceDescriptor {
-  const geom = sourceUnder(id, [electrode], { extent: 0.22 });
+function muSide(id: string, weights: Record<string, number>): PatternSourceDescriptor {
+  const geom = synchronousPatches(id, weights, { extent: 0.3 });
   return {
     id,
     toggles: ['mu-rhythm'],
@@ -117,8 +123,8 @@ function muSide(id: string, electrode: string): PatternSourceDescriptor {
   };
 }
 
-const muL = muSide('mu-l', 'C3');
-const muR = muSide('mu-r', 'C4');
+const muL = muSide('mu-l', MU_FIELD.left);
+const muR = muSide('mu-r', MU_FIELD.right);
 
 // ---------------------------------------------------------------------------
 // Wicket spikes — 6-11 Hz arciform bursts over the mid-temporal region during
@@ -129,23 +135,42 @@ const muR = muSide('mu-r', 'C4');
 // `spikeSlowWave`. Real wicket activity is not synchronous between the two
 // temporal lobes, so this is split into independent T3/T4 sources rather
 // than the single shared timer the legacy code used.
+//
+// One burst is ONE frequency. learningeeg's atlas: "each wicket should be the
+// same duration", in "very brief non-evolving runs". The band is where a burst's
+// frequency is drawn from, not something one burst spans: 6-11 Hz ("theta- or
+// alpha frequency range", Reiher & Lebel as quoted by StatPearls NBK555899;
+// learningeeg says "usually 7-11 Hz"; IK-015 holds the wider range).
+//
+// Each burst used to be SEVEN tones from 6.2 to 11 Hz summed and divided by their
+// combined amplitude. Seven tones of different frequency are almost never in
+// phase, so the sum ran at a quarter of its nominal size — 12 uV at T3 for a
+// nominal 50, measured — and no two arches in a burst were the same width.
+//
+// 70 uV nominal, so bursts peak at roughly 60-100 uV at T3: the foot of the
+// 60-200 uV range given for wickets (AES atlas, NBK390343, as quoted by search).
 // ---------------------------------------------------------------------------
-type WicketEvent = { amp: number; dur: number };
+type WicketEvent = { amp: number; dur: number; freq: number };
 
 function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
   return {
     id,
     toggles: ['wicket'],
-    states: ['drowsy'],
+    // eegpedia: "present in relaxed wakefulness, drowsiness, light sleep";
+    // learningeeg: they "tend to be seen more in the drowsy state". Until
+    // 2026-10-13 this was drowsiness alone, and IK-015 called them "absent in
+    // relaxed wakefulness".
+    states: ['awake', 'drowsy', 'n1', 'n2'],
     spec: sourceUnder(id, [electrode], { extent: 0.30 }),
     make(seed, dt) {
       const ts = new TransientSource<WicketEvent>(seed, dt, {
         schedule: { kind: 'periodic', period: 3.5, jitterFrac: 0.43 }, // legacy 2-5 s
         duration: 1.5,
-        onset: (g) => ({ amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3) }),
+        onset: (g) => ({ amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3), freq: g.range(6, 11) }),
         morphology: (t, e) => {
           const env = gaussian(t, e.dur / 2, e.dur / 4);
-          return 50 * e.amp * env * arciformSignal(t, WICKET_TONES, WICKET_TONE_NORM);
+          // Arches pointed on the negative side (see arciformSignal).
+          return 70 * e.amp * env * arciformSignal(t, [{ f: e.freq, a: 1 }], 1);
         },
       });
       return asGenerator(ts);
@@ -195,21 +220,34 @@ const rmtdR = rmtdSide('rmtd-r', 'T4');
 // Lambda waves — surface-positive occipito-parietal sharp transients evoked
 // by visual scanning of a patterned field (e.g. reading), benign. The visual
 // evoked response drives both hemispheres from the same stimulus at once, so
-// (unlike wicket/RMTD/BETS above) a single source anchored at the mean of
-// O1/O2 is the physiologically appropriate model, not an independent pair.
+// (unlike wicket/RMTD/BETS above) one source for both sides is the
+// physiologically appropriate model, not an independent pair.
+//
+// Field: the bilateral occipital one POSTS use (fields.ts). learningeeg: lambda
+// waves "look almost identical to POSTS" and, in a circumferential montage, are
+// "very occipitally focused". The single patch this used to be sat on the old
+// cortical shell, 4 cm under the occiput, and reached the parietal electrodes at
+// 29-37% — so C3-P3 carried half of what P3-O1 did, against POSTS' 17%.
+//
+// Timing: a lambda wave follows a saccade, so they arrive irregularly. The gap
+// is drawn from an exponential (mean 0.6 s after each 0.3 s event, the legacy
+// rate of about one a second). It used to be 0.6-1.2 s uniform, which measured as
+// an interval CV of 0.15 — as regular as the periodic discharges.
 // ---------------------------------------------------------------------------
 type LambdaEvent = { amp: number; dur: number };
 
 const lambda: PatternSourceDescriptor = {
   id: 'lambda',
   toggles: ['lambda'],
-  spec: sourceUnder('lambda', ['O1', 'O2'], { extent: 0.4 }),
+  spec: synchronousPatches('lambda', OCCIPITAL, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<LambdaEvent>(seed, dt, {
-      schedule: { kind: 'periodic', period: 0.9, jitterFrac: 0.33 }, // legacy 0.6-1.2 s
-      duration: 0.25,
-      onset: (g) => ({ amp: jit(g, 1, 0.25), dur: jit(g, 0.15, 0.2) }),
-      morphology: (t, e) => (t < e.dur ? 60 * e.amp * Math.sin(Math.PI * t / e.dur) : 0),
+      schedule: { kind: 'renewal', meanInterval: 0.6 },
+      // "Amplitude: 50 microV. Duration 200-300 msec" (eegpedia, Lambda waves). It
+      // was 60 uV over 120-180 ms, briefer than the range given for it.
+      duration: 0.3,
+      onset: (g) => ({ amp: jit(g, 1, 0.25), dur: g.range(0.2, 0.3) }),
+      morphology: (t, e) => (t < e.dur ? 50 * e.amp * Math.sin(Math.PI * t / e.dur) : 0),
     });
     return asGenerator(ts);
   },
@@ -222,9 +260,10 @@ const lambda: PatternSourceDescriptor = {
 // the alpha rhythm, which drowsiness/sleep abolish). `PSWY_TONES` sits above
 // the delta band deliberately (see morphology.ts) so this doesn't read as
 // pathological slowing. Legacy's `PSWY_FIELD` table peaked at O1/O2 (1.0) and
-// fell off at P3/P4 (0.67); anchoring the source at the mean of all four
-// electrodes and letting the leadfield's Gaussian falloff reproduce that
-// occipital > parietal gradient is the geometric equivalent.
+// fell off at P3/P4 (0.67): an occipital maximum with a parietal share, built
+// here as patches under those four electrodes. The single patch at their mean
+// position that this used to be sat on the midline between them, so Pz read as
+// large as O1/O2 and the biggest row on the page was Cz-Pz.
 // ---------------------------------------------------------------------------
 type PswyEvent = { dur: number };
 
@@ -232,7 +271,7 @@ const pswy: PatternSourceDescriptor = {
   id: 'pswy',
   toggles: ['pswy'],
   states: ['awake'],
-  spec: sourceUnder('pswy', ['O1', 'O2', 'P3', 'P4'], { extent: 0.5 }),
+  spec: synchronousPatches('pswy', { O1: 1, O2: 1, P3: 0.5, P4: 0.5 }, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<PswyEvent>(seed, dt, {
       schedule: { kind: 'periodic', period: 3.75, jitterFrac: 0.33 }, // legacy 2.5-5.0 s
@@ -249,31 +288,44 @@ const pswy: PatternSourceDescriptor = {
 };
 
 // ---------------------------------------------------------------------------
-// 6 Hz phantom spike-wave — brief (<1 s), low-amplitude generalised spike-
-// wave bursts near 6 Hz, benign, seen in drowsiness/light sleep. "Phantom"
-// because the spike is tiny relative to the slow wave (50 uV vs 30 uV here,
-// both far below a true 2-3 Hz epileptiform spike-wave discharge) and the
-// whole burst is brief. It is genuinely generalised in the legacy code (no
-// electrode restriction at all — every channel gets the same event), so this
-// is modelled as one broad, diffuse source rather than a focal one.
+// 6 Hz phantom spike-wave — brief runs of low-amplitude generalised spike-and-
+// wave near 6 Hz, benign, seen in drowsiness. "Phantom" because the spike is
+// fleeting: "very low amplitude spikes followed by an equally tiny slow wave"
+// (learningeeg, Normal Variants); a low-amplitude, fast spike "followed by a 5 to
+// 7 Hz wave of equal or greater amplitude", in bursts of 1-2 s (StatPearls,
+// Normal EEG Variants, NBK555899, as quoted by search).
+//
+// Two forms are taught: FOLD (female, occipital, low amplitude, drowsy), the
+// classic benign one, and WHAM (waking, high amplitude, anterior, male), whose
+// link to epilepsy is not settled. This toggle is the benign variant, so it is
+// FOLD: posterior maximum (fields.ts), drowsiness and N1 only.
+//
+// It used to be one patch under Cz, awake, with a 50 uV spike on a 30 uV wave —
+// the spike LARGER than the wave, which is the opposite of phantom, on a field
+// that put 40 uV on Fz-Cz and nothing on the temporal chains. Now a 25 uV spike
+// on a 45 uV wave at the source, ~14 and ~25 uV at the occipital electrodes.
 // ---------------------------------------------------------------------------
-type SixHzEvent = { amp: number };
+type SixHzEvent = { amp: number; dur: number };
 
 const sixHzSw: PatternSourceDescriptor = {
   id: '6hz-sw',
   toggles: ['6hz-sw'],
-  spec: sourceUnder('6hz-sw', ['Cz'], { extent: 0.7 }),
+  states: ['drowsy', 'n1'],
+  spec: synchronousPatches('6hz-sw', GENERALIZED_POSTERIOR, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<SixHzEvent>(seed, dt, {
       schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 }, // legacy 3-6 s
-      duration: 1.0,
-      onset: (g) => ({ amp: jit(g, 1, 0.2) }),
+      duration: 2.0, // upper bound on the per-burst length drawn below
+      // 1-2 s, as a whole number of 6 Hz cycles (6 to 12) so the run ends between
+      // complexes rather than being cut off part-way through a wave.
+      onset: (g) => ({ amp: jit(g, 1, 0.2), dur: Math.round(g.range(6, 12)) / 6 }),
       morphology: (t, e) => {
+        if (t >= e.dur) return 0;
         const cyc = t % (1 / 6);
-        // Surface-negative spike, positive after-going wave — same polarity
-        // convention as spikeSlowWave (see morphology.ts).
-        const spike = -50 * e.amp * gaussian(cyc, 0.02, 0.008);
-        const wave = 30 * e.amp * gaussian(cyc, 0.1, 0.035);
+        // Surface-negative spike and a wave of the same polarity — the convention
+        // of spikeSlowWave (see morphology.ts), of which this is the 6 Hz case.
+        const spike = -25 * e.amp * gaussian(cyc, 0.02, 0.008);
+        const wave = -45 * e.amp * gaussian(cyc, 0.1, 0.035);
         return spike + wave;
       },
     });
@@ -287,8 +339,15 @@ const sixHzSw: PatternSourceDescriptor = {
 // independent arciform components (a 14 Hz one and a 6 Hz one — either or
 // both may dominate a given burst, which is why the per-event `ratio`
 // varies). Legacy drove T3/T4/T5/T6 from one shared timer, so — like lambda
-// and PSWY — this stays a single source, anchored at the mean of the
-// posterior-temporal pair T5/T6.
+// and PSWY — this stays a single source for both sides ("bilateral and
+// synchronous", learningeeg), on the posterior temporal field (fields.ts).
+//
+// It used to be anchored "at the mean of T5 and T6" — which is a point on the
+// midline between them, under the occiput. The bursts came out largest at O1/O2
+// with T5/T6 at 36%: a posterior TEMPORAL variant drawn as an occipital one.
+// Amplitudes are the legacy 28 and 18 uV scaled by 1.6, for bursts of ~35 uV at
+// T5/T6: 20-60 uV is the usual range and they rarely exceed 75 (EEG Atlas and
+// StatPearls NBK555899, as quoted by search).
 // ---------------------------------------------------------------------------
 type Pos1406Event = { ratio: number };
 
@@ -300,7 +359,7 @@ const pos1406: PatternSourceDescriptor = {
   // wakefulness. State-gate them like the other drowsy benign variants (wicket,
   // rmtd) rather than letting the toggle fire while awake.
   states: ['drowsy', 'n1', 'n2'],
-  spec: sourceUnder('14-6-pos', ['T5', 'T6'], { extent: 0.4 }),
+  spec: synchronousPatches('14-6-pos', POSTERIOR_TEMPORAL, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<Pos1406Event>(seed, dt, {
       schedule: { kind: 'periodic', period: 6, jitterFrac: 0.33 }, // legacy 4-8 s
@@ -308,18 +367,14 @@ const pos1406: PatternSourceDescriptor = {
       onset: (g) => ({ ratio: jit(g, 0.6, 0.4) }),
       morphology: (t, e) => {
         const env = gaussian(t, 0.5, 0.25);
-        const c14 = 28 * e.ratio * arciformSignal(t, POS14_TONES, POS_BURST_TONE_NORM);
-        const c6 = 18 * (1 - e.ratio) * arciformSignal(t, POS6_TONES, POS_BURST_TONE_NORM);
-        const raw = c14 + c6;
-        // 14-&-6 Hz POSITIVE bursts are surface-positive by definition — the sharp
-        // comb-teeth must deflect DOWN (negative-up canvas). arciformSignal is
-        // odd/symmetric, so summed tones carry no polarity bias on their own and
-        // the burst was rendering with an arbitrary sign. Half-wave-emphasise the
-        // positive-going phase so the sharp deflection is reliably surface-positive,
-        // matching the name and the POLARITIES assertion. The ~14/6 Hz spectral
-        // content (and the on/off band-power checks) is preserved: the fundamental
-        // is still fully present, only its up/down asymmetry changes.
-        return env * (raw + 0.6 * Math.max(raw, 0));
+        // 14 & 6 Hz POSITIVE bursts are named for their polarity: each arch is
+        // pointed on its surface-positive side, which the canvas draws DOWN. That
+        // is the arch itself now (arciformSignal, sharp = +1). It used to be a
+        // tilted wave with its positive half scaled up by 1.6 to force a polarity,
+        // which also left every burst standing on an offset.
+        const c14 = 45 * e.ratio * arciformSignal(t, POS14_TONES, POS_BURST_TONE_NORM, 0, 1);
+        const c6 = 29 * (1 - e.ratio) * arciformSignal(t, POS6_TONES, POS_BURST_TONE_NORM, 0, 1);
+        return env * (c14 + c6);
       },
     });
     return asGenerator(ts);

@@ -128,6 +128,42 @@ export type SourceSpec = {
  * a "left occipital" generator ends up genuinely under O1, not at a hand-picked
  * coordinate that happens to look right.
  */
+/**
+ * A cortical-shell source genuinely EQUIDISTANT from two electrodes — "midway
+ * between two electrodes", the geometry that makes the bipolar link spanning them
+ * go flat (IK-003 case b).
+ *
+ * `sourceUnder([a, b])` is not that. It averages the two electrode positions and
+ * projects the mean radially onto the shell, which lands on the perpendicular
+ * bisector only when the head is a sphere and the two electrodes sit at equal
+ * radius. On the mesh-derived head they do not: F8 (z 0.53) rides higher than T4
+ * (z 0), so the projected mean ends up 8.4% closer to T4 than to F8 and the
+ * "isoelectric" link inherits that as a spurious deflection.
+ *
+ * Walk the great circle between the two radial directions and bisect on the
+ * distance difference; 40 halvings is far below floating-point resolution.
+ * (Moved here from the gate, which built it for a synthetic source, when the
+ * focal-spike toggles gained a between-electrodes focus, 2026-10-13.)
+ */
+export function sourceBetween(id: string, a: string, b: string, extent: number): SourceSpec {
+  const pa = electrodePositions3D[a] as Vec3, pb = electrodePositions3D[b] as Vec3;
+  if (!pa || !pb) throw new Error(`sourceBetween: unknown electrode ${pa ? b : a}`);
+  const d = (p: Vec3, q: Vec3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  const at = (t: number): Vec3 => {
+    const m = [0, 1, 2].map(i =>
+      (pa[i] - HEAD_CENTRE[i]) * (1 - t) + (pb[i] - HEAD_CENTRE[i]) * t) as Vec3;
+    const n = Math.hypot(m[0], m[1], m[2]);
+    return [0, 1, 2].map(i => HEAD_CENTRE[i] + (m[i] / n) * CORTICAL_SHELL) as Vec3;
+  };
+  // f(0) < 0 (sitting on a's ray, so nearer a); f(1) > 0. Bisect for f = 0.
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 40; k++) {
+    const mid = (lo + hi) / 2, p = at(mid);
+    if (d(pa, p) - d(pb, p) < 0) lo = mid; else hi = mid;
+  }
+  return { id, pos: at((lo + hi) / 2), orientation: { kind: 'radial' }, extent };
+}
+
 export function sourceUnder(
   id: string,
   electrodes: string[],

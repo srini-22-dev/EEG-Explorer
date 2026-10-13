@@ -149,4 +149,33 @@ export type SimSettings = {
   ictalParams: IctalParamsMap;
   /** Contextual settings for the artifact toggles. */
   artifactParams: ArtifactParams;
+  /** Choices between forms of one pattern. Optional: omitted means every default. */
+  patternOptions?: PatternOptions;
 };
+
+/**
+ * How POSTS are grouped in time. Both are normal (Neupsy Key: singly, more than
+ * 1 s apart, or in trains of 4-6 per second lasting about a second); the learner
+ * picks which to look at.
+ */
+export type PostsForm = 'singles' | 'trains';
+
+/**
+ * Where a focal discharge's source sits — the focal spikes and the focal seizures
+ * alike. `under` its electrode gives a phase reversal there. `between` that
+ * electrode and the next one up the chain gives the other localising picture: the
+ * link spanning the two goes flat — an isopotential, both ends seeing the same
+ * voltage — and the links either side of it deflect in opposite directions.
+ */
+export type FocalPlacement = 'under' | 'between';
+
+/**
+ * Choices between forms of one pattern, shown under that pattern's toggle. Omitted means the default.
+ *
+ * `seizureMuscle`: whether the tonic-clonic seizure comes with its muscle artifact.
+ * The muscle is what the record of a real one mostly shows, and it buries the
+ * rhythm the seizure is defined by, so both pictures are worth having. Omitted
+ * means off — the discharge alone, which is what a script measuring the seizure
+ * wants; the app sets it on.
+ */
+export type PatternOptions = { postsForm?: PostsForm; focalPlacement?: FocalPlacement; seizureMuscle?: boolean };

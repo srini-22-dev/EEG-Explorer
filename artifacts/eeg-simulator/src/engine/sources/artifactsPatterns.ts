@@ -122,17 +122,26 @@ function makeChewSide(seed: number, dt: number, subjectSeed: number): PatternGen
   };
 }
 
+/**
+ * Field width of a chewing burst. Wider than resting temporalis tone (0.30): a
+ * chew drives the masseter and both pterygoids as well, and learningeeg describes
+ * the result as "bursts of GENERALIZED very fast activity" — temporal maximum, but
+ * on every chain. At 0.6 the frontopolar, central and posterior temporal electrodes
+ * carry about a quarter of what T3 does.
+ */
+const CHEW_EXTENT = 0.6;
+
 const chewLeft: PatternSourceDescriptor = {
   id: 'chewL',
   toggles: ['chewing'],
-  spec: { ...ARTIFACT_SOURCES.temporalisL, id: 'chewL' },
+  spec: { ...ARTIFACT_SOURCES.temporalisL, id: 'chewL', extent: CHEW_EXTENT },
   make: (seed, dt, subjectSeed) => makeChewSide(seed, dt, subjectSeed),
 };
 
 const chewRight: PatternSourceDescriptor = {
   id: 'chewR',
   toggles: ['chewing'],
-  spec: { ...ARTIFACT_SOURCES.temporalisR, id: 'chewR' },
+  spec: { ...ARTIFACT_SOURCES.temporalisR, id: 'chewR', extent: CHEW_EXTENT },
   make: (seed, dt, subjectSeed) => makeChewSide(seed, dt, subjectSeed),
 };
 

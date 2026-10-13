@@ -14,7 +14,7 @@ Use it after any change to `engine/`, `forward.ts`, `montages.ts`, `computeChann
 or the display, and whenever someone says the trace looks wrong. `CLAUDE.md` §4 —
 display space is authoritative.
 
-**Instruments.** All four drive the production engine through the production display transform,
+**Instruments.** All of them drive the production engine through the production display transform,
 so reach for them before writing a probe:
 
 | instrument | answers |
@@ -22,6 +22,8 @@ so reach for them before writing a probe:
 | `scripts/src/renderTrace.ts` | did my change do what I meant **on the page the user sees** (app paper, app montages) |
 | `scripts/src/renderClinicalPage.ts` | does it look like a **real record**: white paper, square millimetres, any channel order. The engine side of every comparison against a reference figure |
 | `scripts/src/measureField.ts --toggle <id>` | one source's **isolated field** (same-seed on−off, raw electrodes) and its bipolar-chain decay |
+| `scripts/src/auditToggles.ts` | **every toggle at once**: isolated field, every row as a share of the largest, smallest/largest row, interval CV, and a flag on any toggle that stays under 1 mm of pen. The wide pass that finds a defect several patterns share — run it after any change to `forward.ts`, and before trusting that a class of patterns is right |
+| `scripts/src/fitField.ts` | the **patch weights** of a generalized or regional field (`sources/fields.ts`), fitted to a target map, with the row table they give. Name single electrodes (`"T3"`, not `"T3/T4"`) for a lateralized field; it then prints both sides |
 | `scripts/read-lab/` | reading **images**: extraction methods, benches, the reference corpus, the journal |
 
 **Numbers quoted in this file are evidence, not thresholds.** Each shows what a failure looked like
@@ -30,7 +32,7 @@ earlier). Never use one as a floor or a target — measure the reference in the 
 
 ---
 
-## The four mistakes this exists to prevent
+## The seven mistakes this exists to prevent
 
 **1. Judging from one draw.** The record varies enormously between subjects and
 between moments. A burst, a waxing alpha run, a bad channel or a quiet stretch can
@@ -66,6 +68,38 @@ Fp1-F7 (0.95 of it; the reference gives 0.07–0.32), and the gate had printed 0
 (§2) comes before the look at the changed feature, and every row the feature reaches is measured
 on both sides (**Comparing against a real clinical record** → *The row table*).
 
+**5. Testing a field through two electrodes.** A pattern's name is a claim about ALL the rows:
+"generalized" says every chain, "bifrontal" says the front of every chain and none of the back,
+"focal" says one electrode and its neighbours. A check that reads Cz and O1, or Fz and T3, cannot
+tell those apart. 2026-10-12: nine patterns taught as generalized — 3 Hz spike-wave, polyspike-wave,
+the absence and tonic-clonic seizures, triphasic waves, FIRDA, GPEDs, the 6 Hz phantom spike-wave,
+the hyperventilation build-up — were each one patch under Fz or Cz, and each drew as a midline
+focus: the discharge on Fz-Cz, a third of it on the parasagittal rows, a tenth or less on the
+temporal chains. Every one of their checks was green (GPEDs' sat at 6.04 against a ceiling of 6).
+The measure that separates them is **smallest row / largest row** over the whole double banana,
+taken in isolation — `auditToggles.ts` prints it for every toggle; the gate's `displayContribAll`
+gives it to a check. On learningeeg's generalized figures it is 0.27–0.53; the midline-patch
+versions measured 0.00–0.08.
+
+**6. Assuming a toggle draws something.** Three artifact toggles drew nothing and nobody had
+looked: sweat (0.4 µV — a scaling slip in its generator), mains (identical on every electrode, so
+0.0 µV on every bipolar, average and ear-referenced row), and ECG on the double banana (1 µV). A
+raw-electrode check passed for mains throughout, because against infinity it was there. After any
+change to an artifact, and for any toggle you have not personally seen, confirm its isolated
+contribution clears a millimetre of pen (7 µV at 7 µV/mm) on at least one row of the montage the
+user is looking at. `auditToggles.ts` flags the ones that do not.
+
+**7. Taking the code and the knowledge base agreeing as evidence.** They were usually written
+together, by the same hand, on the same day. IK-012 said the slow wave after a spike was
+surface-positive and the engine drew it so; an audit that found learningeeg showing the opposite
+left both standing "because they agree" — one error, written down twice. When a reference
+contradicts both, the reference is the finding. Quote it, get a second source, and fix the code,
+its checks and the entry together, leaving a dated note in the entry saying what it got wrong
+(2026-10-13: twelve entries corrected that way; the user's words were "IK are not above mistakes,
+do research to fix them"). A related trap in the same audit: a check label that credits a source
+with a number the source does not give — "LEARNINGEEG: roughly 1-2.5 s" for a figure learningeeg
+states in hertz. Read the sentence the label claims to quote.
+
 ---
 
 ## Protocol
@@ -76,6 +110,12 @@ on both sides (**Comparing against a real clinical record** → *The row table*)
 pnpm --filter @workspace/scripts exec tsx ./src/renderTrace.ts \
   --state awake --montage bipolar-ap --seconds 10 --seed 42 --skip 45 --out "$SCRATCH/s42-t45.png"
 ```
+
+`$SCRATCH` is this session's scratchpad directory — set it yourself at the top of the work
+(`SCRATCH=<the scratchpad path this session was given>`); nothing defines it for you, and a path
+copied from an earlier session will not exist. (The gate keeps its own evidence PNGs under the OS
+temp dir, in `eeg-explorer-validate/`. It used to hard-code one session's scratchpad and crashed
+with ENOENT at Step 23 in every session after it.)
 
 Write renders to the session scratchpad (`$SCRATCH` above), or to `scripts/read-lab/corpus/engine/`
 when they join the corpus — never loose into `scripts/`. The 30 PNGs already there are the user's
@@ -106,14 +146,27 @@ centroid, and lifts the frontal rows. On the same signal and seeds (2026-08-25) 
 F3, ran the midline Fz > Cz > Pz, and read front-to-back 2.48 against 3.86 ear-referenced — the A–P
 gradient backwards. Judge amplitude topography on `reference-ipsi`.
 
+It is worst for exactly the patterns a learner most needs it for. The average of a GENERALIZED
+discharge is the discharge, so subtracting it hands the quietest electrodes an inverted copy about
+as large as what is left at the loudest: once the absence seizure was genuinely generalized, its
+`Fz-AVG / O1-AVG` power ratio read 0.96 — "no frontal predominance" — while `Fz-A1 / O1-A1` read
+several-fold, and the tonic-clonic discharge at `Cz-AVG` was 1.5× background while `Cz-A1` was
+many times it. A "frontal-max survives CAR" check passes only for a field too focal to move the
+average, which is how it kept three midline foci green. ACNS 2021 §C.1.a names the montages for
+calling a generalized pattern frontally, occipitally or midline predominant (a 50% difference):
+ipsilateral ear, transverse bipolar, common average, or a non-cephalic reference. Use the ear.
+
 A change that only looks right in one montage, at one sensitivity, in one state has
 not been verified — it has been framed.
 
 ### 2. Look at the images — in the order a reader would
 
 Actually open them. **First write down which label each row carries.** The app's label
-strip prints row *numbers* only, so look the order up in `utils/montages.ts` — `reference-ipsi`
-is Fp1, F7, F3, T3, C3, T5, P3, O1 | Fp2 … O2 | Fz, Cz, Pz, and `bipolar-transverse` runs
+strip prints row *numbers* only, so look the order up in `utils/montages.ts` — `bipolar-ap` is
+parasagittal-first (Fp1-F3 on the top row; left and right parasagittal, left and right temporal,
+midline), `reference-ipsi` is Fp1, F7, F3, T3, C3, T5, P3, O1 | Fp2 … O2 | Fz, Cz, Pz,
+`reference-car` follows the double banana instead (Fp1, F3, C3, P3, O1 | Fp2 … O2 | F7, T3, T5 |
+F8, T4, T6 | Fz, Cz, Pz), and `bipolar-transverse` runs
 F7-Fp1 … O2-T6 front to back. Naming the montage correctly is not the same as knowing where
 row 8 is: a blind read put a Cz phase reversal in the left temporal lobe that way.
 
@@ -164,7 +217,8 @@ which is itself the tell:
 - bad electrodes (`sampleDefects`) put dense fuzz on one or two rows — but only when the
   `bad-electrodes` toggle is on. Since 2026-09-02 they are gated like every other artifact, so
   fuzz on an all-toggles-off page is a finding, not a distractor
-- mu is a per-subject trait present in ~34% of subjects, so central rows legitimately
+- mu is a per-subject trait present in ~16% of subjects (and never in the app, where it is the
+  `mu-rhythm` toggle only), so central rows legitimately
   carry alpha-band activity and a phase reversal in some subjects and not others
 
 ### 3. Back the eye with band-resolved spectra
@@ -315,6 +369,19 @@ one was wrong or unfounded: that a blink recreation matched, that slow-wave slee
 that the vertex wave was midline-only. An impression compared against a number is not a
 comparison.
 
+**Where the references are.** The user verifies against **learningeeg.com** (twelve chapters and an
+atlas) and **eegpedia.org**. Both can be read as text, and should be: fetch a chapter's HTML, strip
+it to text in the scratchpad and grep it — a claim checked against a sentence you can quote beats one
+checked against a memory of the site. learningeeg's figures are at `/images/<chapter>/<name>.webp`
+(convert to PNG before `rowtable.py`). eegpedia answers on **http only** (https fails the handshake)
+and rate-limits after about forty-five pages. ncbi.nlm.nih.gov — StatPearls and the AES atlas — puts
+a CAPTCHA in front of automated fetches; do not work round it. Use search excerpts, and say in the
+code comment and the report that an excerpt is what the number came from. For terminology and
+polarity the **IFCN glossary of EEG terms** (Kane et al. 2017) is open access and can be read whole
+through Europe PMC's API (`…/europepmc/webservices/rest/PMC6123891/fullTextXML`, in two halves):
+it defines spike, sharp wave, triphasic wave, wicket spikes, mu, lambda, POSTS and the rest, and
+is what settled the slow wave's polarity.
+
 **Before extracting anything from an image, read [comparing-to-a-reference.md](comparing-to-a-reference.md)**
 — the method tables (grid, pitch, trace tracking, crossover reconstruction, label reading, ECG
 clock), the evidence behind them and the failure log. The code is in `scripts/read-lab/py/`; do
@@ -461,9 +528,12 @@ is exactly that source.
   the window through the record; storing absolute time renders an empty grid. If a
   render comes back blank, suspect the time origin before suspecting the signal.
 - **Row indices are not stable.** `renderTrace` prints row *numbers*, and those shift
-  whenever a montage's channel list changes (`bipolar-ap` was reordered to ACNS
-  LB-18.3, briefly parasagittal-first on 2026-09-11, back to LB-18.3 — L/R temporal,
-  L/R parasagittal, midline — on 2026-09-14, and `bipolar-transverse` gained four rows). Refer to rows by **label** in
+  whenever a montage's channel list changes (`bipolar-ap` has been temporal-first, then
+  parasagittal-first on 2026-09-11, temporal-first again on 2026-09-14, and parasagittal-first
+  since 2026-09-22 at the user's request — do not move it again unasked; `bipolar-transverse`
+  gained four rows; `reference-car` was regrouped by chain on 2026-10-12). Note that learningeeg
+  calls the temporal-first layout the "double banana" and the parasagittal-first one the "bipolar
+  T1-T2 montage": read a reference figure's order off its own labels. Refer to rows by **label** in
   anything you write down, and never compare row numbers across a montage change.
 - **The seed does more than you think.** `SimulationSource(seed)` draws the whole
   subject — IAF, alpha amplitude, smearing, artifact burden, mu presence, bad
@@ -483,8 +553,37 @@ is exactly that source.
   with `recordingChain: false` (most of `validateEngine.ts` §7c) bypasses the amplifier filters,
   gain mismatch, sensor noise and bad electrodes. Filter overshoot is the one that matters most
   on the page. `SimulationSource`, `renderTrace` and `renderClinicalPage` all keep the chain.
-- **The gate prints ~500 lines.** Piping it through `tail` hides the checks you changed, and
-  the run takes minutes. Redirect it to a file and grep.
+- **The app and the scripts switch a stage's features on differently.** In the app, what a stage
+  brings (vertex waves, POSTS, spindles, K-complexes, slow waves, roving and REM eye movements) are
+  toggles the app sets ON when the stage is entered, and the engine runs toggles-only
+  (`SimulationSource.useAppMode()`), so a user can switch one off and it leaves the page.
+  `renderTrace`, `auditToggles` and the gate never call that: there the STATE brings those features
+  with no toggle set. A render with `--state n2` and no `--patterns` is therefore the app's N2 page
+  with its defaults on, not the app with everything switched off. POSTS come one at a time unless
+  the trains form is chosen: `renderTrace --posts trains`, or the control under the POSTS toggle.
+- **Where the annotation arrows go is decided in `utils/markRows.ts`**, which the canvas and gate
+  Step 27 both call: every row carrying at least 35% of the artifact's largest row, the ten largest
+  at most, from the artifact's own field put through the montage. The arrows are a claim about
+  where an artifact is, so check them like one: Step 27 compares them with the artifact's
+  on-minus-off contribution, event by event and row by row. Independent sources (the two kinds of
+  spindle, the two jaw muscles) are marked separately; a field summed across them puts arrows on
+  rows the event is not on.
+- **Which toggles can be on together is decided in `utils/toggleRules.ts`**, not in the engine: a
+  table of states, requirements and exclusions (a blink needs Awake and open eyes; muscle is not
+  available in REM; lambda needs open eyes), applied by pure functions the app makes every change
+  through. Gate Step 26 walks 20,000 random actions through them. A script can still ask the
+  engine for a page the app cannot reach (`--state rem --patterns blink`) — check a combination
+  against `violations()` before treating a render of it as something a learner can see.
+- **Two localising pictures, two ways to make them.** A focal spike under an electrode gives a
+  phase reversal there; one midway between two electrodes makes the link spanning them go flat (an
+  isopotential) with its flanks opposed. The focal-spike toggles do both: `renderTrace --focus
+  between`, or the Focus control under the toggle. `sourceBetween()` in `forward.ts` is the
+  geometry (a true equidistant point, which `sourceUnder([a, b])` is not).
+- **The gate prints ~750 lines and takes 20–30 minutes.** Piping it through `tail` hides the
+  checks you changed. Redirect it to a file, run it in the background, and grep. Run nothing else
+  heavy beside it: an audit or a batch of renders alongside doubles its time, and theirs. Batch
+  your model changes so one run covers them; measure a candidate bound with `auditToggles.ts`
+  (seconds) before asking the gate (half an hour) whether it holds.
 - **A field is an RMS map, not a signed-peak map.** `measureField` reports each electrode's
   largest single sample with its sign. For a transient that is the field; for ongoing activity it
   is noise. It made a perfectly symmetric generalized-slowing field "lean left" (P3 +49% vs P4

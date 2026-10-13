@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info, ChevronDown, Download, MonitorPlay, Brain } from 'lucide-react';
 import { MONTAGES, Montage } from '../utils/montages';
-import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, Speed, Sensitivity } from '../utils/simTypes';
+import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions, Speed, Sensitivity } from '../utils/simTypes';
 import { ICTAL_TOGGLE_IDS, SPEED_VALUES, SENSITIVITY_VALUES } from '../utils/simTypes';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { ArtifactControls } from './ArtifactControls';
@@ -56,6 +56,8 @@ type Props = {
   updateIctalParams: (toggleId: string, patch: Partial<IctalParams>) => void;
   artifactParams: ArtifactParams;
   updateArtifactParams: (patch: Partial<ArtifactParams>) => void;
+  patternOptions: PatternOptions;
+  updatePatternOptions: (patch: Partial<PatternOptions>) => void;
   speed: number;
   setSpeed: (v: Speed) => void;
   sensitivity: number;
@@ -111,6 +113,7 @@ export function ControlPanel({
   activePatterns, togglePattern,
   ictalParams, updateIctalParams,
   artifactParams, updateArtifactParams,
+  patternOptions, updatePatternOptions,
   speed, setSpeed,
   sensitivity, setSensitivity,
   patientState, setPatientState,
@@ -353,6 +356,57 @@ export function ControlPanel({
                               </TooltipContent>
                             </Tooltip>
                           </div>
+                          {(p.id.startsWith('focal-spikes-') || FOCAL_ICTAL_IDS.has(p.id)) && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Focus</Label>
+                              <div className="flex gap-1">
+                                {([['under', 'Under electrode'], ['between', 'Between two']] as const).map(([f, label]) => (
+                                  <button key={f} onClick={() => updatePatternOptions({ focalPlacement: f })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                      patternOptions.focalPlacement === f
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {p.id === 'gtc-ictal' && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Muscle artifact</Label>
+                              <div className="flex gap-1">
+                                {([[true, 'On'], [false, 'Off']] as const).map(([m, label]) => (
+                                  <button key={label} onClick={() => updatePatternOptions({ seizureMuscle: m })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                      (patternOptions.seizureMuscle ?? false) === m
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {p.id === 'posts' && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Form</Label>
+                              <div className="flex gap-1">
+                                {(['singles', 'trains'] as const).map(f => (
+                                  <button key={f} onClick={() => updatePatternOptions({ postsForm: f })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors capitalize ${
+                                      patternOptions.postsForm === f
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {f}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {isIctal && on && params && (
                             <div className="pt-2 pb-1 pl-1 space-y-2">
                               {FOCAL_ICTAL_IDS.has(p.id) && (

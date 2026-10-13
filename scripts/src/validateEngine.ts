@@ -20,7 +20,7 @@ import { BurstyOscillator } from '../../artifacts/eeg-simulator/src/engine/burst
 import { AmplifierLowPass } from '../../artifacts/eeg-simulator/src/engine/chain';
 import { traceY, ecgScale } from '../../artifacts/eeg-simulator/src/utils/displayGeometry';
 import {
-  electrodeDistanceCm, sourceUnder, buildLeadfield,
+  electrodeDistanceCm, sourceUnder, sourceBetween, buildLeadfield,
   HEAD_CENTRE, CORTICAL_SHELL, type SourceSpec, type Vec3,
 } from '../../artifacts/eeg-simulator/src/engine/forward';
 import { electrodePositions3D } from '../../artifacts/eeg-simulator/src/utils/electrodePositions3D';
@@ -41,23 +41,10 @@ import { electrodePositions3D } from '../../artifacts/eeg-simulator/src/utils/el
  * Walk the great circle between the two radial directions and bisect on the
  * distance difference; 40 halvings is far below floating-point resolution.
  */
-function midwaySource(id: string, a: string, b: string, extent: number): SourceSpec {
-  const pa = electrodePositions3D[a] as Vec3, pb = electrodePositions3D[b] as Vec3;
-  const d = (p: Vec3, q: Vec3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
-  const at = (t: number): Vec3 => {
-    const m: Vec3 = [0, 1, 2].map(i =>
-      (pa[i] - HEAD_CENTRE[i]) * (1 - t) + (pb[i] - HEAD_CENTRE[i]) * t) as Vec3;
-    const n = Math.hypot(m[0], m[1], m[2]);
-    return [0, 1, 2].map(i => HEAD_CENTRE[i] + (m[i] / n) * CORTICAL_SHELL) as Vec3;
-  };
-  // f(0) < 0 (sitting on a's ray, so nearer a); f(1) > 0. Bisect for f = 0.
-  let lo = 0, hi = 1;
-  for (let k = 0; k < 40; k++) {
-    const mid = (lo + hi) / 2, p = at(mid);
-    if (d(pa, p) - d(pb, p) < 0) lo = mid; else hi = mid;
-  }
-  return { id, pos: at((lo + hi) / 2), orientation: { kind: 'radial' }, extent };
-}
+// The construction now lives in forward.ts (`sourceBetween`), since the focal-spike
+// toggles use it too.
+const midwaySource = (id: string, a: string, b: string, extent: number): SourceSpec =>
+  sourceBetween(id, a, b, extent);
 import type { PatientState, ArtifactParams } from '../../artifacts/eeg-simulator/src/utils/simTypes';
 import {
   welch, fitAperiodic, std, kurtosis, autocorr, hilbertEnvelope, dfa, spectralPeak, skewness,
@@ -72,6 +59,12 @@ import {
 import { SimulationSource } from '../../artifacts/eeg-simulator/src/engine/adapter';
 import { MONTAGES, ALL_ELECTRODES } from '../../artifacts/eeg-simulator/src/utils/montages';
 import { commonAverage, computeChannelVoltage } from '../../artifacts/eeg-simulator/src/utils/computeChannel';
+import { markRowSizes, markRows } from '../../artifacts/eeg-simulator/src/utils/markRows';
+import { PATTERN_CATEGORIES } from '../../artifacts/eeg-simulator/src/utils/patterns';
+import {
+  TOGGLE_RULES, STATE_DEFAULTS, initialToggles, effective, violations,
+  toggle, enterState, clearToggles, setPage, quizPage,
+} from '../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { defaultArtifactParams, defaultIctalParamsMap, SPEED_VALUES, type SimSettings } from '../../artifacts/eeg-simulator/src/utils/simTypes';
 import type { ChannelDef } from '../../artifacts/eeg-simulator/src/utils/montages';
 
@@ -90,13 +83,20 @@ import { spikeSlowWave } from '../../artifacts/eeg-simulator/src/engine/sources/
 import { renderTrace } from './renderTrace';
 
 // Scratch dir for Step 23's incidental PNG evidence — not asserted on, just left
-// on disk for a reviewer to open (audit brief, ACCEPTANCE BAR §3).
-const SCRATCH = 'C:/Users/CMC/AppData/Local/Temp/claude/C--Users-CMC-Desktop-EEG-Explorer-dev-EEG-Explorer/430e9c84-cae5-4d2b-a812-86536870ba4c/scratchpad';
+// on disk for a reviewer to open (audit brief, ACCEPTANCE BAR §3). Under the OS
+// temp dir and created here. It used to be one session's scratchpad path, which
+// stopped existing when that session ended: the first render then threw ENOENT
+// and took the gate down before Steps 23, 21 and 24, the knowledge-base audit and
+// the near-bound review had run.
+const SCRATCH = join(tmpdir(), 'eeg-explorer-validate');
+mkdirSync(SCRATCH, { recursive: true });
 
 const FS = 250;
 const DT = 1 / FS;
 
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 let failures = 0;
@@ -387,6 +387,7 @@ function runEngineState(
 // channels, rather than runEngineState's raw electrodes.
 function runDisplay(
   montageId: string, state: PatientState, patterns: string[], secs: number, seed: number,
+  patternOptions?: SimSettings['patternOptions'],
 ) {
   const montage = MONTAGES[montageId];
   const settings: SimSettings = {
@@ -394,6 +395,7 @@ function runDisplay(
     activePatterns: new Set(patterns),
     ictalParams: defaultIctalParamsMap(),
     artifactParams: { ...defaultArtifactParams() },
+    patternOptions,
   };
   const src = new SimulationSource(seed, FS);
   const n = Math.floor(secs * FS);
@@ -423,6 +425,61 @@ function displayContrib(
   for (let k = 0; k < n; k++) diff[k] = on.data[ci][k] - off.data[ci][k];
   return diff;
 }
+
+/**
+ * A toggle's isolated contribution on EVERY row of a montage at once (same-seed
+ * on minus off), keyed by label. `displayContrib` above answers for one row; a
+ * claim about a field — generalized, bifrontal, confined to one chain — is a
+ * claim about all of them, and two electrodes on one reference cannot make it.
+ */
+function displayContribAll(
+  montageId: string, state: PatientState, toggle: string, secs: number, seed: number,
+): Record<string, Float64Array> {
+  const off = runDisplay(montageId, state, [], secs, seed);
+  const on = runDisplay(montageId, state, [toggle], secs, seed);
+  const out: Record<string, Float64Array> = {};
+  on.montage.channels.forEach((ch, c) => {
+    if (ch.group === 'ecg') return;
+    out[ch.label] = on.data[c].map((v, k) => v - off.data[c][k]);
+  });
+  return out;
+}
+
+/** Largest absolute sample. */
+function absPeak(x: Float64Array): number {
+  let p = 0;
+  for (let i = 0; i < x.length; i++) p = Math.max(p, Math.abs(x[i]));
+  return p;
+}
+
+/** The eight left/right pairs of homologous double-banana rows. */
+const HOMOLOGOUS_ROWS: [string, string][] = [
+  ['Fp1-F3', 'Fp2-F4'], ['F3-C3', 'F4-C4'], ['C3-P3', 'C4-P4'], ['P3-O1', 'P4-O2'],
+  ['Fp1-F7', 'Fp2-F8'], ['F7-T3', 'F8-T4'], ['T3-T5', 'T4-T6'], ['T5-O1', 'T6-O2'],
+];
+
+/**
+ * Largest side-to-side difference between homologous rows, as a fraction of the
+ * larger. learningeeg (Normal Awake) draws the line for the posterior rhythm at a
+ * 50% amplitude difference between sides; the same line is used here for any
+ * pattern taught as symmetric. What it has to absorb is real: each electrode's
+ * amplifier gain is drawn 4% either way, and a bipolar row is the difference of
+ * two such electrodes, so rows fed by one mirrored source still differ by 10-20%.
+ */
+function largestSideDifference(rows: Record<string, Float64Array>): number {
+  return Math.max(...HOMOLOGOUS_ROWS.map(([l, r]) => {
+    const a = absPeak(rows[l]), b = absPeak(rows[r]);
+    return Math.abs(a - b) / Math.max(a, b);
+  }));
+}
+
+/** Mean absolute peak over `els`, each read against the reference `ref(el)` names. */
+function meanPeakAt(rows: Record<string, Float64Array>, els: string[], ref: (e: string) => string): number {
+  return els.reduce((a, e) => a + absPeak(rows[`${e}-${ref(e)}`]), 0) / els.length;
+}
+const IPSI_EAR = (e: string) => (/[13579]$/.test(e) ? 'A1' : 'A2');
+const ANTERIOR_SITES = ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8'];
+const POSTERIOR_SITES = ['P3', 'P4', 'O1', 'O2', 'T5', 'T6'];
 
 /** Robust peak-to-peak: 99th minus 1st percentile, ignoring rare outliers. */
 function pctP2p(x: Float64Array): number {
@@ -723,13 +780,14 @@ console.log('\nPDR alpha burst salience (waxing tail):');
 // exercises the shipped sampling rather than an injected override.
 console.log('\nBackground mu as a per-subject variant (display space, bipolar-ap awake):');
 {
-  // Prevalence guard: mu is a minority finding. Reported prevalence spans
-  // roughly 20-50% of routine adult records, so this bounds the sampling to
-  // that range rather than to the exact draw engine.ts happens to make.
+  // Prevalence guard: mu is a minority finding. Published figures for a routine
+  // record run from 4% (visual review of 100 normal adults) to 22% (a sleep-EEG
+  // cohort), and the bounds are those two. They were 20-50%, a range with no
+  // source, and the draw sat at 34% inside it.
   let present = 0;
   for (let sd = 1; sd <= 2000; sd++) if (sampleSubject(sd).muFraction > 0) present++;
   check('subjects with background mu (benign variant, minority finding)',
-    present / 2000, 0.20, 0.50);
+    present / 2000, 0.04, 0.22);
 
   // (i) The invariant the reported defect was about, measured on the SHIPPED
   // sampling: take the first six subjects `sampleSubject` gives no mu, and the
@@ -965,7 +1023,7 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
    * RHYTHMIC train — there every spike is preceded by the previous cycle's slow
    * wave, so a look-back would report that neighbour instead.
    */
-  function polarity(state: PatientState, toggle: string, el: string, metric: 'lead' | 'peak'): number {
+  function polarity(state: PatientState, toggle: string, el: string, metric: 'lead' | 'peak' | 'sharp'): number {
     const on = runEngineState(SECS, POL_OPTS, state, [toggle]);
     const off = runEngineState(SECS, POL_OPTS, state, []);
     const i = on.eng.indexOf(el);
@@ -978,6 +1036,18 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
     }
     if (Math.abs(peak) < 1) return 0; // toggle never reached the generator
     if (metric === 'peak') return Math.sign(peak);
+    if (metric === 'sharp') {
+      // The sharpest point of the trace: where a sample stands furthest from the
+      // mean of its neighbours two samples (8 ms) either side. For a complex whose
+      // slow wave is the larger lobe — the 6 Hz phantom spike-wave, by definition —
+      // this names the spike, which 'peak' would not.
+      let best = 0, at = 2;
+      for (let k = 2; k < n - 2; k++) {
+        const c = Math.abs(d[k] - (d[k - 2] + d[k + 2]) / 2);
+        if (c > best) { best = c; at = k; }
+      }
+      return Math.sign(d[at] - (d[at - 2] + d[at + 2]) / 2);
+    }
     const thresh = 0.4 * Math.abs(peak);
     for (let k = Math.max(0, peakAt - Math.round(0.5 * FS)); k <= peakAt; k++) {
       if (Math.abs(d[k]) >= thresh) return Math.sign(d[k]);
@@ -1313,10 +1383,15 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
       let lo = peakAt; while (lo > 0 && Math.abs(d[lo]) >= thresh) lo--;
       let hi = peakAt; while (hi < d.length - 1 && Math.abs(d[hi]) >= thresh) hi++;
       const widthMs = ((hi - lo) / FS) * 1000;
+      // The slow wave is the largest excursion 0.08-0.4 s after the sharp peak (it
+      // peaks 0.12-0.16 s after it, and a bare sharp wave is under 1% of its own
+      // peak by 0.08 s), kept with its sign: the same polarity as the spike is
+      // what it should have, and until 2026-10-13 it had the other.
       let slow = 0;
-      const end = Math.min(d.length, peakAt + Math.round(0.6 * FS));
-      for (let k = peakAt; k < end; k++) if (d[k] > slow) slow = d[k];
-      return { widthMs, slowRatio: slow / Math.abs(peak), peak: Math.abs(peak) };
+      const from = Math.min(d.length, peakAt + Math.round(0.08 * FS));
+      const end = Math.min(d.length, peakAt + Math.round(0.4 * FS));
+      for (let k = from; k < end; k++) if (Math.abs(d[k]) > Math.abs(slow)) slow = d[k];
+      return { widthMs, slowRatio: Math.abs(slow) / Math.abs(peak), slowSign: Math.sign(slow), peak: Math.abs(peak) };
     };
     const spike = measure(iedAtT3('ied-spike'));
     const sharp = measure(iedAtT3('ied-sharp'));
@@ -1330,21 +1405,34 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
     check('ied-sharp has no after-going slow wave (IK-012)', sharp.slowRatio, 0, 0.15);
     check('ied-spike-wave carries an after-going slow wave (IK-012)', spikeWave.slowRatio, 0.3, 1.5);
     check('ied-sharp-wave carries an after-going slow wave (IK-012)', sharpWave.slowRatio, 0.3, 1.5);
+    // IFCN glossary (Kane 2017): a sharp wave "may be followed by slow wave of the
+    // same polarity"; learningeeg: an "upward going spike and wave ... is a negative
+    // ... discharge". The spike is negative here by construction, so: -1.
+    check('ied-spike-wave: the after-going slow wave has the polarity of its spike (-1; IK-012)', spikeWave.slowSign, -1, -1);
+    check('ied-sharp-wave: the after-going slow wave has the polarity of its sharp wave (-1; IK-012)', sharpWave.slowSign, -1, -1);
   }
 
   // -1 = renders UP (surface-negative), +1 = renders DOWN (surface-positive).
-  const POLARITIES: [string, PatientState, string, string, 'lead' | 'peak', number][] = [
+  const POLARITIES: [string, PatientState, string, string, 'lead' | 'peak' | 'sharp', number][] = [
     // Surface-NEGATIVE sharp transients — the epileptiform family and the
     // vertex/K-complex sharp components. All must point UP.
     ['V-wave Cz',                'awake', 'v-waves',         'Cz', 'lead', -1],
     ['K-complex Cz (sharp)',     'awake', 'k-complex',       'Cz', 'lead', -1],
     ['focal spike LT T3',        'awake', 'focal-spikes-lt', 'T3', 'lead', -1],
-    ['3 Hz gen. spike-wave Fz',  'awake', '3hz-gsw',         'Fz', 'peak', -1],
-    ['polyspike-wave Fz',        'awake', 'polyspike-wave',  'Fz', 'peak', -1],
+    // A spike-wave run swings about the baseline — troughs down, spikes and
+    // domes up — so its largest excursion says little. The spike is the
+    // sharpest thing in it.
+    ['3 Hz gen. spike-wave Fz',  'awake', '3hz-gsw',         'Fz', 'sharp', -1],
+    ['polyspike-wave Fz',        'awake', 'polyspike-wave',  'Fz', 'sharp', -1],
     ['GPEDs Cz',                 'awake', 'gpeds',           'Cz', 'peak', -1],
-    ['6 Hz phantom spike-wave Cz', 'awake', '6hz-sw',        'Cz', 'peak', -1],
+    // Posterior (FOLD) and drowsy-only since 2026-10-12, and the spike is the
+    // SMALLER lobe, so it is found by sharpness rather than by size.
+    ['6 Hz phantom spike O1',    'drowsy', '6hz-sw',         'O1', 'sharp', -1],
     // BETS is state-gated to drowsy/n1/n2 (A4 fix — see variants.ts betsSide).
     ['BETS T3',                  'drowsy', 'bets',           'T3', 'lead', -1],
+    // IFCN glossary: wickets are "spike-like monophasic surface negative" waves —
+    // the sharp side of each arch is the negative one.
+    ['wicket T3 (sharp side)',   'drowsy', 'wicket',         'T3', 'sharp', -1],
     // Surface-POSITIVE transients — named for their polarity, must point DOWN.
     ['POSTS O1',                 'awake', 'posts',           'O1', 'lead',  1],
     ['lambda O1',                'awake', 'lambda',          'O1', 'lead',  1],
@@ -1358,6 +1446,23 @@ console.log('\nDisplay polarity (negative-up: v > 0 renders DOWN):');
   for (const [label, state, toggle, el, metric, want] of POLARITIES) {
     check(`${label} renders ${want < 0 ? 'UP  ' : 'DOWN'} (${want > 0 ? '+1' : '-1'})`,
       polarity(state, toggle, el, metric), want, want);
+  }
+
+  // The WAVE of a spike-and-wave run has its spike's polarity too (morphology.ts):
+  // 110 ms after the sharpest point of a 3 Hz run — the top of the slow wave —
+  // the trace is on the same side of the baseline as the spike.
+  {
+    const on = runEngineState(SECS, POL_OPTS, 'awake', ['3hz-gsw']);
+    const off = runEngineState(SECS, POL_OPTS, 'awake', []);
+    const i = on.eng.indexOf('Fz');
+    const d = on.data[i].map((v, k) => v - off.data[i][k]);
+    const lag = Math.round(0.11 * FS);
+    let best = 0, at = 2;
+    for (let k = 2; k < d.length - 2 - lag; k++) {
+      const c = Math.abs(d[k] - (d[k - 2] + d[k + 2]) / 2);
+      if (c > best) { best = c; at = k; }
+    }
+    check('3 Hz gen. spike-wave Fz: the wave after the spike renders UP too (-1; IK-012)', Math.sign(d[at + lag]), -1, -1);
   }
 }
 
@@ -1650,7 +1755,10 @@ console.log('\nTriphasic waves (anterior-predominant, periodic):');
   const fzP2pOff = pctP2p(base.data[base.eng.indexOf('Fz')]);
   const o1P2p = pctP2p(tp.data[tp.eng.indexOf('O1')]);
   check('Fz p2p, triphasic on / off', fzP2pOn / fzP2pOff, 1.5, 60);
-  check('Fz p2p / O1 p2p (anterior-predominant)', fzP2pOn / o1P2p, 1.3, 50);
+  // Read at the frontal pole: since 2026-10-12 the wave's anterior half is a
+  // bifrontal field whose maximum is Fp1/Fp2, not the single patch under Fz this
+  // used to compare with O1.
+  check('Fp1 p2p / O1 p2p (anterior-predominant)', pctP2p(tp.data[tp.eng.indexOf('Fp1')]) / o1P2p, 1.3, 50);
 }
 
 console.log('\nGPEDs (generalised periodic discharges, ~1-2 s):');
@@ -1718,9 +1826,18 @@ console.log('\nWicket spikes (6-11 Hz bursts, temporal, drowsy only):');
   // naturally gentler than the 7-11 Hz band's, but 1.2x still decisively beats the
   // ~1.0 the old alpha-only tone set would give here.
   check('T3 6-7.5 Hz power, wicket on / off (drowsy; widened range)', t3LoOn / t3LoOff, 1.2, 1e6);
+  // eegpedia: wickets are "present in relaxed wakefulness, drowsiness, light sleep".
+  // Until 2026-10-13 the source was gated to drowsiness alone and this line
+  // asserted that the toggle did nothing awake (`T3 p2p, wicket toggle while
+  // awake (state-gated off)`).
   const wAwake = runEngineState(180, SLEEP_OPTS, 'awake', ['wicket']);
-  const t3AwakeP2p = pctP2p(wAwake.data[wAwake.eng.indexOf('T3')]);
-  check('T3 p2p, wicket toggle while awake (state-gated off)', t3AwakeP2p / baseCzP2p, 0, 1.5);
+  const wAwakeOff = runEngineState(180, SLEEP_OPTS, 'awake', []);
+  const iT3 = wAwake.eng.indexOf('T3');
+  let wAwakePeak = 0;
+  for (let k = 0; k < wAwake.data[iT3].length; k++) {
+    wAwakePeak = Math.max(wAwakePeak, Math.abs(wAwake.data[iT3][k] - wAwakeOff.data[iT3][k]));
+  }
+  check('T3 wicket burst peak while awake (EEGPEDIA: present in relaxed wakefulness too)', wAwakePeak, 30, 250, ' uV');
 }
 
 console.log('\nRMTD (monomorphic ~6 Hz, temporal, drowsy only):');
@@ -1755,12 +1872,31 @@ console.log('\nPSWY (2.5-4.5 Hz, posterior, awake only):');
     o1SlowDrowsy / o1SlowDrowsyBase, 0.7, 1.5);
 }
 
-console.log('\n6 Hz phantom spike-wave (brief, generalised, low-amplitude):');
+// The classic FOLD form: posterior maximum, low amplitude, drowsiness (learningeeg,
+// Normal Variants; StatPearls NBK555899). It used to be asserted at Cz, awake,
+// where a 50 uV spike nearly tripled the trace (2.85 against a ceiling of 3).
+console.log('\n6 Hz phantom spike-wave (FOLD: brief, posterior, low-amplitude, drowsy):');
 {
-  const s = runEngineState(180, SLEEP_OPTS, 'awake', ['6hz-sw']);
-  const czP2p = pctP2p(cz(s.data, s.eng));
-  check('Cz p2p, 6hz-sw on / off', czP2p / baseCzP2p, 1.05, 3);
-  check('Cz p2p, 6hz-sw (sanity: phantom = low amplitude)', czP2p, 10, 90, ' uV');
+  const iso = (state: PatientState, el: string) => {
+    const on = runEngineState(180, SLEEP_OPTS, state, ['6hz-sw']);
+    const off = runEngineState(180, SLEEP_OPTS, state, []);
+    const i = on.eng.indexOf(el);
+    return on.data[i].map((v, k) => v - off.data[i][k]);
+  };
+  const o1 = iso('drowsy', 'O1');
+  // Spike and wave are both negative (morphology.ts) and the wave is the larger,
+  // so the wave is the deepest point of the trace and the spike its sharpest.
+  let wave = 0, spike = 0, sharpest = 0;
+  for (let k = 0; k < o1.length; k++) wave = Math.min(wave, o1[k]);
+  for (let k = 2; k < o1.length - 2; k++) {
+    const c = Math.abs(o1[k] - (o1[k - 2] + o1[k + 2]) / 2);
+    if (c > sharpest) { sharpest = c; spike = o1[k]; }
+  }
+  check('6hz-sw O1 slow wave (phantom: low amplitude)', -wave, 10, 50, ' uV');
+  check('6hz-sw O1 spike / slow wave (StatPearls: wave of equal or greater amplitude)', spike / wave, 0.2, 1);
+  check('6hz-sw O1: spike and wave are both surface-negative (sum of the two signs, -2)', Math.sign(spike) + Math.sign(wave), -2, -2);
+  check('6hz-sw O1 / Fz (FOLD: posterior maximum)', absPeak(o1) / absPeak(iso('drowsy', 'Fz')), 2, 1e6);
+  check('6hz-sw O1, toggle while awake (state-gated off)', absPeak(iso('awake', 'O1')), 0, 1, ' uV');
 }
 
 console.log('\n14 & 6 Hz positive bursts (posterior temporal, arciform):');
@@ -1929,11 +2065,12 @@ console.log('Absence (3 Hz generalised spike-wave, frontally-max):');
 
 console.log('\nGTC (clonic discharge -> post-ictal suppression):');
 {
-  const gt = runEngineState(60, SLEEP_OPTS, 'awake', ['gtc-ictal']);
-  // Clonic discharge (clock ~10-17 s) is high-amplitude; post-ictal suppression
-  // (clock ~43-49 s, gate at 0.08) is near-flat. The contrast IS the seizure.
-  const clonic = pctP2p(win(gt, 'Fz', 10, 17));
-  const suppressed = pctP2p(win(gt, 'Fz', 43, 49));
+  const gt = runEngineState(92, SLEEP_OPTS, 'awake', ['gtc-ictal']);
+  // The seizure starts 6 s in: tonic to 16 s, clonic to 61 s, suppressed to 96 s.
+  // Clonic discharge (clock 20-55 s) is high-amplitude; post-ictal suppression
+  // (clock 70-90 s, gate at 0.08) is near-flat. The contrast IS the seizure.
+  const clonic = pctP2p(win(gt, 'Fz', 20, 55));
+  const suppressed = pctP2p(win(gt, 'Fz', 70, 90));
   check('Fz clonic p2p, gtc (high-amplitude discharge)', clonic, 120, 900, ' uV');
   check('Fz post-ictal p2p / clonic p2p (suppression)', suppressed / clonic, 0, 0.4);
 }
@@ -1951,11 +2088,10 @@ console.log('\nFocal temporal (left onset, late contralateral spread):');
   check('T4 theta late / early (contralateral spread appears)',
     t4Late / Math.max(t4Early, 1e-6), 2, 1e6);
 
-  // Phase reversal: T3 is a single RADIAL (same-sign) source — no orientation
-  // override in its sourceUnder() call — so its field doesn't stop at T3, it
-  // ripples outward with smoothly falling amplitude into the AP-chain
-  // neighbours F7 (anterior) and T5 (posterior), both carrying the SAME
-  // seizure waveform, just attenuated. A bipolar chain crossing T3 (F7-T3,
+  // Phase reversal: T3 is the maximum of one same-sign field (fields.ts,
+  // MID_TEMPORAL_REGIONAL), so the seizure doesn't stop at T3, it falls away
+  // smoothly into the AP-chain neighbours F7 (anterior) and T5 (posterior),
+  // both carrying the SAME seizure waveform, just attenuated. A bipolar chain crossing T3 (F7-T3,
   // T3-T5) subtracts the shared T3 electrode from each derivation, so the two
   // channels flanking T3 deflect in OPPOSITE directions at the same instant
   // even though the underlying pattern is identical — the textbook "similar
@@ -1969,7 +2105,9 @@ console.log('\nFocal temporal (left onset, late contralateral spread):');
   // 2026-09-22. It was read on raw potentials, i.e. against infinity, where a spurious
   // same-sign far field (the monopole forward.ts now removes) lifted F7 and T5 to 0.10 and
   // 0.07 of T3's power. No montage ever showed that: on reference-car the page had F7 ~0.04
-  // and T5 ~0.02 all along. IK-003 is marked violated for this clause.
+  // and T5 ~0.02 all along, and IK-003 stood violated for this clause until
+  // 2026-10-13, when the single patch became a regional field fitted to learningeeg's
+  // temporal seizure (beside the maximum: 0.4-0.7 of its voltage, 16-49% of its power).
   const carMid = (name: string) => winCar(ft, name, 15, 25);
   const t3Car = carMid('T3'), f7Car = carMid('F7'), t5Car = carMid('T5');
   check('referential corr T3-F7 (shared source, same polarity)', corr(t3Car, f7Car), 0.6, 1.0);
@@ -2708,12 +2846,14 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     return Math.sqrt(s);
   };
 
-  console.log('POSTS (NPK: surface-positive, 20-75 uV, 80-200 ms, singly or in trains of 4-6/s; LE: on the occipital link):');
+  console.log('POSTS (NPK: surface-positive, 20-75 uV, 80-200 ms, singly more than 1 s apart; LE: on the occipital link):');
   {
     const ref = isolated('reference-ipsi', 'posts', 180, 20);
     const o1 = ref['O1-A1'];
     const pk = peaksPast(o1, 5, 0.03, +1);
-    check('POSTS: transients in 180 s (singles and train elements)', pk.length, 40, 400);
+    // One at a time since 2026-10-12 (owner's decision; sleep.ts). NPK gives singles
+    // as "more than 1 s apart", which caps the count at one a second.
+    check('POSTS: transients in 180 s (one at a time, more than 1 s apart)', pk.length, 40, 180);
     check('POSTS O1-A1 median peak (NPK: 20-75 uV)', median(pk.map(i => o1[i])), 20, 75, ' uV');
     check('POSTS O1-A1 largest peak (NPK: up to ~120 uV)', Math.max(...pk.map(i => o1[i])), 20, 120, ' uV');
     const dur = pk.map(i => {
@@ -2723,21 +2863,35 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
       return (b - a) / FS;
     });
     check('POSTS O1-A1 median duration (NPK: 80-200 ms)', median(dur), 0.08, 0.2, ' s');
-    // Consecutive transients under 0.5 s apart belong to one train.
+    // These two replaced `POSTS within-train rate` and `POSTS share of events that
+    // are single`, which asserted the half-singles, half-trains mix the source drew
+    // until 2026-10-12.
     const gaps = pk.slice(1).map((v, k) => (v - pk[k]) / FS);
-    check('POSTS within-train rate (NPK: trains of 4-6 per second)', 1 / median(gaps.filter(g => g < 0.5)), 4, 6.5, ' Hz');
-    let events = 1, singles = 0, size = 1;
-    for (const g of gaps) {
-      if (g < 0.5) { size++; continue; }
-      if (size === 1) singles++;
-      events++; size = 1;
-    }
-    if (size === 1) singles++;
-    check('POSTS share of events that are single (NPK: singles as often as trains)', singles / events, 0.25, 0.75);
+    check('POSTS shortest interval between transients (NPK: singly, more than 1 s apart)', Math.min(...gaps), 1, Infinity, ' s');
+    check('POSTS largest change between consecutive intervals (NPK: "without periodicity"; LEARNINGEEG: not periodic past 50%)',
+      largestStep(gaps), 0.5, Infinity);
     const bip = isolated('bipolar-ap', 'posts', 120, 20);
     check('POSTS field C3-P3 / P3-O1 (LE: on the occipital link only)', peakAbs(bip['C3-P3']) / peakAbs(bip['P3-O1']), 0, 0.35);
     check('POSTS field T3-T5 / T5-O1 (LE: on the occipital link only)', peakAbs(bip['T3-T5']) / peakAbs(bip['T5-O1']), 0, 0.35);
     check('POSTS render UP on P3-O1, bipolar-ap (O1 positive is input 2)', Math.sign(bip['P3-O1'][argAbsMax(bip['P3-O1'])]), -1, -1);
+
+    // The other form, chosen with the POSTS option (sleep.ts): the same elements,
+    // in trains. NPK: "trains of up to 4-6 per second lasting about a second".
+    const trainsRun = (on: boolean) =>
+      runDisplay('reference-ipsi', 'awake', on ? ['posts'] : [], 180, 20, { postsForm: 'trains' });
+    const trOn = trainsRun(true), trOff = trainsRun(false);
+    const kO1 = trOn.montage.channels.findIndex(c => c.label === 'O1-A1');
+    const tr = trOn.data[kO1].map((v, i) => v - trOff.data[kO1][i]);
+    const trPk = peaksPast(tr, 5, 0.03, +1);
+    const trGaps = trPk.slice(1).map((v, k) => (v - trPk[k]) / FS);
+    // Consecutive transients under 0.5 s apart belong to one train.
+    const trSizes: number[] = [];
+    let trSize = 1;
+    for (const g of trGaps) { if (g < 0.5) trSize++; else { trSizes.push(trSize); trSize = 1; } }
+    trSizes.push(trSize);
+    check('POSTS trains: within-train rate (NPK: trains of 4-6 per second)', 1 / median(trGaps.filter(g => g < 0.5)), 4, 6.5, ' Hz');
+    check('POSTS trains: elements per train, median (NPK: about a second at 4-6 per second)', median(trSizes), 2, 6);
+    check('POSTS trains: O1-A1 median peak (NPK: 20-75 uV)', median(trPk.map(i => tr[i])), 20, 75, ' uV');
   }
 
   console.log('\nVertex waves (SP: surface-negative, ~100 ms, reversing at the vertex; AASM: < 0.5 s; LE: parasagittal AND central chains):');
@@ -2746,7 +2900,10 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     const cz = ref['Cz-A1'], c3 = ref['C3-A1'];
     const pk = peaksPast(cz, 20, 0.2, -1);
     check('V-waves in 180 s', pk.length, 12, 60);
-    check('V-wave Cz-A1 median negative peak (adults usually 100-150 uV)', -median(pk.map(i => cz[i])), 70, 200, ' uV');
+    // Was 70-200 against "adults usually 100-150 uV", a figure attributed to
+    // Niedermeyer at second hand. Teaching references give 50-150 uV (sleep.ts), and
+    // the source was brought down to the floor of that on 2026-10-12.
+    check('V-wave Cz-A1 median negative peak (teaching references: 50-150 uV)', -median(pk.map(i => cz[i])), 50, 150, ' uV');
     const base = pk.map(i => {
       const t = 0.1 * cz[i]; let a = i, b = i;
       while (a > 0 && cz[a] < t) a--;
@@ -3006,7 +3163,21 @@ console.log('Absence (display space, reference-car): peak frequency lands in the
   const fzPow = winPower(fzWin, 2.5, 3.5), o1Pow = winPower(o1Win, 2.5, 3.5);
   check('absence O1-AVG carries real 2.5-3.5 Hz power (generalised field reaches occiput)',
     o1Pow, 1, 1e6, ' uV^2');
-  check('absence Fz-AVG / O1-AVG 2.5-3.5 Hz power (frontal-max survives CAR)', fzPow / o1Pow, 1.1, 20);
+  // Frontal predominance is read on an EAR reference, not the common average.
+  // This used to be `Fz-AVG / O1-AVG ... (frontal-max survives CAR)`, and it does
+  // not survive: the average of a generalized discharge IS the discharge, so
+  // subtracting it hands the occiput an inverted copy about as large as what is
+  // left at Fz (measured 0.96 once the field was generalized, 2026-10-12). The old
+  // check passed only while the "generalized" discharge was a frontal-midline
+  // focus too small to move the average. ACNS 2021 §C.1.a names the ipsilateral
+  // ear for this judgement, and "frontally predominant" is a 50% voltage excess —
+  // 2.25 in power.
+  {
+    const win = (label: string) => displayContrib('reference-ipsi', 'awake', 'absence-ictal', label, 12, 7)
+      .subarray(Math.floor(4.5 * FS), Math.floor(8 * FS));
+    check('absence Fz-A1 / O1-A1 2.5-3.5 Hz power, reference-ipsi (ACNS: frontally predominant from 2.25)',
+      winPower(win('Fz-A1'), 2.5, 3.5) / winPower(win('O1-A1'), 2.5, 3.5), 2.25, Infinity);
+  }
 
   // IK-017: absence returns INSTANTLY to baseline at offset — no post-ictal
   // slowing. A prior port added a ~2 s fading delta burst after each discharge;
@@ -3040,27 +3211,27 @@ console.log('\nGTC (display space, reference-car): recruiting -> clonic slowing 
   // neuralGate), not just this generator's own output — an on-minus-off diff
   // would net out the very suppression being measured. Read the raw on-run
   // instead, exactly as Step 16's raw-space check does, through the montage/
-  // CAR transform. GTC_DELAY = 6 s, so absolute time = 6 + cycle: recruiting
-  // is t in [6,10), clonic [10,24), decrescendo [24,41), suppression [41,56).
-  const gt = runDisplay('reference-car', 'awake', ['gtc-ictal'], 60, 11);
+  // CAR transform. GTC_DELAY = 6 s, so absolute time = 6 + cycle: the tonic
+  // phase is t in [6,16), clonic [16,61), suppression [61,96).
+  const gt = runDisplay('reference-car', 'awake', ['gtc-ictal'], 92, 11);
   const fzIdx = gt.montage.channels.findIndex((c) => c.label === 'Fz-AVG');
   const czIdx = gt.montage.channels.findIndex((c) => c.label === 'Cz-AVG');
   const slice = (ch: number, t0: number, t1: number) =>
     gt.data[ch].subarray(Math.floor(t0 * FS), Math.floor(t1 * FS));
 
-  // gate()==1 throughout recruiting (cycle < 35), so on-minus-off cleanly
+  // gate()==1 until the clonic phase ends, so on-minus-off cleanly
   // isolates the recruiting rhythm's own contribution here — unlike the
   // suppression checks below, nothing is confounded by scaling the background.
   // A ratio against the raw run's own delta band (as opposed to this isolated
   // diff) is unstable: awake background is 1/f-shaped, so ambient low-frequency
-  // power alone can rival a still-building (env = (cycle/4)^2) beta rhythm —
+  // power alone can rival a still-building (env 0.45 -> 1) beta rhythm —
   // the isolated diff sidesteps that floor entirely. The recruiting rhythm's
   // BETA_TONES carrier runs at freqScale 1.2 (a fixed multiplier, not a sweep),
   // so — unlike the focal-temporal/frontal chirps below — spectralPeak's single
   // dominant bin is a fair read here: the 14.2 Hz tone (amplitude 1.0, the
   // tallest in BETA_TONES) scales to ~17 Hz.
-  const gtcContrib = displayContrib('reference-car', 'awake', 'gtc-ictal', 'Fz-AVG', 12, 11);
-  const recruitWin = gtcContrib.subarray(Math.floor(7 * FS), Math.floor(9.5 * FS));
+  const gtcContrib = displayContrib('reference-car', 'awake', 'gtc-ictal', 'Fz-AVG', 17, 11);
+  const recruitWin = gtcContrib.subarray(Math.floor(8 * FS), Math.floor(15.5 * FS));
   const recruitPeak = spectralPeak(welch(recruitWin, FS, 512), 10, 32);
   check('GTC Fz-AVG recruiting contribution p2p (fast recruiting rhythm, isolated)',
     pctP2p(recruitWin), 10, 200, ' uV');
@@ -3069,23 +3240,86 @@ console.log('\nGTC (display space, reference-car): recruiting -> clonic slowing 
 
   // Clonic slowing 3 -> 1.5 Hz, read as a spectral-peak drop between an early
   // and a late 3 s window inside the clonic phase.
-  const early = spectralPeak(welch(slice(fzIdx, 10.5, 13.5), FS, 512), 1, 4);
-  const late = spectralPeak(welch(slice(fzIdx, 20.5, 23.5), FS, 512), 1, 4);
+  const early = spectralPeak(welch(slice(fzIdx, 17, 20), FS, 512), 1, 4);
+  const late = spectralPeak(welch(slice(fzIdx, 56.5, 59.5), FS, 512), 1, 4);
   check('GTC Fz-AVG clonic peak frequency, early window', early.freq, 2.2, 3.2, ' Hz');
   check('GTC Fz-AVG clonic peak frequency, late window (slows toward 1.5 Hz)', late.freq, 1.2, 2.2, ' Hz');
   check('GTC Fz-AVG clonic peak frequency, early / late (organised slowing)', early.freq / late.freq, 1.15, 1e6);
 
-  // Generalised: the clonic discharge must be scalp-visible beyond Fz, at Cz.
-  const czClonic = pctP2p(slice(czIdx, 12, 22));
-  const czBaseline = pctP2p(slice(czIdx, 0, 5));
-  check('GTC Cz-AVG clonic / pre-ictal p2p (generalised field reaches Cz)', czClonic / czBaseline, 1.5, 1e6);
+  // Generalised: the clonic discharge must be scalp-visible beyond Fz, at Cz —
+  // read against the ear. On the common average Cz sits almost exactly on the mean
+  // of a generalized field and is nearly nulled (read skill: "not reference-car for
+  // amplitude topography"); the same seizure measured 1.55 there against a floor of
+  // 1.5 while Cz-A1 carried several times its background.
+  {
+    const ear = runDisplay('reference-ipsi', 'awake', ['gtc-ictal'], 32, 11);
+    const cz = ear.data[ear.montage.channels.findIndex((c) => c.label === 'Cz-A1')];
+    const p2p = (t0: number, t1: number) => pctP2p(cz.subarray(Math.floor(t0 * FS), Math.floor(t1 * FS)));
+    check('GTC Cz-A1 clonic / pre-ictal p2p, reference-ipsi (generalised field reaches Cz)', p2p(20, 30) / p2p(0, 5), 1.5, 1e6);
+  }
 
   // Post-ictal suppression: near-flat against the clonic discharge, on the
   // display-space channel — the display-space pin for the raw-space check
   // already covering IK's "post-ictal attenuation, not silence".
-  const clonicP2p = pctP2p(slice(fzIdx, 11, 24));
-  const suppP2p = pctP2p(slice(fzIdx, 45, 49));
+  const clonicP2p = pctP2p(slice(fzIdx, 17, 60));
+  const suppP2p = pctP2p(slice(fzIdx, 70, 90));
   check('GTC Fz-AVG post-ictal / clonic p2p (display-space suppression)', suppP2p / clonicP2p, 0, 0.4);
+}
+
+console.log('\nGTC muscle artifact (the option on): throughout the tonic phase, a burst with each jerk, none after:');
+{
+  // learningeeg, Seizures: the tonic phase "on EEG appears as significant and usually
+  // diffuse myogenic artifact", then "intermittent bursts of spike / polyspike and
+  // slow waves, with each spike burst corresponding to the clonic jerks". Its
+  // Artifacts chapter has muscle "minimal at vertex". Read as the difference between
+  // the same seizure with its muscle and without, so that only the muscle is
+  // measured. Script time: tonic 6-16 s, clonic 16-61 s, suppressed after.
+  const withMuscle = runDisplay('bipolar-ap', 'awake', ['gtc-ictal'], 80, 11, { seizureMuscle: true });
+  const alone = runDisplay('bipolar-ap', 'awake', ['gtc-ictal'], 80, 11);
+  const off = runDisplay('bipolar-ap', 'awake', [], 80, 11);
+  const labels = alone.montage.channels.filter((c) => c.group !== 'ecg').map((c) => c.label);
+  const at = (label: string) => alone.montage.channels.findIndex((c) => c.label === label);
+  const muscle = (label: string) => withMuscle.data[at(label)].map((v, i) => v - alone.data[at(label)][i]);
+  const seizure = (label: string) => alone.data[at(label)].map((v, i) => v - off.data[at(label)][i]);
+  const rmsIn = (x: Float64Array, t0: number, t1: number) => {
+    const w = x.subarray(Math.floor(t0 * FS), Math.floor(t1 * FS));
+    return Math.sqrt(w.reduce((a, v) => a + v * v, 0) / w.length);
+  };
+  check('GTC muscle / seizure rhythm RMS on T3-T5, tonic phase (LEARNINGEEG: "significant ... myogenic artifact")',
+    rmsIn(muscle('T3-T5'), 8, 15) / rmsIn(seizure('T3-T5'), 8, 15), 1, 50);
+  const tonic = labels.map((l) => rmsIn(muscle(l), 8, 15));
+  check('GTC muscle: rows carrying at least a quarter of the largest row, tonic phase, of 18 (LEARNINGEEG: "usually diffuse")',
+    tonic.filter((v) => v >= 0.25 * Math.max(...tonic)).length, 10, 18);
+  check('GTC muscle on Cz-Pz / on T3-T5, tonic phase (LEARNINGEEG: muscle is "minimal at vertex")',
+    rmsIn(muscle('Cz-Pz'), 8, 15) / rmsIn(muscle('T3-T5'), 8, 15), 0, 0.35);
+
+  // Clonic: the muscle's envelope (rectified, smoothed over 40 ms) on T3-T5.
+  const m = muscle('T3-T5');
+  const env = new Float64Array(m.length);
+  const half = Math.round(0.02 * FS);
+  for (let i = 0; i < m.length; i++) {
+    let a = 0, k = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(m.length - 1, i + half); j++) { a += Math.abs(m[j]); k++; }
+    env[i] = a / k;
+  }
+  const clonic = Array.from(env.subarray(20 * FS, 50 * FS)).sort((a, b) => a - b);
+  const high = clonic[Math.floor(clonic.length * 0.95)];
+  check('GTC muscle: share of the clonic phase with the muscle let go (under 15% of its bursts)',
+    clonic.filter((v) => v < 0.15 * high).length / clonic.length, 0.35, 0.85);
+  // One burst to a jerk: counted where the envelope rises through 30% of its bursts'
+  // height, and held to the bounds the discharge's own rate is held to above.
+  const burstsPerSec = (t0: number, t1: number) => {
+    let n = 0, up = false, last = -Infinity;
+    for (let i = Math.floor(t0 * FS); i < Math.floor(t1 * FS); i++) {
+      const hit = env[i] > 0.3 * high;
+      if (hit && !up && i - last > 0.15 * FS) { n++; last = i; }
+      up = hit;
+    }
+    return n / (t1 - t0);
+  };
+  check('GTC muscle bursts per second, early clonic (one to a jerk: ~3)', burstsPerSec(17, 23), 2.2, 3.2, ' /s');
+  check('GTC muscle bursts per second, late clonic (slowing with the jerks: ~1.5)', burstsPerSec(53.5, 59.5), 1.2, 2.2, ' /s');
+  check('GTC muscle RMS on T3-T5 after the seizure (flaccid: none)', rmsIn(m, 62, 80), 0, 0.01, ' uV');
 }
 
 console.log('\nFocal temporal (display space, reference-car T3-AVG): onset theta evolves 6 -> 3.5 Hz:');
@@ -3268,7 +3502,7 @@ console.log('\nNormal amplitude ranges by region (LEARNINGEEG-STUDY.md §1/§3):
 //
 // Parietal >= central IS asserted now (2026-09-11). It was left out when every
 // subject carried an always-on, full-strength mu and (P3+P4)/(C3+C4) read 0.95.
-// Mu is now a per-subject trait (engine.ts sampleSubject: 34% of subjects), and
+// Mu is now a per-subject trait (engine.ts sampleSubject: 34% of subjects then, 16% since 2026-10-13), and
 // over 8 subjects the ratio reads 1.05-1.62 (mean 1.27): lowest, 1.05-1.10, in the
 // three subjects with mu — a central rhythm raises the central rows, as it should —
 // and 1.26-1.62 in the five without.
@@ -3372,25 +3606,31 @@ console.log('\n=== Step 21: epileptiform in DISPLAY space (A6 audit) ===\n');
 
 console.log('IK-012 (spike/sharp duration, ±slow wave) survives the montage transform, bipolar-ap T3-T5:');
 {
-  // Same measure() as Step 20's BETS check: 10%-of-peak base width, and the
-  // after-going slow wave measured as the largest positive excursion within
-  // 0.6 s of the peak, divided by |peak|.
-  const measure = (d: Float64Array) => {
+  // The base width at 10% of the peak, and the after-going slow wave: the largest
+  // excursion 0.08-0.4 s after the peak, with its sign, as a fraction of the peak.
+  //
+  // `level` is where the width is read. A bare spike or sharp wave is read at 10%
+  // of its peak. One with a slow wave cannot be — the slow wave has the same
+  // polarity and starts at once, so the trace does not come back to 10% between
+  // them — and is read at half height instead, then scaled to the 10% base of the
+  // same Gaussian (4.292 / 2.355).
+  const measure = (d: Float64Array, level = 0.1) => {
     let peak = 0, peakAt = 0;
     for (let k = 0; k < d.length; k++) if (d[k] < peak) { peak = d[k]; peakAt = k; }
-    const thresh = 0.1 * Math.abs(peak);
+    const thresh = level * Math.abs(peak);
     let lo = peakAt; while (lo > 0 && Math.abs(d[lo]) >= thresh) lo--;
     let hi = peakAt; while (hi < d.length - 1 && Math.abs(d[hi]) >= thresh) hi++;
-    const widthMs = ((hi - lo) / FS) * 1000;
+    const widthMs = ((hi - lo) / FS) * 1000 * (level === 0.1 ? 1 : 4.292 / 2.355);
     let slow = 0;
-    const end = Math.min(d.length, peakAt + Math.round(0.6 * FS));
-    for (let k = peakAt; k < end; k++) if (d[k] > slow) slow = d[k];
-    return { widthMs, slowRatio: slow / Math.abs(peak), peak: Math.abs(peak) };
+    const from = Math.min(d.length, peakAt + Math.round(0.08 * FS));
+    const end = Math.min(d.length, peakAt + Math.round(0.4 * FS));
+    for (let k = from; k < end; k++) if (Math.abs(d[k]) > Math.abs(slow)) slow = d[k];
+    return { widthMs, slowRatio: Math.abs(slow) / Math.abs(peak), slowSign: Math.sign(slow), peak: Math.abs(peak) };
   };
   const spike = measure(displayContrib('bipolar-ap', 'awake', 'ied-spike', 'T3-T5', 180, 7));
   const sharp = measure(displayContrib('bipolar-ap', 'awake', 'ied-sharp', 'T3-T5', 180, 7));
-  const spikeWave = measure(displayContrib('bipolar-ap', 'awake', 'ied-spike-wave', 'T3-T5', 180, 7));
-  const sharpWave = measure(displayContrib('bipolar-ap', 'awake', 'ied-sharp-wave', 'T3-T5', 180, 7));
+  const spikeWave = measure(displayContrib('bipolar-ap', 'awake', 'ied-spike-wave', 'T3-T5', 180, 7), 0.5);
+  const sharpWave = measure(displayContrib('bipolar-ap', 'awake', 'ied-sharp-wave', 'T3-T5', 180, 7), 0.5);
   check('ied-spike T3-T5 base width (IK-012: 20-70 ms)', spike.widthMs, 20, 70, ' ms');
   check('ied-sharp T3-T5 base width (IK-012: 70-200 ms)', sharp.widthMs, 70, 200, ' ms');
   check('ied-spike T3-T5 has no after-going slow wave', spike.slowRatio, 0, 0.15);
@@ -3399,6 +3639,9 @@ console.log('IK-012 (spike/sharp duration, ±slow wave) survives the montage tra
   check('ied-sharp-wave T3-T5 base width stays sharp-length (~70-200 ms)', sharpWave.widthMs, 70, 200, ' ms');
   check('ied-spike-wave T3-T5 HAS an after-going slow wave', spikeWave.slowRatio, 0.3, 1.5);
   check('ied-sharp-wave T3-T5 HAS an after-going slow wave', sharpWave.slowRatio, 0.3, 1.5);
+  // T3 is input 1 of T3-T5, so the spike points up there, and so does its slow wave.
+  check('ied-spike-wave T3-T5: the slow wave deflects the same way as its spike (-1; IK-012)', spikeWave.slowSign, -1, -1);
+  check('ied-sharp-wave T3-T5: the slow wave deflects the same way as its sharp wave (-1; IK-012)', sharpWave.slowSign, -1, -1);
 }
 
 console.log('\nIK-003 case (a): a focal SPIKE source produces a phase reversal AT the electrode it peaks under, bipolar-ap:');
@@ -3465,6 +3708,94 @@ console.log('\nIK-003 case (b): a focal SPIKE source anchored MIDWAY between two
   check('T6-O2 decays relative to T4-T6 (falloff with distance)', Math.abs(pk4) / Math.abs(pk3), 0, 0.5);
 }
 
+// The same signature from a toggle a learner can switch on: the focal-spike
+// toggles' Focus option puts the source midway between the focus electrode and
+// its neighbour up the chain (2026-10-13). Read through the whole display path,
+// recording chain included — so the flat link is flat to within the amplifiers'
+// gain mismatch, not to zero.
+console.log('\nIsopotential from a toggle: focal spikes with the focus BETWEEN two electrodes (IK-003 case b):');
+for (const [toggle, flat, above, below, beyond] of [
+  ['focal-spikes-lt', 'F7-T3', 'Fp1-F7', 'T3-T5', 'T5-O1'],
+  ['focal-spikes-rt', 'F8-T4', 'Fp2-F8', 'T4-T6', 'T6-O2'],
+  ['focal-spikes-lf', 'F3-C3', 'Fp1-F3', 'C3-P3', 'P3-O1'],
+] as const) {
+  const on = runDisplay('bipolar-ap', 'awake', [toggle], 60, 9, { focalPlacement: 'between' });
+  const off = runDisplay('bipolar-ap', 'awake', [], 60, 9, { focalPlacement: 'between' });
+  const peakOn = (label: string) => {
+    const k = on.montage.channels.findIndex(c => c.label === label);
+    let p = 0;
+    for (let i = 0; i < on.data[k].length; i++) {
+      const v = on.data[k][i] - off.data[k][i];
+      if (Math.abs(v) > Math.abs(p)) p = v;
+    }
+    return p;
+  };
+  const pFlat = peakOn(flat), pAbove = peakOn(above), pBelow = peakOn(below), pBeyond = peakOn(beyond);
+  check(`${toggle}, focus between: ${flat} is near-isoelectric against its flanks`,
+    Math.abs(pFlat) / Math.max(Math.abs(pAbove), Math.abs(pBelow)), 0, 0.25);
+  check(`${toggle}, focus between: ${above} and ${below} deflect OPPOSITE ways`, Math.sign(pAbove) * Math.sign(pBelow), -1, -1);
+  check(`${toggle}, focus between: ${beyond} continues the way of ${below}, smaller`,
+    Math.sign(pBelow) * Math.sign(pBeyond) * (Math.abs(pBeyond) < Math.abs(pBelow) ? 1 : 0), 1, 1);
+  check(`${toggle}, focus between: the discharge is on the page (${below} peak)`, Math.abs(pBelow), 15, 400, ' uV');
+}
+
+// The focal SEIZURES have the same option. A seizure is a rhythm, not a transient,
+// so the peaks' signs mean nothing; the links are compared over the whole
+// discharge — by size for the flat one, by correlation for the ones either side.
+for (const [toggle, flat, above, below, beyond] of [
+  ['focal-temporal-ictal', 'F7-T3', 'Fp1-F7', 'T3-T5', 'T5-O1'],
+  ['focal-frontal-ictal', 'F3-C3', 'Fp1-F3', 'C3-P3', 'P3-O1'],
+] as const) {
+  const on = runDisplay('bipolar-ap', 'awake', [toggle], 40, 9, { focalPlacement: 'between' });
+  const off = runDisplay('bipolar-ap', 'awake', [], 40, 9, { focalPlacement: 'between' });
+  const row = (label: string) => {
+    const k = on.montage.channels.findIndex(c => c.label === label);
+    return on.data[k].map((v, i) => v - off.data[k][i]);
+  };
+  const rms = (x: Float64Array) => Math.sqrt(x.reduce((s, v) => s + v * v, 0) / x.length);
+  const rFlat = row(flat), rAbove = row(above), rBelow = row(below), rBeyond = row(beyond);
+  check(`${toggle}, focus between: ${flat} stays near-isoelectric against its flanks (RMS over the seizure)`,
+    rms(rFlat) / Math.max(rms(rAbove), rms(rBelow)), 0, 0.25);
+  check(`${toggle}, focus between: ${above} vs ${below} correlation (the flanks oppose)`, corr(rAbove, rBelow), -1.0001, -0.4);
+  check(`${toggle}, focus between: ${below} vs ${beyond} correlation (continues the same way past the focus)`, corr(rBelow, rBeyond), 0.4, 1.0001);
+  // Smaller than the row before it, and by no fixed factor: on learningeeg's left
+  // temporal seizure the row past the focus (T5-O1) is 0.75 of the one before it
+  // (0.69 against 0.92 of Fp1-F7). The ceiling was 0.6, with no source.
+  check(`${toggle}, focus between: ${beyond} / ${below} RMS (falls off with distance)`, rms(rBeyond) / rms(rBelow), 0, 0.9);
+  check(`${toggle}, focus between: the seizure is on the page (${below} RMS)`, rms(rBelow), 5, 300, ' uV');
+}
+
+// The temporal seizure against the figure its field is fitted to: learningeeg,
+// Seizures, the left temporal focal seizure (page 2), every row traced and read at
+// the seizure's own frequency for the share that is in step with a reference row,
+// signed. One source gives every row the same waveform, so here that share is the
+// row's on-minus-off contribution projected on the reference row's. +-0.3 is the
+// tolerance used for the other figure read with this tracer (the LPEDs); nothing
+// better is known about this one.
+console.log('\nFocal temporal seizure: a region, as on the learningeeg figure:');
+for (const [placement, ref, rows] of [
+  // Early in the figure's seizure (2.7 Hz) the maximum is a plateau across F7 and T3.
+  ['between', 'Fp1-F7', [['T3-T5', -0.92], ['T5-O1', -0.69], ['F3-C3', -0.30], ['C3-P3', -0.23], ['Fp1-F3', 0.18]]],
+  // Late (2.35 Hz) it is at T3. Only the link above the focus is held to the figure:
+  // the outer rows are kept smaller than the figure's on purpose (fields.ts, MID).
+  ['under', 'T3-T5', [['F7-T3', -0.74]]],
+] as const) {
+  const on = runDisplay('bipolar-ap', 'awake', ['focal-temporal-ictal'], 40, 9, { focalPlacement: placement });
+  const off = runDisplay('bipolar-ap', 'awake', [], 40, 9, { focalPlacement: placement });
+  const row = (label: string) => {
+    const k = on.montage.channels.findIndex(c => c.label === label);
+    return on.data[k].map((v, i) => v - off.data[k][i]);
+  };
+  const r = row(ref);
+  for (const [label, figure] of rows) {
+    const x = row(label);
+    let a = 0, b = 0;
+    for (let i = 0; i < x.length; i++) { a += x[i] * r[i]; b += r[i] * r[i]; }
+    check(`focal-temporal-ictal, focus ${placement}: ${label} in step with ${ref} (LEARNINGEEG figure: ${figure})`,
+      a / b, Math.round((figure - 0.3) * 100) / 100, Math.round((figure + 0.3) * 100) / 100);
+  }
+}
+
 console.log('\n3 Hz GSW: ~3 Hz, frontally-dominant, generalised/bilateral, spike-then-slow, bipolar-ap:');
 {
   const fzcz = displayContrib('bipolar-ap', 'awake', '3hz-gsw', 'Fz-Cz', 60, 11);
@@ -3478,15 +3809,24 @@ console.log('\n3 Hz GSW: ~3 Hz, frontally-dominant, generalised/bilateral, spike
   check('3hz-gsw generalised/bilateral: Fp1-F3 p2p ~= Fp2-F4 p2p (symmetric, unlike a focal spike)',
     pctP2p(fp1f3) / pctP2p(fp2f4), 0.6, 1.6);
 
-  // Spike-then-slow within one ~333 ms cycle: the sharp component leads, the
-  // after-going slow wave follows within the same cycle, not the next one.
-  let peak = 0, peakAt = 0;
-  for (let k = 0; k < fzcz.length; k++) if (fzcz[k] < peak) { peak = fzcz[k]; peakAt = k; }
-  let slowMax = 0, slowAt = 0;
-  const winEnd = Math.min(fzcz.length, peakAt + Math.round(0.25 * FS));
-  for (let k = peakAt; k < winEnd; k++) if (fzcz[k] > slowMax) { slowMax = fzcz[k]; slowAt = k; }
-  check('3hz-gsw Fz-Cz: after-going slow wave follows the spike within the same ~333 ms cycle',
-    (slowAt - peakAt) / FS * 1000, 20, 250, ' ms');
+  // Spike-then-slow within one ~333 ms cycle: the sharp component leads and its
+  // slow wave follows within the same cycle, on the same side of the baseline
+  // (IK-012). The spike is found as the sharpest point of the run, since spike
+  // and dome are about the same height; the slow wave is the highest point of
+  // the trace 50-200 ms after it. On Fz-Cz the discharge is larger at Fz, input
+  // 1, so both are negative and point up.
+  const lead = Math.round(0.2 * FS);
+  let sharpest = 0, spikeAt = 2;
+  for (let k = 2; k < fzcz.length - 2 - lead; k++) {
+    const c = Math.abs(fzcz[k] - (fzcz[k - 2] + fzcz[k + 2]) / 2);
+    if (c > sharpest) { sharpest = c; spikeAt = k; }
+  }
+  let slowAt = spikeAt + Math.round(0.05 * FS);
+  for (let k = slowAt; k <= spikeAt + lead; k++) if (fzcz[k] < fzcz[slowAt]) slowAt = k;
+  check('3hz-gsw Fz-Cz: the slow wave peaks after its spike, within the same ~333 ms cycle',
+    (slowAt - spikeAt) / FS * 1000, 60, 180, ' ms');
+  check('3hz-gsw Fz-Cz: spike and slow wave deflect the same way, both up (sum of the two signs, -2)',
+    Math.sign(fzcz[spikeAt]) + Math.sign(fzcz[slowAt]), -2, -2);
 }
 
 console.log('\nPolyspike-and-slow-wave: each complex carries MULTIPLE resolvable spikes before its slow wave, bipolar-ap Fz-Cz:');
@@ -3498,15 +3838,27 @@ console.log('\nPolyspike-and-slow-wave: each complex carries MULTIPLE resolvable
   // than the isolated-spike base width, so they're counted as local minima
   // dipping back below a relative threshold, not as separate threshold-
   // crossing runs (which would merge adjacent polyspikes into one).
+  //
+  // Since 2026-10-13 the polyspikes rise out of a trough and are followed by a
+  // slow wave of their own polarity, so the complex's largest excursion is no
+  // longer one of them and a fixed level no longer separates them from the
+  // rest. They are found by what makes them spikes: each is a local minimum
+  // standing clear of the trace 16 ms either side of it, by at least a
+  // twentieth of the complex's swing — which the rounded slow wave never does.
+  // Counted in the one complex that holds the sharpest point of the run; its
+  // polyspikes span at most 0.16 s, and the next complex's begin 0.31 s on.
   const diff = displayContrib('bipolar-ap', 'awake', 'polyspike-wave', 'Fz-Cz', 60, 13);
-  let gPeak = 0, gAt = 0;
-  for (let k = 0; k < diff.length; k++) if (Math.abs(diff[k]) > Math.abs(gPeak)) { gPeak = diff[k]; gAt = k; }
-  const lo = Math.max(0, gAt - Math.round(0.05 * FS));
-  const hi = Math.min(diff.length, gAt + Math.round(0.22 * FS));
-  const thresh = 0.2 * Math.abs(gPeak);
+  // Clear of BOTH sides: the corner where a burst begins stands clear of one.
+  const stands = (k: number) => Math.min(diff[k - 4], diff[k + 4]) - diff[k];
+  let sharpAt = 4;
+  for (let k = 4; k < diff.length - 4; k++) if (stands(k) > stands(sharpAt)) sharpAt = k;
+  const lo = Math.max(4, sharpAt - Math.round(0.17 * FS));
+  const hi = Math.min(diff.length - 4, sharpAt + Math.round(0.17 * FS));
+  let top = -Infinity, bottom = Infinity;
+  for (let k = lo; k < hi; k++) { top = Math.max(top, diff[k]); bottom = Math.min(bottom, diff[k]); }
   let minimaCount = 0;
   for (let k = lo + 1; k < hi - 1; k++) {
-    if (diff[k] < -thresh && diff[k] <= diff[k - 1] && diff[k] <= diff[k + 1]) minimaCount++;
+    if (diff[k] < diff[k - 1] && diff[k] <= diff[k + 1] && stands(k) >= 0.05 * (top - bottom)) minimaCount++;
   }
   check('polyspike-wave Fz-Cz: distinct spikes resolvable in one complex (epileptiform.ts: 2-5 polyspikes)',
     minimaCount, 2, 5);
@@ -3605,6 +3957,20 @@ function eventIntervals(x: Float64Array, thresholdFrac: number, refractorySec: n
   return intervals;
 }
 
+/**
+ * Largest fractional change from one inter-discharge interval to the next.
+ * learningeeg (Physiology & Terminology, Rhythmicity & Periodicity): a pattern
+ * whose interval varies by 25-50% is quasi-periodic, and by more than 50% is not
+ * periodic at all — so a pattern taught as periodic keeps every step under 25%.
+ */
+function largestStep(intervals: number[]): number {
+  let worst = 0;
+  for (let i = 1; i < intervals.length; i++) {
+    worst = Math.max(worst, Math.abs(intervals[i] - intervals[i - 1]) / intervals[i - 1]);
+  }
+  return worst;
+}
+
 // No existing primitive scans a cross-correlation across a range of lags (the
 // DSP module's autocorr is single-signal only); this is the standard way to
 // find the timing offset between two related channels for the triphasic-wave
@@ -3635,12 +4001,24 @@ function bestLag(a: Float64Array, b: Float64Array, maxLagSamples: number): { lag
 console.log('FIRDA: frontal-maximal, rhythmic ~1.5-3 Hz, reference-car:');
 {
   const fz = displayContrib('reference-car', 'awake', 'firda', 'Fz-AVG', 60, 20);
-  const o1 = displayContrib('reference-car', 'awake', 'firda', 'O1-AVG', 60, 20);
-  const t3 = displayContrib('reference-car', 'awake', 'firda', 'T3-AVG', 60, 20);
-  check('firda Fz-AVG p2p > O1-AVG p2p (frontal-maximal)', pctP2p(fz) / pctP2p(o1), 1.3, 5);
-  check('firda Fz-AVG p2p > T3-AVG p2p (frontal-maximal)', pctP2p(fz) / pctP2p(t3), 1.5, 8);
+  // Frontal maximum, read on the ear (ACNS 2021 §C.1.a: frontally predominant is
+  // anterior voltage at least 50% above posterior on, among others, an ipsilateral
+  // ear reference). These were `Fz-AVG p2p > O1-AVG / T3-AVG`: on the common
+  // average a bilateral frontal field leaves the back of the head with an inverted
+  // copy of the average, so the ratio tends to 1 however frontal the rhythm is
+  // (measured 1.04 and 1.41). The frontal pole is the maximum, so it is read there.
+  {
+    const ear = displayContribAll('reference-ipsi', 'awake', 'firda', 60, 20);
+    check('firda Fp1-A1 p2p / O1-A1 p2p, reference-ipsi (ACNS: frontally predominant from 1.5)',
+      pctP2p(ear['Fp1-A1']) / pctP2p(ear['O1-A1']), 1.5, Infinity);
+    check('firda Fp1-A1 p2p / T3-A1 p2p, reference-ipsi (frontal, not temporal)',
+      pctP2p(ear['Fp1-A1']) / pctP2p(ear['T3-A1']), 1.5, Infinity);
+  }
   const pk = spectralPeak(welch(fz, FS, 2048), 1, 4);
-  check('firda Fz-AVG discharge frequency (LEARNINGEEG: ~1.5-3 Hz)', pk.freq, 1.5, 3.0, ' Hz');
+  // learningeeg gives no band beyond "delta" and shows one example at 1.5 Hz; the
+  // 1.5-3 Hz here is the conventional figure for FIRDA, and this label used to
+  // credit learningeeg with it.
+  check('firda Fz-AVG discharge frequency (delta; conventionally 1.5-3 Hz, learningeeg example 1.5 Hz)', pk.freq, 1.5, 3.0, ' Hz');
   check('firda Fz-AVG spectral peak is tight (rhythmic, not polymorphic)', pk.fwhm, 0, 1.2, ' Hz');
   const ac = autocorr(fz, Math.round(FS * 3));
   let bestLagIdx = -1, bestVal = -1;
@@ -3715,25 +4093,105 @@ console.log('\nGPEDs: periodic, roughly regular interval, generalized, reference
   const iv = eventIntervals(cz, 0.3, 0.5);
   const mean = iv.reduce((a, b) => a + b, 0) / iv.length;
   const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) ** 2, 0) / iv.length);
-  check('gpeds Cz-AVG mean inter-discharge interval (LEARNINGEEG: periodic, roughly 1-2.5 s)', mean, 1.0, 2.5, ' s');
+  // The old label credited learningeeg with "roughly 1-2.5 s". Its "1-2.5" is in
+  // HERTZ, and is where GPDs enter the ictal-interictal continuum; the same bounds
+  // read as an interval say the opposite — slower than 1 Hz, below that range.
+  check('gpeds Cz-AVG mean inter-discharge interval (no faster than 1 Hz: below the ictal-interictal continuum)', mean, 1.0, 2.5, ' s');
   check('gpeds Cz-AVG interval coefficient of variation stays low (periodic, not random)', sd / mean, 0, 0.35);
   const o1 = displayContrib('reference-car', 'awake', 'gpeds', 'O1-AVG', 120, 20);
   check('gpeds present at O1-AVG too (generalized, not focal)', pctP2p(o1), 15, 1e6, ' uV');
   check('gpeds Cz-AVG / O1-AVG p2p ratio stays within a generalized (not sharply focal) range', pctP2p(cz) / pctP2p(o1), 1, 6);
+  // ACNS 2021 §C.2.a: "nearly regular" is a cycle length varying by < 50% from one
+  // cycle to the next in most (> 50%) cycle pairs. The CV above is this file's own
+  // yardstick; this is the definition's.
+  let regularPairs = 0;
+  for (let i = 1; i < iv.length; i++) if (Math.abs(iv[i] - iv[i - 1]) / iv[i - 1] < 0.5) regularPairs++;
+  check('gpeds cycle pairs varying < 50% (ACNS: periodic = most, > 0.5)', regularPairs / (iv.length - 1), 0.5, 1);
+  check('gpeds largest change between consecutive intervals (LEARNINGEEG: periodic < 25%)', largestStep(iv), 0, 0.25);
   renderTrace({ state: 'awake', patterns: ['gpeds'], montage: 'reference-car', seconds: 8, seed: 20,
     out: `${SCRATCH}/a5-gpeds-refcar.png` });
+}
+
+// A generalized discharge has to be generalized ON THE PAGE. The four checks above
+// read Cz and O1 on the common average, and passed (6.0 against a ceiling of 6)
+// while the discharge was a vertex spike: 123 uV on Fz-Cz, 25 uV on the
+// parasagittal rows and 1-2 uV on the temporal chains, because two electrodes on
+// one reference say nothing about the other seventeen. These read every row.
+//
+// Sources. ACNS 2021 (Hirsch et al., J Clin Neurophysiol 38:1) §C.1.a: generalized
+// is "any bilaterally synchronous and symmetric pattern"; a generalized pattern is
+// "midline predominant" when midline voltage is >= 50% above parasagittal on a
+// common average, and frontally or occipitally predominant on the same 50% rule,
+// read on (among others) an ipsilateral ear reference. learningeeg's two GPD
+// figures (Rhythmicity & Periodicity), read with read-lab's rowtable.py: the
+// smallest of the eighteen double-banana rows is 0.42 and 0.53 of the largest. Both
+// pages sit above 1 row-height occupancy, where a single row's reading is not
+// admissible (read skill), so only that aggregate is used and the floor is set
+// under it, at a third.
+console.log('\nGPEDs: generalized on the page — every row, both sides, no predominance (ACNS 2021; LEARNINGEEG figures):');
+{
+  const bip = displayContribAll('bipolar-ap', 'awake', 'gpeds', 60, 20);
+  const rows = Object.values(bip).map(absPeak);
+  check('gpeds smallest / largest row of the double banana (LEARNINGEEG figures: 0.42, 0.53)',
+    Math.min(...rows) / Math.max(...rows), 1 / 3, 1);
+  check('gpeds largest left/right difference between homologous rows (LEARNINGEEG: over 50% is abnormal)',
+    largestSideDifference(bip), 0, 0.5);
+  check('gpeds F3-C3 vs F4-C4 correlation (ACNS: bilaterally synchronous)',
+    corr(bip['F3-C3'], bip['F4-C4']), 0.9, 1.0001);
+  const car = displayContribAll('reference-car', 'awake', 'gpeds', 60, 20);
+  check('gpeds midline / parasagittal voltage, reference-car (ACNS: "midline predominant" from 1.5)',
+    meanPeakAt(car, ['Fz', 'Cz', 'Pz'], () => 'AVG') / meanPeakAt(car, ['F3', 'F4', 'C3', 'C4', 'P3', 'P4'], () => 'AVG'),
+    1 / 1.5, 1.5);
+  const ipsi = displayContribAll('reference-ipsi', 'awake', 'gpeds', 60, 20);
+  check('gpeds anterior / posterior voltage, reference-ipsi (ACNS: frontal or occipital predominance from 1.5)',
+    meanPeakAt(ipsi, ANTERIOR_SITES, IPSI_EAR) / meanPeakAt(ipsi, POSTERIOR_SITES, IPSI_EAR),
+    1 / 1.5, 1.5);
 }
 
 console.log('\nLPEDs: periodic, roughly regular interval, lateralized, bipolar-ap:');
 {
   const t3t5 = displayContrib('bipolar-ap', 'awake', 'lpeds', 'T3-T5', 120, 20);
-  const iv = eventIntervals(t3t5, 0.3, 0.4);
+  // One discharge is now a sharp wave AND its slow wave, 0.6 s in all, so the
+  // detector's refractory period has to cover the whole complex: at 0.4 s the
+  // tail of a large, stretched slow wave was still near threshold and counted
+  // as a second discharge.
+  const iv = eventIntervals(t3t5, 0.3, 0.6);
   const mean = iv.reduce((a, b) => a + b, 0) / iv.length;
   const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) ** 2, 0) / iv.length);
-  check('lpeds T3-T5 mean inter-discharge interval (LEARNINGEEG: periodic, roughly 0.8-2 s)', mean, 0.8, 2.0, ' s');
+  // learningeeg: "recurring roughly once per second"; its example is 1-1.5 Hz.
+  // The old bounds, 0.8-2 s, were not its figure.
+  check('lpeds T3-T5 mean inter-discharge interval (LEARNINGEEG: "roughly once per second")', mean, 0.67, 1.5, ' s');
   check('lpeds T3-T5 interval coefficient of variation stays low (periodic, not random)', sd / mean, 0, 0.35);
+  check('lpeds largest change between consecutive intervals (LEARNINGEEG: periodic < 25%)', largestStep(iv), 0, 0.25);
   const t4t6 = displayContrib('bipolar-ap', 'awake', 'lpeds', 'T4-T6', 120, 20);
   check('lpeds T3-T5 p2p >> T4-T6 p2p (lateralized, unlike GPEDs)', pctP2p(t3t5) / pctP2p(t4t6), 20, 1e7);
+
+  // Regional, not under one electrode: the left parasagittal chain carries it too.
+  // learningeeg's "Left temporal LPDs at 1 Hz", read row by row — the median
+  // peak-to-peak per 1 s window of the page as drawn, each left row less its
+  // right-side twin (the background's share), as a fraction of T3-T5's — gives
+  // F7-T3 0.84, F3-C3 0.68, C3-P3 0.27. Same estimator here, on the page with its
+  // background. The bounds are those figures +-0.3, which is how far the estimate
+  // moved on the figure between the median window and the 80th-percentile one
+  // (0.29, 0.23, 0.07). One patch under T3 gave F3-C3 0.09 of T3-T5 by its leadfield.
+  {
+    const page = runDisplay('bipolar-ap', 'awake', ['lpeds'], 60, 20);
+    const windowP2p = (label: string) => {
+      const x = page.data[page.montage.channels.findIndex((c) => c.label === label)];
+      const w: number[] = [];
+      for (let s = 0; s + FS <= x.length; s += FS) {
+        let lo = Infinity, hi = -Infinity;
+        for (let k = s; k < s + FS; k++) { if (x[k] < lo) lo = x[k]; if (x[k] > hi) hi = x[k]; }
+        w.push(hi - lo);
+      }
+      return w.sort((a, b) => a - b)[Math.floor(w.length / 2)];
+    };
+    const share = (left: string, right: string) =>
+      (windowP2p(left) - windowP2p(right)) / (windowP2p('T3-T5') - windowP2p('T4-T6'));
+    check('lpeds F7-T3 less F8-T4, as a share of T3-T5 less T4-T6 (LEARNINGEEG figure: 0.84)', share('F7-T3', 'F8-T4'), 0.54, 1.14);
+    check('lpeds F3-C3 less F4-C4, as a share of T3-T5 less T4-T6 (LEARNINGEEG figure: 0.68)', share('F3-C3', 'F4-C4'), 0.38, 0.98);
+    check('lpeds C3-P3 less C4-P4, as a share of T3-T5 less T4-T6 (LEARNINGEEG figure: 0.27)', share('C3-P3', 'C4-P4'), 0, 0.57);
+  }
   renderTrace({ state: 'awake', patterns: ['lpeds'], montage: 'bipolar-ap', seconds: 8, seed: 20,
     out: `${SCRATCH}/a5-lpeds-bipap.png` });
 }
@@ -3753,15 +4211,479 @@ console.log('\nTriphasic waves: classic 3-phase morphology with anterior->poster
   const lagPz = bestLag(fz, pz, Math.round(FS * 0.6));
   const lagO1 = bestLag(fz, o1, Math.round(FS * 0.6));
   check('triphasic Fz-A1 leads Pz-A1 (positive lag = posterior follows anterior)', lagPz.lag / FS, 0.008, 0.2, ' s');
-  check('triphasic Fz-A1 vs Pz-A1 lagged correlation is a real, positive relationship', lagPz.corr, 0.15, 1.0);
+  // The two correlation floors were 0.15 and 0.08, and the engine sat on them at
+  // 0.189 and 0.129: the posterior half drifted 0.11 s further behind on every
+  // complex (nonEpileptiform.ts, TRIPHASIC_SPAN), so front and back were hardly
+  // related at all. One discharge seen twice is strongly correlated at its lag.
+  check('triphasic Fz-A1 vs Pz-A1 lagged correlation is a real, positive relationship', lagPz.corr, 0.5, 1.0);
   check('triphasic Fz-A1 leads O1-A1 (positive lag = posterior follows anterior)', lagO1.lag / FS, 0.008, 0.2, ' s');
-  check('triphasic Fz-A1 vs O1-A1 lagged correlation is a real, positive relationship', lagO1.corr, 0.08, 1.0);
-  check('triphasic Fz-A1 p2p > O1-A1 p2p (anterior-predominant amplitude gradient preserved)',
-    pctP2p(fz) / pctP2p(o1), 1.3, 20);
+  check('triphasic Fz-A1 vs O1-A1 lagged correlation is a real, positive relationship', lagO1.corr, 0.5, 1.0);
+  // ACNS 2021 §C.4.c: an anterior-posterior lag is "a consistent measurable delay
+  // of > 100 ms from the most anterior to the most posterior derivation" — so it
+  // is read between the first and last rows of a longitudinal chain, not against
+  // an ear that itself carries the anterior field. P3-O1 is negated: the wave is
+  // largest at the far end of that row and at the near end of Fp1-F3.
+  {
+    const bip = displayContribAll('bipolar-ap', 'awake', 'triphasic', 60, 20);
+    const lag = bestLag(bip['Fp1-F3'], bip['P3-O1'].map((v) => -v), Math.round(FS * 0.6));
+    check('triphasic Fp1-F3 leads P3-O1, bipolar-ap (ACNS: an A-P lag is > 100 ms)', lag.lag / FS, 0.1, 0.2, ' s');
+  }
+  // learningeeg (Non-Epileptiform, key points): triphasic waves run at 1-3 Hz.
+  {
+    const iv = eventIntervals(fz, 0.5, 0.4);
+    check('triphasic repetition rate (LEARNINGEEG: 1-3 Hz)', iv.length / iv.reduce((a, b) => a + b, 0), 1, 3, ' Hz');
+  }
+  // Read at the frontal pole, where the field is largest, against the ear (ACNS
+  // 2021 §C.1.a: frontally predominant is a 50% excess). This was `Fz-A1 p2p >
+  // O1-A1 p2p`, from when the whole wave was one patch under Fz.
+  check('triphasic Fp1-A1 p2p / O1-A1 p2p, reference-ipsi (ACNS: frontally predominant from 1.5)',
+    pctP2p(displayContrib('reference-ipsi', 'awake', 'triphasic', 'Fp1-A1', 60, 20)) / pctP2p(o1), 1.5, 20);
   renderTrace({ state: 'awake', patterns: ['triphasic'], montage: 'bipolar-ap', seconds: 6, seed: 20,
     out: `${SCRATCH}/a5-triphasic-bipap.png` });
   renderTrace({ state: 'awake', patterns: ['triphasic'], montage: 'reference-car', seconds: 6, seed: 20,
     out: `${SCRATCH}/a5-triphasic-refcar.png` });
+}
+
+// ===========================================================================
+// Step 25 — fields and timing against learningeeg.com (audit of 2026-10-12)
+// ===========================================================================
+// Every toggle was measured in isolation (same-seed on minus off) on every row of
+// the double banana and compared with what learningeeg's chapters and figures say
+// that pattern looks like. Three classes of defect came out, none of which any
+// earlier check could see, because each earlier check read one or two electrodes:
+//
+//   A. Patterns taught as GENERALIZED were one midline patch, and drew as a
+//      midline focus (sources/fields.ts has the table).
+//   B. Three artifact toggles drew nothing at all: sweat (0.4 uV), mains (0.0 uV on
+//      every bipolar row) and, on bipolar montages, ECG.
+//   C. Several variants sat in the wrong place or ran at the wrong size or rhythm.
+//
+// The checks below assert the corrected behaviour ROW BY ROW, in display space.
+console.log('\n=== Step 25: fields and timing against learningeeg (2026-10-12 audit) ===\n');
+
+const rmsOf = (x: Float64Array) => Math.sqrt(x.reduce((a, v) => a + v * v, 0) / x.length);
+
+// Sources: learningeeg, Epileptiform Discharges — generalized discharges often have
+// "an anterior predominance", but the morphology "remains throughout all the
+// leads". Its two generalized spike-wave figures (rowtable.py; both above 0.5
+// row-heights occupancy, so only the aggregate is used): smallest row 0.35 and
+// 0.27 of the largest. ACNS 2021 §C.1.a: "frontally predominant" is anterior
+// voltage at least 50% above posterior on an ear reference; "midline predominant"
+// is midline at least 50% above parasagittal on a common average.
+console.log('Generalized spike-and-wave: on every row, frontally predominant, not a midline focus:');
+for (const toggle of ['3hz-gsw', 'polyspike-wave', 'absence-ictal', 'gtc-ictal'] as const) {
+  // 60 s, which for the tonic-clonic seizure stops just short of the end of its
+  // clonic phase (61 s): after that the on-minus-off difference is the suppressed
+  // BACKGROUND, not the seizure.
+  const secs = 60;
+  const bip = displayContribAll('bipolar-ap', 'awake', toggle, secs, 20);
+  const rows = Object.values(bip).map(absPeak);
+  check(`${toggle} smallest / largest row of the double banana (LEARNINGEEG figures: 0.27, 0.35)`,
+    Math.min(...rows) / Math.max(...rows), 0.25, 1);
+  check(`${toggle} largest left/right difference between homologous rows (LEARNINGEEG: over 50% is abnormal)`,
+    largestSideDifference(bip), 0, 0.5);
+  const ipsi = displayContribAll('reference-ipsi', 'awake', toggle, secs, 20);
+  check(`${toggle} anterior / posterior voltage, reference-ipsi (ACNS: frontally predominant from 1.5)`,
+    meanPeakAt(ipsi, ANTERIOR_SITES, IPSI_EAR) / meanPeakAt(ipsi, POSTERIOR_SITES, IPSI_EAR), 1.5, Infinity);
+  const car = displayContribAll('reference-car', 'awake', toggle, secs, 20);
+  check(`${toggle} midline / parasagittal voltage, reference-car (ACNS: "midline predominant" from 1.5)`,
+    meanPeakAt(car, ['Fz', 'Cz', 'Pz'], () => 'AVG') / meanPeakAt(car, ['F3', 'F4', 'C3', 'C4', 'P3', 'P4'], () => 'AVG'),
+    0, 1.5);
+}
+
+// Source: learningeeg, Rhythmicity & Periodicity — "the bifrontal delta activity
+// does not travel back to the posterior regions"; on its figure the frontopolar
+// rows carry the most.
+console.log('\nFIRDA: largest on the frontopolar rows, gone by the posterior ones:');
+{
+  const bip = displayContribAll('bipolar-ap', 'awake', 'firda', 60, 20);
+  const r = (...labels: string[]) => labels.reduce((a, l) => a + rmsOf(bip[l]), 0) / labels.length;
+  const frontopolar = r('Fp1-F3', 'Fp2-F4', 'Fp1-F7', 'Fp2-F8');
+  check('firda frontopolar rows / Fz-Cz (LEARNINGEEG figure: largest at the frontal pole)',
+    frontopolar / r('Fz-Cz'), 1, 3);
+  check('firda posterior rows / frontopolar rows (LEARNINGEEG: "does not travel back")',
+    r('P3-O1', 'P4-O2', 'T5-O1', 'T6-O2') / frontopolar, 0, 0.2);
+}
+
+// Source: learningeeg, Non-Epileptiform — triphasic waves are "most often
+// generalized", "maximal frontally".
+console.log('\nTriphasic waves: generalized, not a midline focus:');
+{
+  const bip = displayContribAll('bipolar-ap', 'awake', 'triphasic', 60, 20);
+  const rows = Object.values(bip).map(absPeak).sort((a, b) => a - b);
+  // No figure was measured for this one, so this is a guard, not a target: as a
+  // patch under Fz the median row was 0.17 of the largest (Fz-Cz).
+  check('triphasic median / largest row of the double banana (LEARNINGEEG: "most often generalized"; 0.17 as a midline focus)',
+    rows[rows.length >> 1] / rows[rows.length - 1], 0.3, 1);
+  const car = displayContribAll('reference-car', 'awake', 'triphasic', 60, 20);
+  check('triphasic midline / parasagittal voltage, reference-car (ACNS: "midline predominant" from 1.5)',
+    meanPeakAt(car, ['Fz', 'Cz', 'Pz'], () => 'AVG') / meanPeakAt(car, ['F3', 'F4', 'C3', 'C4', 'P3', 'P4'], () => 'AVG'),
+    0, 1.5);
+}
+
+// Source: learningeeg, Artifacts — sweat is "very slow (typically less than
+// 0.5 Hz), relatively low amplitude". The floor is one millimetre of pen at
+// 7 uV/mm (7 uV peak to peak, ~2.5 uV RMS for a slow wander): below that the
+// toggle is not on the page. The ceiling keeps it under the adult background's
+// own 10-50 uV, which is what "relatively low" is relative to.
+console.log('\nSweat: a rolling baseline that reaches the page:');
+{
+  const x = displayContribAll('bipolar-ap', 'awake', 'sweat', 120, 20)['Fp1-F3'];
+  check('sweat Fp1-F3 drift, toggle on minus off (RMS; measured 0.1 uV before the fix)', rmsOf(x), 2.5, 20, ' uV');
+  check('sweat Fp1-F3 dominant frequency (LEARNINGEEG: typically < 0.5 Hz)',
+    spectralPeak(welch(x, FS, 8192), 0.03, 5).freq, 0, 0.5, ' Hz');
+}
+
+// Interference identical on every electrode is rejected by every difference a
+// montage takes. The floor is the amplifier's own noise (0.9 uV RMS per electrode):
+// under it the line is thinner than the trace it is meant to thicken.
+console.log('\nMains: reaches a bipolar page:');
+{
+  const bip = displayContribAll('bipolar-ap', 'awake', '50hz', 30, 20);
+  const amps = Object.values(bip).map(rmsOf).sort((a, b) => a - b);
+  check('mains median double-banana row at the default 5 uV, toggle on minus off (RMS; measured 0.0 uV before the fix)',
+    amps[Math.floor(amps.length / 2)], 0.9, 5, ' uV');
+}
+
+// Sources: eegpedia (ECG artifact) — "most prominent in referential montages using
+// earlobe electrodes"; learningeeg (Artifacts) — "usually relatively low
+// amplitude", "more prominent or solely seen on the left side". The floor is one
+// millimetre of pen at 7 uV/mm.
+console.log('\nECG artifact: visible against the ear, low on the double banana, larger on the left:');
+{
+  const ear = displayContribAll('reference-ipsi', 'awake', 'ecg-artifact', 30, 20);
+  check('ecg-artifact R wave at Cz-A1, reference-ipsi (measured 4 uV before the fix)', absPeak(ear['Cz-A1']), 7, 40, ' uV');
+  const side = (els: string[], ref: string) => els.reduce((a, e) => a + absPeak(ear[`${e}-${ref}`]), 0);
+  check('ecg-artifact left / right, reference-ipsi (LEARNINGEEG: more prominent on the left)',
+    side(['F3', 'C3', 'P3'], 'A1') / side(['F4', 'C4', 'P4'], 'A2'), 1, 3);
+  const bip = displayContribAll('bipolar-ap', 'awake', 'ecg-artifact', 30, 20);
+  check('ecg-artifact largest double-banana row (LEARNINGEEG: "usually relatively low amplitude")',
+    Math.max(...Object.values(bip).map(absPeak)), 1, 10, ' uV');
+}
+
+// Source: learningeeg (Artifacts) — myogenic artifact is "most commonly found in the
+// frontal or lateral temporal regions", with "only minimal myogenic artifact near
+// the vertex"; chewing is "bursts of generalized very fast activity".
+console.log('\nMuscle: temporal and frontal, least over the centre; chewing reaches every chain:');
+{
+  const rowRms = (toggle: string) => {
+    const bip = displayContribAll('bipolar-ap', 'awake', toggle, 60, 20);
+    return (...labels: string[]) => labels.reduce((a, l) => a + rmsOf(bip[l]), 0) / labels.length;
+  };
+  const m = rowRms('muscle');
+  const temporal = m('T3-T5', 'T4-T6');
+  check('muscle central rows / mid-temporal rows (LEARNINGEEG: temporal; measured 0.87 before the fix)',
+    m('C3-P3', 'C4-P4') / temporal, 0, 0.3);
+  check('muscle midline rows / mid-temporal rows (LEARNINGEEG: "minimal ... near the vertex")',
+    m('Fz-Cz', 'Cz-Pz') / temporal, 0, 0.3);
+  check('muscle frontopolar rows / mid-temporal rows (LEARNINGEEG: frontal as well as temporal)',
+    m('Fp1-F3', 'Fp2-F4', 'Fp1-F7', 'Fp2-F8') / temporal, 0.3, 2);
+  const c = rowRms('chewing');
+  check('chewing parasagittal rows / temporal rows (LEARNINGEEG: "generalized", temporal maximum)',
+    c('Fp1-F3', 'F3-C3', 'C3-P3', 'P3-O1', 'Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2')
+      / c('Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2'), 0.1, 1);
+}
+
+// Sources: learningeeg atlas — "each wicket should be the same duration"; the AES
+// atlas (NBK390343) gives wickets as 6-11 Hz and 60-200 uV.
+console.log('\nWicket: one frequency per burst, large enough to read:');
+{
+  const x = displayContribAll('bipolar-ap', 'drowsy', 'wicket', 120, 20)['T3-T5'];
+  check('wicket T3-T5 largest burst (AES atlas: 60-200 uV at the electrode; measured 12 uV before the fix)',
+    absPeak(x), 40, 200, ' uV');
+  // Cycle lengths inside the largest burst: upward zero crossings within 0.35 s of
+  // its peak. One carrier gives equal cycles; a sum of tones does not.
+  let at = 0;
+  for (let k = 0; k < x.length; k++) if (Math.abs(x[k]) > Math.abs(x[at])) at = k;
+  const ups: number[] = [];
+  for (let k = Math.max(1, at - Math.round(0.35 * FS)); k < Math.min(x.length, at + Math.round(0.35 * FS)); k++) {
+    if (x[k - 1] < 0 && x[k] >= 0) ups.push(k - x[k] / (x[k] - x[k - 1]));
+  }
+  const cyc = ups.slice(1).map((u, i) => u - ups[i]);
+  const m = cyc.reduce((a, b) => a + b, 0) / cyc.length;
+  check('wicket cycle-length CV within the largest burst (LEARNINGEEG: "each wicket should be the same duration")',
+    Math.sqrt(cyc.reduce((a, b) => a + (b - m) ** 2, 0) / cyc.length) / m, 0, 0.1);
+  check('wicket frequency of the largest burst (IK-015: 6-11 Hz)', FS / m, 6, 11, ' Hz');
+}
+
+// Source: learningeeg — lambda waves look "almost identical to POSTS" and are
+// "very occipitally focused"; they follow visual scanning, i.e. saccades. The
+// field bound is the one POSTS are held to above.
+console.log('\nLambda: occipital like POSTS, and not periodic:');
+{
+  const bip = displayContribAll('bipolar-ap', 'awake', 'lambda', 120, 20);
+  check('lambda field C3-P3 / P3-O1 (LEARNINGEEG: "very occipitally focused"; measured 0.51 before the fix)',
+    absPeak(bip['C3-P3']) / absPeak(bip['P3-O1']), 0, 0.35);
+  check('lambda largest change between consecutive intervals (LEARNINGEEG: not periodic beyond 50%)',
+    largestStep(eventIntervals(bip['P3-O1'], 0.4, 0.2)), 0.5, Infinity);
+}
+
+// Sources: learningeeg — "posterior quadrants"; StatPearls NBK555899 — the
+// posterior temporal head regions. Raw electrodes, so no reference takes a share.
+console.log('\n14 & 6 Hz positive bursts and mu: in the right place:');
+{
+  const raw = (state: PatientState, toggle: string, el: string) => {
+    const on = runEngineState(120, SLEEP_OPTS, state, [toggle]);
+    const off = runEngineState(120, SLEEP_OPTS, state, []);
+    const i = on.eng.indexOf(el);
+    return on.data[i].map((v, k) => v - off.data[i][k]);
+  };
+  check('14-6-pos T5 / O1 (posterior TEMPORAL maximum; measured 0.36 before the fix)',
+    absPeak(raw('drowsy', '14-6-pos', 'T5')) / absPeak(raw('drowsy', '14-6-pos', 'O1')), 1.2, 10);
+  // learningeeg: mu runs "over the centroparietal (central) regions".
+  check('mu-rhythm toggle P3 / C3 (LEARNINGEEG: centroparietal; measured 0.01 before the fix)',
+    rmsOf(raw('awake', 'mu-rhythm', 'P3')) / rmsOf(raw('awake', 'mu-rhythm', 'C3')), 0.15, 0.6);
+}
+
+// ---------------------------------------------------------------------------
+// Step 26 — toggle rules: no contradictory page can be reached (2026-10-13)
+//
+// Not a signal check: this one is about which signals the app will let a learner
+// put on one page. Eye Blink could be switched on in REM and sat there beside
+// Rapid Eye Movements, because no artifact had a state rule and the only rule
+// between two toggles was blink -> eyes open. The rules are now a table
+// (utils/toggleRules.ts) applied by pure functions, and the app makes every change
+// through them — so walking random actions through those same functions and
+// finding no violation is a statement about the app, not about a copy of it.
+// ---------------------------------------------------------------------------
+console.log('\n=== Step 26: toggle rules — no contradictory combination is reachable ===\n');
+{
+  const ids = PATTERN_CATEGORIES.flatMap(c => c.patterns.map(p => p.id));
+  const stages: PatientState[] = ['awake', 'drowsy', 'n1', 'n2', 'n3', 'rem'];
+  const ruleIds = Object.keys(TOGGLE_RULES);
+
+  // The table itself: a rule that contradicts another could not be satisfied.
+  check('toggle rules: rules naming something that is not a toggle',
+    ruleIds.filter(id => ![id, ...(TOGGLE_RULES[id].requires ?? []), ...(TOGGLE_RULES[id].excludes ?? [])]
+      .every(x => ids.includes(x))).length, 0, 0);
+  check('toggle rules: rules whose target state is not one of their own states',
+    ruleIds.filter(id => {
+      const r = TOGGLE_RULES[id];
+      return !!r.states && (!r.target || !r.states.includes(r.target));
+    }).length, 0, 0);
+  check('toggle rules: toggles requiring something they cannot be on with (another state, or excluded)',
+    ruleIds.filter(id => (TOGGLE_RULES[id].requires ?? []).some(need => {
+      const a = TOGGLE_RULES[id], b = TOGGLE_RULES[need];
+      const stateClash = !!b?.states && (a.states ?? stages).some(st => !b.states!.includes(st));
+      return stateClash || !!a.excludes?.includes(need) || !!b?.excludes?.includes(id);
+    })).length, 0, 0);
+  check('toggle rules: state defaults that are not allowed in their own state',
+    stages.flatMap(st => STATE_DEFAULTS[st].filter(id => {
+      const r = TOGGLE_RULES[id];
+      return !!r?.states && !r.states.includes(st);
+    })).length, 0, 0);
+
+  // Every kind of change the app can make, at random, 20 000 times.
+  let seed = 20261013;
+  const rnd = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <T,>(a: T[]): T => a[Math.floor(rnd() * a.length)];
+  let st = initialToggles('awake');
+  let broken = 0, firstBroken = '';
+  const seenStates = new Set<string>(), seenOn = new Set<string>();
+  for (let i = 0; i < 20000; i++) {
+    const u = rnd();
+    if (u < 0.70) st = toggle(st, pick(ids));
+    else if (u < 0.90) st = enterState(st, pick(stages));
+    else if (u < 0.93) st = clearToggles(st);
+    else if (u < 0.97) st = setPage(st.patientState, [pick(ids), pick(ids), pick(ids)]);
+    else st = quizPage([pick(ids)]);
+    const now = effective(st);
+    seenStates.add(st.patientState);
+    for (const id of now) seenOn.add(id);
+    const v = violations(st.patientState, now);
+    if (v.length) { broken++; firstBroken ||= `${v[0]} (action ${i})`; }
+  }
+  if (firstBroken) console.log(`  first violation: ${firstBroken}`);
+  check('toggle rules: contradictory pages reached in 20000 random actions (clicks, state buttons, Clear All, tutorial and quiz pages)',
+    broken, 0, 0);
+  // The walk is only evidence if it actually went everywhere.
+  check('toggle rules: states the random walk visited', seenStates.size, 6, 6);
+  check('toggle rules: toggles the random walk never managed to switch on', ids.filter(id => !seenOn.has(id)).length, 0, 0);
+
+  const yes = (b: boolean) => (b ? 1 : 0);
+  const has = (s: ReturnType<typeof initialToggles>, ...xs: string[]) => xs.every(x => effective(s).has(x));
+  const lacks = (s: ReturnType<typeof initialToggles>, ...xs: string[]) => xs.every(x => !effective(s).has(x));
+
+  // The case that started this.
+  let c = toggle(enterState(initialToggles(), 'rem'), 'blink');
+  check('toggle rules: Eye Blink switched on in REM moves to Awake and Rapid Eye Movements goes off',
+    yes(c.patientState === 'awake' && has(c, 'blink', 'eyes-open') && lacks(c, 'rem-eyes')), 1, 1);
+  for (const stage of ['drowsy', 'n1', 'n2', 'n3', 'rem'] as PatientState[]) {
+    c = enterState(toggle(initialToggles(), 'blink'), stage);
+    check(`toggle rules: entering ${stage} switches Eye Blink and Eyes Open off (LEARNINGEEG: blinks are a mark of the awake record)`,
+      yes(lacks(c, 'blink', 'eyes-open')), 1, 1);
+  }
+  c = toggle(initialToggles(), 'lambda');
+  check('toggle rules: Lambda switches Eyes Open on (LEARNINGEEG: awake, visually scanning)', yes(has(c, 'lambda', 'eyes-open')), 1, 1);
+  c = toggle(c, 'eyes-open');
+  check('toggle rules: closing the eyes switches Lambda off', yes(lacks(c, 'lambda', 'eyes-open')), 1, 1);
+  c = toggle(toggle(initialToggles(), 'blink'), 'eye-opening');
+  check('toggle rules: Eye Opening / Closing switches Eyes Open and Eye Blink off (it starts from closed eyes)',
+    yes(has(c, 'eye-opening') && lacks(c, 'eyes-open', 'blink')), 1, 1);
+  c = toggle(toggle(initialToggles(), 'pswy'), 'eyes-open');
+  check('toggle rules: Eyes Open switches Posterior Slow Waves of Youth off (LEARNINGEEG: they sit within the PDR)',
+    yes(has(c, 'eyes-open') && lacks(c, 'pswy')), 1, 1);
+  c = toggle(enterState(initialToggles(), 'rem'), 'muscle');
+  check('toggle rules: Muscle switched on in REM moves to Awake (LEARNINGEEG: muscle near-absent in REM)',
+    yes(c.patientState === 'awake' && has(c, 'muscle')), 1, 1);
+  c = enterState(toggle(initialToggles(), 'muscle'), 'rem');
+  check('toggle rules: entering REM switches Muscle off', yes(lacks(c, 'muscle') && has(c, 'rem-eyes')), 1, 1);
+  c = toggle(toggle(initialToggles(), 'chewing'), 'gtc-ictal');
+  check('toggle rules: a tonic-clonic seizure switches Chewing off', yes(has(c, 'gtc-ictal') && lacks(c, 'chewing')), 1, 1);
+  c = toggle(toggle(initialToggles(), 'absence-ictal'), 'hyperventilation');
+  check('toggle rules: Hyperventilation and an absence seizure can be on together (it provokes one)',
+    yes(has(c, 'absence-ictal', 'hyperventilation')), 1, 1);
+
+  // What already worked must still work.
+  c = toggle(initialToggles(), 'posts');
+  check('toggle rules: POSTS switched on from Awake arrives in N1 alone', yes(c.patientState === 'n1' && [...effective(c)].join() === 'posts'), 1, 1);
+  c = enterState(initialToggles(), 'n2');
+  check('toggle rules: the N2 state brings POSTS, vertex waves, K-complexes and spindles',
+    yes(has(c, 'posts', 'v-waves', 'k-complex', 'spindles')), 1, 1);
+  c = toggle(toggle(c, 'spindles'), 'spindles');
+  check('toggle rules: a stage default switched off and on again stays in its stage', yes(c.patientState === 'n2' && has(c, 'spindles')), 1, 1);
+  check('toggle rules: Clear All leaves nothing on', effective(clearToggles(c)).size, 0, 0);
+  check('toggle rules: Awake starts with nothing on', effective(initialToggles()).size, 0, 0);
+  c = setPage('awake', ['blink']);
+  check('toggle rules: a tutorial page listing Eye Blink gets Eyes Open with it', yes(has(c, 'blink', 'eyes-open')), 1, 1);
+}
+
+// ===========================================================================
+// Step 27: annotation arrows — every artifact pointed at, on the rows it is on.
+//
+// The arrows are the app's own claim about where an artifact is, and until
+// 2026-10-13 nothing checked them. The owner found the result on the page:
+// artifacts with no arrow, and one arrow for an artifact on eight rows. What had
+// gone wrong, each caught by a measurement below when it was first run:
+//   - one arrow per event, on the first row that recorded a listed electrode;
+//   - a spindle's two generators marked as one, so a central spindle was pointed
+//     at on the frontal rows as well;
+//   - a chew marked two or three times, at each gap in its own muscle noise;
+//   - a roving eye movement's trough left out whenever a wobble came before it;
+//   - the roving movement itself switching on with a 71 uV step.
+//
+// Run exactly as the app runs it: `SimulationSource` in app mode, the marks it
+// reports, and `utils/markRows.ts` — the function the canvas calls — to turn a
+// mark into rows. The artifact's true extent on the page is its on-minus-off
+// contribution through the montage.
+// ===========================================================================
+console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on the rows it is on ===\n');
+{
+  const SECS = 40, SEED = 3;
+  const montage = MONTAGES['bipolar-ap'];
+  const chans = montage.channels.map((c, i) => ({ c, i })).filter(({ c }) => c.active !== 'ECG');
+  type Mark = { id: string; t: number; dur: number; rows: string[] };
+  const appRun = (state: PatientState, patterns: string[]) => {
+    const settings: SimSettings = {
+      speed: 30, sensitivity: 7, patientState: state, activePatterns: new Set(patterns),
+      ictalParams: defaultIctalParamsMap(), artifactParams: defaultArtifactParams(),
+    };
+    const src = new SimulationSource(SEED, FS);
+    src.useAppMode();
+    const n = SECS * FS;
+    const data = chans.map(() => new Float64Array(n));
+    const marks: Mark[] = [];
+    for (let i = 0; i < n; i++) {
+      const allV = src.next(settings);
+      const avg = commonAverage(allV);
+      chans.forEach(({ c }, k) => { data[k][i] = computeChannelVoltage(c, src.t, allV, avg); });
+      for (const m of src.groundTruth.marks) {
+        const rows = markRows(markRowSizes(m.fields, montage), m.inUv ? settings.sensitivity : undefined);
+        marks.push({ id: m.id, t: i / FS - (m.ago ?? 0), dur: m.dur, rows: rows.map((c) => montage.channels[c].label) });
+      }
+    }
+    return { data, marks };
+  };
+  // What the artifact does to the page, and what the arrows say about it.
+  const survey = (state: PatientState, patterns: string[], toggle: string) => {
+    const on = appRun(state, patterns), off = appRun(state, patterns.filter((x) => x !== toggle));
+    const n = SECS * FS;
+    const marks = on.marks.filter((m) => m.id === toggle || (toggle === 'eye-opening' && m.id === 'eye-closing'));
+    const arrowed = new Set(marks.flatMap((m) => m.rows));
+    const moved = chans.map((_, k) => { let x = 0; for (let i = 0; i < n; i++) x = Math.max(x, Math.abs(on.data[k][i] - off.data[k][i])); return x; });
+    const largest = Math.max(...moved);
+    // Events: stretches in which a row the artifact is pointed at on is moved by
+    // 2 mm or more (14 uV at 7 uV/mm), joined across gaps under 0.4 s. Only those
+    // rows: eye opening also blocks the alpha rhythm at the back of the head, and
+    // that difference is the background's, not the artifact's.
+    const watch = chans.map(({ c }, k) => (arrowed.has(c.label) ? k : -1)).filter((k) => k >= 0);
+    const events: [number, number][] = [];
+    let start = -1, last = -1;
+    for (let i = 0; i < n; i++) {
+      let hit = false;
+      for (const k of watch) if (Math.abs(on.data[k][i] - off.data[k][i]) >= 14) { hit = true; break; }
+      if (hit) { if (start < 0) start = i; last = i; }
+      else if (start >= 0 && i - last > 0.4 * FS) { events.push([start / FS, last / FS]); start = -1; }
+    }
+    if (start >= 0) events.push([start / FS, last / FS]);
+    const times = marks.map((m) => m.t).sort((a, b) => a - b);
+    let longestGap = times.length ? Math.max(times[0], SECS - times[times.length - 1]) : SECS;
+    for (let k = 1; k < times.length; k++) longestGap = Math.max(longestGap, times[k] - times[k - 1]);
+    return {
+      marks, events, longestGap,
+      unmarked: events.filter(([a, b]) => !marks.some((m) => m.t + m.dur >= a - 0.15 && m.t <= b + 0.15)).length,
+      // Arrows go on from 35% of the largest row (MARK_ROW_SHARE); a row moved by
+      // half as much as the largest and never pointed at is a row left out.
+      rowsLeftOut: chans.filter(({ c }, k) => moved[k] >= 0.5 * largest && !arrowed.has(c.label)).map(({ c }) => c.label),
+    };
+  };
+
+  console.log('Events: each one has an arrow, and every row it is plainly on has one:');
+  const EVENTS: [string, PatientState, string[]][] = [
+    ['blink', 'awake', ['eyes-open', 'blink']], ['eye-opening', 'awake', ['eye-opening']],
+    ['eye-movement', 'awake', ['eye-movement']], ['chewing', 'awake', ['chewing']],
+    ['rem-eyes', 'rem', ['rem-eyes']], ['roving-eyes', 'drowsy', ['roving-eyes']],
+    ['posts', 'n1', ['posts']], ['v-waves', 'n1', ['v-waves']], ['k-complex', 'n2', ['k-complex']],
+  ];
+  for (const [toggle, state, patterns] of EVENTS) {
+    const r = survey(state, patterns, toggle);
+    check(`arrows: ${toggle} events on the page (the test has something to test)`, r.events.length, 2, 1e6);
+    check(`arrows: ${toggle} events with no arrow`, r.unmarked, 0, 0);
+    check(`arrows: ${toggle} rows moved by half its largest row or more and never pointed at`, r.rowsLeftOut.length, 0, 0);
+    if (toggle === 'chewing') {
+      // One arrow set per chew on each side. Chews come 1.5 a second (+-20%), so two
+      // on the same rows are at least 0.55 s apart; a chew used to be marked two or
+      // three times, tens of milliseconds apart, at each gap in its own muscle noise.
+      const byRows = new Map<string, number[]>();
+      for (const m of r.marks) byRows.set(m.rows.join(' '), [...(byRows.get(m.rows.join(' ')) ?? []), m.t]);
+      let closest = Infinity;
+      for (const ts of byRows.values()) for (let k = 1; k < ts.length; k++) closest = Math.min(closest, ts[k] - ts[k - 1]);
+      check('arrows: chewing shortest time between two arrows on the same rows (one per chew)', closest, 0.45, 60, ' s');
+    }
+  }
+
+  console.log('\nContinuous artifacts: pointed at throughout, on the rows they are on:');
+  for (const toggle of ['muscle', 'sweat', 'bad-electrodes']) {
+    const r = survey('awake', [toggle], toggle);
+    // An arrow every 1.5 s (CONTINUOUS_MARK_S); the requirement is that none is 2 s from the next.
+    check(`arrows: ${toggle} longest stretch with no arrow (one every 1.5 s)`, r.longestGap, 0, 2, ' s');
+    check(`arrows: ${toggle} rows moved by half its largest row or more and never pointed at`, r.rowsLeftOut.length, 0, 0);
+  }
+
+  console.log('\nECG and mains: under a millimetre on this montage, so one arrow each time and not ten:');
+  for (const toggle of ['ecg-artifact', '50hz']) {
+    const r = survey('awake', [toggle], toggle);
+    check(`arrows: ${toggle} longest stretch with no arrow`, r.longestGap, 0, 2, ' s');
+    check(`arrows: ${toggle} most rows pointed at for one occurrence, bipolar-ap at 7 uV/mm`,
+      Math.max(...r.marks.map((m) => m.rows.length)), 1, 1);
+  }
+
+  console.log('\nSpindles: each kind pointed at where it is, not both everywhere:');
+  {
+    const r = survey('n2', ['spindles'], 'spindles');
+    const frontal = r.marks.filter((m) => m.rows.includes('Fp1-F3')).length;
+    const posterior = r.marks.filter((m) => m.rows.includes('P3-O1')).length;
+    check('arrows: spindles marked', r.marks.length, 2, 1e6);
+    check('arrows: spindles pointed at on both the frontopolar and the parieto-occipital rows at once',
+      r.marks.filter((m) => m.rows.includes('Fp1-F3') && m.rows.includes('P3-O1')).length, 0, 0);
+    check('arrows: spindles marks that are on neither (every spindle is frontal or centroparietal)',
+      r.marks.length - frontal - posterior, 0, 0);
+  }
 }
 
 console.log('\n' + '='.repeat(60));

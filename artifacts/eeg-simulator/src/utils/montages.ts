@@ -205,10 +205,25 @@ export const MONTAGES: Record<string, Montage> = {
     ],
   },
 
+  // Chain order, as on the double banana: left parasagittal, right parasagittal,
+  // left temporal, right temporal, midline (user's layout, 2026-10-12). The two
+  // ear-referenced montages below keep the older side-by-side order.
   'reference-car': {
     id: 'reference-car',
     name: 'Reference – Common Average',
-    channels: refChannels('AVG', (el) => `${el}-AVG`),
+    channels: [
+      ...(['Fp1', 'F3', 'C3', 'P3', 'O1'] as Electrode[]).map((el): ChannelDef =>
+        ({ label: `${el}-AVG`, active: el, reference: 'AVG', group: 'left-paramedian' })),
+      ...(['Fp2', 'F4', 'C4', 'P4', 'O2'] as Electrode[]).map((el): ChannelDef =>
+        ({ label: `${el}-AVG`, active: el, reference: 'AVG', group: 'right-paramedian' })),
+      ...(['F7', 'T3', 'T5'] as Electrode[]).map((el): ChannelDef =>
+        ({ label: `${el}-AVG`, active: el, reference: 'AVG', group: 'left-temporal' })),
+      ...(['F8', 'T4', 'T6'] as Electrode[]).map((el): ChannelDef =>
+        ({ label: `${el}-AVG`, active: el, reference: 'AVG', group: 'right-temporal' })),
+      ...(['Fz', 'Cz', 'Pz'] as Electrode[]).map((el): ChannelDef =>
+        ({ label: `${el}-AVG`, active: el, reference: 'AVG', group: 'central' })),
+      { label: 'ECG', active: 'ECG', group: 'ecg' },
+    ],
   },
 
   'reference-ipsi': {
