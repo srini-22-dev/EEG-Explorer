@@ -16,7 +16,7 @@
  */
 
 import type { SourceSpec } from '../forward';
-import type { PatientState, IctalHemisphere, PostsForm, FocalPlacement } from '../../utils/simTypes';
+import type { PatientState, IctalHemisphere, PostsForm, FocalPlacement, KcSpindle } from '../../utils/simTypes';
 
 /**
  * The rhythm bands the engine's ongoing background is decomposed into. A pattern
@@ -66,6 +66,8 @@ export type SampleContext = {
   ictalDelay: number | null;
   /** Whether a seizure's muscle artifact is drawn with it (`PatternOptions.seizureMuscle`). */
   seizureMuscle: boolean;
+  /** Whether a K-complex is followed by a spindle (`KcSpindle`). Only the K-complex generator consults this. */
+  kcSpindle: KcSpindle;
 };
 
 export interface PatternGenerator {
@@ -91,7 +93,40 @@ export interface PatternGenerator {
    * other active patterns' band gates. Only consulted while the toggle is active.
    */
   bandGate?(ctx: SampleContext): Partial<Record<Band, number>>;
+  /**
+   * Optional: the annotations for what this source has just begun to draw (see
+   * `PatternMarkEvent`). The engine takes them every sample, after `gate`; return
+   * [] when nothing began. A source that draws events and has no `openBox` must
+   * report them here: the gate fails a toggle whose events go unannotated.
+   */
+  takeMarks?(): PatternMarkEvent[];
 }
+
+/**
+ * One annotation, reported by the generator that drew the event (owner, 2026-10-23:
+ * "everything should have an intention, so annotations should be easy, whatever is
+ * present in the signals should be by design"). The generator knows what it drew,
+ * when and how long, so it says so; nothing is detected in the signal. Times are
+ * seconds from the sample it is reported on.
+ */
+export type PatternMarkEvent = {
+  /** The name on the page; omitted, the toggle's own name. */
+  label?: string;
+  /** Where the arrow's window or the box starts, from now; may be negative. Default 0. */
+  at?: number;
+  /** A box from `at` to `at + span`, for an event with extent. Omitted, an arrow. */
+  span?: number;
+  /** The arrow's window: it points at the largest swing in [at, at + dur]. Default 0.3. */
+  dur?: number;
+  /**
+   * Which rows: the field of the source reporting it (default), of every source on
+   * its toggle (a pattern drawn by several sources at once), or the whole page (a
+   * pattern that acts on the background everywhere, such as burst-suppression).
+   */
+  where?: MarkWhere;
+};
+
+export type MarkWhere = 'source' | 'toggle' | 'page';
 
 export type PatternSourceDescriptor = {
   /** Unique leadfield source id; also the label passed to `deriveSeed`. */
@@ -112,6 +147,13 @@ export type PatternSourceDescriptor = {
    *    an additional way to force them (e.g. to show a spindle while awake).
    */
   stateIntrinsic?: boolean;
+  /**
+   * A pattern that has no events, only a presence — a continuous rhythm, a
+   * periodic pattern, a change to the whole background: one box from when the
+   * source comes on until it goes off, drawn by the engine. On one descriptor per
+   * toggle (the others carry nothing), so the pattern gets one box per chain block.
+   */
+  openBox?: { label?: string; where?: MarkWhere };
   /** Geometry for the leadfield column (build with `sourceUnder`). */
   spec: SourceSpec;
   /** Factory: build the stateful generator. `seed` is already derived from `id`. */

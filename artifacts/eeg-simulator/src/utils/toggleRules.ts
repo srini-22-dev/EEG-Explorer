@@ -68,6 +68,9 @@ export const TOGGLE_RULES: Record<string, ToggleRule> = {
   '14-6-pos':  { target: 'drowsy', states: ['drowsy', 'n1', 'n2'] },
   '6hz-sw':    { target: 'drowsy', states: ['drowsy', 'n1'] },
   'bets':      { target: 'drowsy', states: ['drowsy', 'n1', 'n2'] },
+  // Midline theta (Ciganek) "is seen during wakefulness and drowsiness", commonest in
+  // drowsiness (neupsykey, Patterns of Unclear Significance).
+  'midline-theta': { target: 'drowsy', states: ['awake', 'drowsy'] },
   // Mu is a waking rhythm: selecting it brings the record back to awake.
   'mu-rhythm': { target: 'awake', states: ['awake', 'drowsy'] },
   // LE: lambda waves "emerge in the awake state when one is visually scanning

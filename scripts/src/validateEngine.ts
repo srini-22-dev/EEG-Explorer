@@ -1679,6 +1679,57 @@ console.log('\nK-complexes (large biphasic, frontal maximum, N2):');
   check('Fz: K-complex isolated p2p / background p2p (AASM: stands out from the background)',
     (hi - lo) / pctP2p(base.data[base.eng.indexOf('Fz')]), 1.5, 50);
   check('K-complex isolated peak Fz / O1 (frontal, not occipital)', Math.max(hi, -lo) / o1Peak, 3, 100);
+
+  // The early positive phase and the spindle after, per event, at Fz (2026-10-22).
+  // Sources (sources/sleep.ts): the definitions are biphasic; the literature adds "a
+  // smaller preceding positivity that may not be visible by eye" (the P200). So it is
+  // there in some events and not others, and always smaller than the negative peak.
+  // The spindle after is a choice under the toggle: none, sometimes (the default,
+  // learningeeg "often but not always"), always.
+  const kcAtFz = (mode: 'none' | 'sometimes' | 'always') => {
+    const run = (pat: string[]) => {
+      const e = new EegEngine(SLEEP_OPTS);
+      e.setPatientState('awake');
+      e.setActivePatterns(new Set(pat));
+      e.setPatternOptions({ kcSpindle: mode });
+      const fz = e.electrodes.indexOf('Fz'), buf = new Float64Array(e.electrodes.length), x = new Float64Array(240 * FS);
+      for (let i = 0; i < x.length; i++) { e.next(buf); x[i] = buf[fz]; }
+      return x;
+    };
+    const a = run(['k-complex']), b = run([]);
+    const x = a.map((v, i) => v - b[i]);
+    let mn = 0;
+    for (const v of x) mn = Math.min(mn, v);
+    const peaks: number[] = [];
+    for (let i = 1; i < x.length - 1; i++) {
+      if (x[i] < 0.5 * mn && x[i] <= x[i - 1] && x[i] <= x[i + 1] && (!peaks.length || i - peaks[peaks.length - 1] > 3 * FS)) peaks.push(i);
+    }
+    // Early phase: the largest positive value 0.15-0.45 s before the negative peak, as a share of it.
+    const early = peaks.map((pk) => {
+      let m = 0;
+      for (let k = pk - Math.round(0.45 * FS); k < pk - Math.round(0.15 * FS); k++) m = Math.max(m, x[k]);
+      return m / -x[pk];
+    });
+    // Spindle after: 11-16 Hz-ish energy (a second difference) 0.5-2.2 s after the peak.
+    const spindle = peaks.map((pk) => {
+      let e2 = 0, n = 0;
+      for (let k = pk + Math.round(0.5 * FS); k < Math.min(x.length - 2, pk + Math.round(2.2 * FS)); k++) {
+        const hp = x[k] - (x[k - 2] + x[k + 2]) / 2;
+        e2 += hp * hp; n++;
+      }
+      return Math.sqrt(e2 / n);
+    });
+    return { early, withSpindle: spindle.filter((v) => v > 0.2).length / Math.max(1, peaks.length), n: peaks.length };
+  };
+  const kcSome = kcAtFz('sometimes');
+  check('K-complex events in 240 s at Fz (the tests have something to test)', kcSome.n, 6, 30);
+  check('K-complex share with an early positive phase over 5% of the negative peak (literature: "may not always be present")',
+    kcSome.early.filter((v) => v > 0.05).length / kcSome.n, 0.4, 0.95);
+  check('K-complex largest early positive phase / negative peak (literature: "a smaller preceding positivity")',
+    Math.max(...kcSome.early), 0.05, 0.4);
+  check('K-complex share followed by a spindle, option Sometimes (learningeeg: "often but not always")', kcSome.withSpindle, 0.3, 0.9);
+  check('K-complex share followed by a spindle, option None', kcAtFz('none').withSpindle, 0, 0);
+  check('K-complex share followed by a spindle, option Always', kcAtFz('always').withSpindle, 1, 1);
 }
 
 console.log('\nPOSTS (positive occipital sharp transients, N1/N2):');
@@ -2575,6 +2626,32 @@ console.log('\nK-complex (sharp UP, then slower smaller DOWN), Cz-AVG reference-
     slow / Math.abs(peak), 0.2, 0.9);
 }
 
+console.log('\nV-wave field on the double banana: down the parasagittal chains, little on the temporal ones:');
+{
+  // learningeeg's vertex-wave figure: "symmetric discharge maximal over the parasagittal
+  // and central chains", the wave on all four rows of each parasagittal chain; the owner
+  // (2026-10-22): F4-C4 down, C4-P4 up, and a smaller wave the same way on Fp2-F4 and
+  // P4-O2, and a smaller one again on the temporal chains. Read at the instant of the
+  // largest Cz-Pz swing, each row's share of it, signed. The figure could not be read
+  // row by row (fields.ts, VERTEX_FIELD), so these bounds are orderings, not figures:
+  // the outer link carries the wave the same way as its neighbour and is smaller but
+  // visible (0.3-0.95 of it), and the temporal chains carry under 0.6 of the parasagittal.
+  const bip = displayContribAll('bipolar-ap', 'awake', 'v-waves', 120, 20);
+  const ref = bip['Cz-Pz'];
+  let t = 0;
+  for (let i = 0; i < ref.length; i++) if (Math.abs(ref[i]) > Math.abs(ref[t])) t = i;
+  const at = (row: string) => bip[row][t];
+  for (const [outer, inner] of [['Fp2-F4', 'F4-C4'], ['P4-O2', 'C4-P4'], ['Fp1-F3', 'F3-C3'], ['P3-O1', 'C3-P3']] as const) {
+    check(`v-waves ${outer} / ${inner} at the wave's peak (same way, smaller, visible)`, at(outer) / at(inner), 0.3, 0.95);
+  }
+  check('v-waves F4-C4 and C4-P4 deflect opposite ways (reversal at C4)', Math.sign(at('F4-C4')) * Math.sign(at('C4-P4')), -1, -1);
+  check('v-waves F3-C3 and C3-P3 deflect opposite ways (reversal at C3)', Math.sign(at('F3-C3')) * Math.sign(at('C3-P3')), -1, -1);
+  const big = (rows: string[]) => Math.max(...rows.map((r) => Math.abs(at(r))));
+  check('v-waves largest temporal row / largest parasagittal row (smaller on the temporal chains)',
+    big(['Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2'])
+      / big(['Fp1-F3', 'F3-C3', 'C3-P3', 'P3-O1', 'Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2']), 0.1, 0.6);
+}
+
 console.log('\nV-wave: sharp, phase-reverses across Cz (IK-008), bipolar-ap:');
 {
   const fzCz = displayContrib('bipolar-ap', 'awake', 'v-waves', 'Fz-Cz', 120, 20);
@@ -2922,7 +2999,10 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     check('V-wave C3-A1 / Cz-A1 (bilateral central field, not a point at Cz)', median(pk.map(i => c3[i] / cz[i])), 0.4, 0.9);
     const bip = isolated('bipolar-ap', 'v-waves', 120, 20);
     check('V-wave F3-C3 / Fz-Cz (LE: over the parasagittal chains too)', peakAbs(bip['F3-C3']) / peakAbs(bip['Fz-Cz']), 0.4, 2);
-    check('V-wave T3-T5 / Fz-Cz (not a temporal field)', peakAbs(bip['T3-T5']) / peakAbs(bip['Fz-Cz']), 0, 0.2);
+    // The ceiling was 0.2, with no source. Since 2026-10-22 the temporal chains carry a small
+    // wave on purpose (owner; learningeeg's figure shows a little there), which reads 0.2; the
+    // field check above holds them under 0.6 of the parasagittal rows.
+    check('V-wave T3-T5 / Fz-Cz (not a temporal field)', peakAbs(bip['T3-T5']) / peakAbs(bip['Fz-Cz']), 0, 0.35);
     const at = argAbsMax(bip['Fz-Cz']);
     check('V-wave reverses at C3 (sign of F3-C3 x C3-P3 at the peak)', Math.sign(bip['F3-C3'][at]) * Math.sign(bip['C3-P3'][at]), -1, -1);
   }
@@ -4577,15 +4657,17 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
   const SECS = 40, SEED = 3;
   const montage = MONTAGES['bipolar-ap'];
   const chans = montage.channels.map((c, i) => ({ c, i })).filter(({ c }) => c.active !== 'ECG');
-  type Mark = { id: string; t: number; dur: number; rows: string[] };
-  const appRun = (state: PatientState, patterns: string[]) => {
+  // `span`: the mark is a box over [t, t + span] (an event with extent), not an arrow;
+  // Infinity while a pattern with no end is on, until the mark with its `key` closes it.
+  type Mark = { id: string; label?: string; t: number; dur: number; span?: number; key?: string; rows: string[] };
+  const appRun = (state: PatientState, patterns: string[], opts?: SimSettings['patternOptions'], secs = SECS) => {
     const settings: SimSettings = {
       speed: 30, sensitivity: 7, patientState: state, activePatterns: new Set(patterns),
-      ictalParams: defaultIctalParamsMap(), artifactParams: defaultArtifactParams(),
+      ictalParams: defaultIctalParamsMap(), artifactParams: defaultArtifactParams(), patternOptions: opts,
     };
     const src = new SimulationSource(SEED, FS);
     src.useAppMode();
-    const n = SECS * FS;
+    const n = secs * FS;
     const data = chans.map(() => new Float64Array(n));
     const marks: Mark[] = [];
     for (let i = 0; i < n; i++) {
@@ -4593,15 +4675,22 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
       const avg = commonAverage(allV);
       chans.forEach(({ c }, k) => { data[k][i] = computeChannelVoltage(c, src.t, allV, avg); });
       for (const m of src.groundTruth.marks) {
-        const rows = markRows(markRowSizes(m.fields, montage), m.inUv ? settings.sensitivity : undefined);
-        marks.push({ id: m.id, t: i / FS - (m.ago ?? 0), dur: m.dur, rows: rows.map((c) => montage.channels[c].label) });
+        const t = i / FS - (m.ago ?? 0);
+        // As the canvas does: a closing mark ends the open box with its key.
+        const open = m.key != null ? marks.find((o) => o.key === m.key && o.span === Infinity) : undefined;
+        if (open) { open.span = t - open.t; continue; }
+        const rows = m.page ? chans.map(({ i: c }) => c)
+          : markRows(markRowSizes(m.fields, montage), m.inUv ? settings.sensitivity : undefined, m.span != null ? Infinity : undefined);
+        marks.push({ id: m.id, label: m.label, t, dur: m.dur, span: m.span, key: m.key, rows: rows.map((c) => montage.channels[c].label) });
       }
     }
     return { data, marks };
   };
   // What the artifact does to the page, and what the arrows say about it.
-  const survey = (state: PatientState, patterns: string[], toggle: string) => {
-    const on = appRun(state, patterns), off = appRun(state, patterns.filter((x) => x !== toggle));
+  // `allRows`: look for events on every row, not only the rows the marks name — for a
+  // toggle whose marks are the thing being tested, and may be missing.
+  const survey = (state: PatientState, patterns: string[], toggle: string, opts?: SimSettings['patternOptions'], allRows = false) => {
+    const on = appRun(state, patterns, opts), off = appRun(state, patterns.filter((x) => x !== toggle), opts);
     const n = SECS * FS;
     const marks = on.marks.filter((m) => m.id === toggle || (toggle === 'eye-opening' && m.id === 'eye-closing'));
     const arrowed = new Set(marks.flatMap((m) => m.rows));
@@ -4611,29 +4700,48 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
     // 2 mm or more (14 uV at 7 uV/mm), joined across gaps under 0.4 s. Only those
     // rows: eye opening also blocks the alpha rhythm at the back of the head, and
     // that difference is the background's, not the artifact's.
-    const watch = chans.map(({ c }, k) => (arrowed.has(c.label) ? k : -1)).filter((k) => k >= 0);
-    const events: [number, number][] = [];
-    let start = -1, last = -1;
-    for (let i = 0; i < n; i++) {
-      let hit = false;
-      for (const k of watch) if (Math.abs(on.data[k][i] - off.data[k][i]) >= 14) { hit = true; break; }
-      if (hit) { if (start < 0) start = i; last = i; }
-      else if (start >= 0 && i - last > 0.4 * FS) { events.push([start / FS, last / FS]); start = -1; }
-    }
-    if (start >= 0) events.push([start / FS, last / FS]);
+    const watch = chans.map(({ c }, k) => (allRows || arrowed.has(c.label) ? k : -1)).filter((k) => k >= 0);
+    const episodes = (gapS: number) => {
+      const out: [number, number][] = [];
+      let start = -1, last = -1;
+      for (let i = 0; i < n; i++) {
+        let hit = false;
+        for (const k of watch) if (Math.abs(on.data[k][i] - off.data[k][i]) >= 14) { hit = true; break; }
+        if (hit) { if (start < 0) start = i; last = i; }
+        else if (start >= 0 && i - last > gapS * FS) { out.push([start / FS, last / FS]); start = -1; }
+      }
+      if (start >= 0) out.push([start / FS, last / FS]);
+      return out;
+    };
+    const events = episodes(0.4);
+    // An event is marked by an arrow whose window touches it, or by a box over it.
+    const covers = (m: Mark, a: number, b: number) => (m.span != null
+      ? m.t <= b + 0.15 && m.t + m.span >= a - 0.15
+      : m.t + m.dur >= a - 0.15 && m.t <= b + 0.15);
     const times = marks.map((m) => m.t).sort((a, b) => a - b);
     let longestGap = times.length ? Math.max(times[0], SECS - times[times.length - 1]) : SECS;
     for (let k = 1; k < times.length; k++) longestGap = Math.max(longestGap, times[k] - times[k - 1]);
+    // The contribution on the row the artifact is largest on, for how much of it the boxes hold.
+    const top = moved.indexOf(largest);
+    const inBoxes = () => {
+      let inside = 0, all = 0;
+      for (let i = 0; i < n; i++) {
+        const v = (on.data[top][i] - off.data[top][i]) ** 2, t = i / FS;
+        all += v;
+        if (marks.some((m) => m.span != null && t >= m.t && t <= m.t + m.span)) inside += v;
+      }
+      return inside / all;
+    };
     return {
-      marks, events, longestGap,
-      unmarked: events.filter(([a, b]) => !marks.some((m) => m.t + m.dur >= a - 0.15 && m.t <= b + 0.15)).length,
+      marks, events, longestGap, episodes, inBoxes,
+      unmarked: events.filter(([a, b]) => !marks.some((m) => covers(m, a, b))).length,
       // Arrows go on from 35% of the largest row (MARK_ROW_SHARE); a row moved by
       // half as much as the largest and never pointed at is a row left out.
       rowsLeftOut: chans.filter(({ c }, k) => moved[k] >= 0.5 * largest && !arrowed.has(c.label)).map(({ c }) => c.label),
     };
   };
 
-  console.log('Events: each one has an arrow, and every row it is plainly on has one:');
+  console.log('Events: each one has an arrow or a box, and every row it is plainly on has one:');
   const EVENTS: [string, PatientState, string[]][] = [
     ['blink', 'awake', ['eyes-open', 'blink']], ['eye-opening', 'awake', ['eye-opening']],
     ['eye-movement', 'awake', ['eye-movement']], ['chewing', 'awake', ['chewing']],
@@ -4643,34 +4751,112 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
   for (const [toggle, state, patterns] of EVENTS) {
     const r = survey(state, patterns, toggle);
     check(`arrows: ${toggle} events on the page (the test has something to test)`, r.events.length, 2, 1e6);
-    check(`arrows: ${toggle} events with no arrow`, r.unmarked, 0, 0);
+    check(`arrows: ${toggle} events with no arrow or box`, r.unmarked, 0, 0);
     check(`arrows: ${toggle} rows moved by half its largest row or more and never pointed at`, r.rowsLeftOut.length, 0, 0);
     if (toggle === 'chewing') {
-      // One arrow set per chew on each side. Chews come 1.5 a second (+-20%), so two
-      // on the same rows are at least 0.55 s apart; a chew used to be marked two or
-      // three times, tens of milliseconds apart, at each gap in its own muscle noise.
-      const byRows = new Map<string, number[]>();
-      for (const m of r.marks) byRows.set(m.rows.join(' '), [...(byRows.get(m.rows.join(' ')) ?? []), m.t]);
-      let closest = Infinity;
-      for (const ts of byRows.values()) for (let k = 1; k < ts.length; k++) closest = Math.min(closest, ts[k] - ts[k - 1]);
-      check('arrows: chewing shortest time between two arrows on the same rows (one per chew)', closest, 0.45, 60, ' s');
+      // One box per episode on each side (3-5 chews, 1.5 a second): an episode is
+      // chewing with no gap of 0.8 s. Every episode has at least three chews, so no
+      // chew is left as an arrow of its own.
+      check('boxes: chewing arrows on single chews (every episode is several chews)', r.marks.filter((m) => m.span == null).length, 0, 0);
+      check('boxes: chewing boxes per episode and side (one each)',
+        r.marks.filter((m) => m.span != null).length / 2 / Math.max(1, r.episodes(0.8).length), 0.9, 1.1);
     }
   }
 
-  console.log('\nContinuous artifacts: pointed at throughout, on the rows they are on:');
+  // Every toggle annotates what it draws. The owner, 2026-10-23: "everything should have
+  // an intention, so annotations should be easy, whatever is present in the signals
+  // should be by design." Each generator reports its own events (PatternMarkEvent) or
+  // declares a box for as long as it is on (openBox); nothing is detected. Until then
+  // 25 toggles — the benign variants, the IEDs, slowing, periodic patterns, burst-
+  // suppression, photic, HV — drew on the page with no annotation, and no check
+  // looked, because the arrow checks above only ever ran on toggles that had marks.
+  // So this runs EVERY toggle as the app would switch it on (its state, what it
+  // requires) and looks for events on every row: 2 mm of its contribution anywhere,
+  // with no arrow or box over that moment, fails.
+  console.log('\nEvery toggle annotates what it draws (owner, 2026-10-23: "whatever is present in the signals should be by design"):');
+  {
+    const silent: string[] = [];
+    for (const id of PATTERN_CATEGORIES.flatMap((c) => c.patterns.map((p) => p.id))) {
+      const page = toggle(initialToggles('awake'), id);
+      const r = survey(page.patientState, [...page.active], id, undefined, true);
+      if (!r.events.length) { silent.push(id); continue; }
+      check(`by design: ${id} events on the page with no arrow or box`, r.unmarked, 0, 0);
+    }
+    // A toggle with nothing on the page in 40 s draws nothing of its own (Slow-Wave
+    // Sleep, which sets the stage) or draws rarely; listed so a silent one is seen.
+    console.log(`  no events in ${SECS} s (nothing to annotate): ${silent.join(', ') || 'none'}`);
+  }
+
+  console.log('\nBoxes for events with extent (owner, 2026-10-22), arrows for single ones:');
+  {
+    // POSTS: singles more than 1 s apart stay arrows; with the trains form every
+    // event is a train of 2-6 at 4-6 a second, and each is one box about a second long.
+    const singles = survey('n1', ['posts'], 'posts');
+    check('boxes: single POSTS given a box', singles.marks.filter((m) => m.span != null).length, 0, 0);
+    const trains = survey('n1', ['posts'], 'posts', { postsForm: 'trains' });
+    check('boxes: POSTS trains drawn as boxes', trains.marks.filter((m) => m.span != null).length, 2, 1e6);
+    check('boxes: POSTS trains left as arrows', trains.marks.filter((m) => m.span == null).length, 0, 0);
+    // The shortest train the source can draw is two elements at 6 a second (one
+    // interval, at least 0.15 s with its 10% jitter) ending in the shortest element
+    // (0.09 s): 0.24 s. The box is that train's own length since 2026-10-23, no
+    // longer the stretch a threshold found, so the floor is 0.2; NPK's "about a
+    // second (rarely > 2 s)" keeps the ceiling at 2.5.
+    check('boxes: POSTS train boxes outside 0.2-2.5 s long',
+      trains.marks.filter((m) => m.span != null && (m.span < 0.2 || m.span > 2.5)).length, 0, 0);
+    // Vertex waves: a run (waves joined by gaps under 1.2 s, 0.6 s or longer) gets a box, a single wave an arrow.
+    const v = survey('n1', ['v-waves'], 'v-waves');
+    const runs = v.episodes(1.2).filter(([a, b]) => b - a >= 0.6);
+    const loneWaves = v.episodes(1.2).filter(([a, b]) => b - a < 0.6);
+    check('boxes: vertex-wave runs with no box over them',
+      runs.filter(([a, b]) => !v.marks.some((m) => m.span != null && m.t <= b && m.t + m.span >= a)).length, 0, 0);
+    // Forty seconds may hold no run at all (seed 3 has none), which would let the two
+    // checks around this pass on nothing; five minutes holds several.
+    const vLong = appRun('n1', ['v-waves'], undefined, 300).marks.filter((m) => m.id === 'v-waves' && m.span != null);
+    check('boxes: vertex-wave runs boxed in 300 s (a quarter of events are runs)', vLong.length, 2, 1e6);
+    check('boxes: vertex-wave run boxes outside 0.6-2.6 s long (2-3 waves, 0.6-1.1 s apart)',
+      vLong.filter((m) => m.span! < 0.6 || m.span! > 2.6).length, 0, 0);
+    check('boxes: single vertex waves given a box',
+      loneWaves.filter(([a, b]) => v.marks.some((m) => m.span != null && m.t <= b && m.t + m.span >= a)).length, 0, 0);
+    // Spindles and K-complexes: always a box, holding the event — measured as the share
+    // of its contribution on its largest row that falls inside the boxes.
+    const sp = survey('n2', ['spindles'], 'spindles');
+    check('boxes: spindle energy inside its boxes (largest row)', sp.inBoxes(), 0.9, 1);
+    check('boxes: spindle boxes longer than 2.5 s', sp.marks.filter((m) => m.span != null && m.span > 2.5).length, 0, 0);
+    const kc = survey('n2', ['k-complex'], 'k-complex');
+    check('boxes: K-complex energy inside its boxes (largest row)', kc.inBoxes(), 0.9, 1);
+    check('boxes: K-complexes left as arrows', kc.marks.filter((m) => m.span == null).length, 0, 0);
+    const kcSp = survey('n2', ['k-complex'], 'k-complex', { kcSpindle: 'always' });
+    check('boxes: K-complex energy inside its boxes, every one with a spindle (largest row)', kcSp.inBoxes(), 0.9, 1);
+    // A tonic-clonic seizure reports its phases as it reaches them: tonic 10 s,
+    // clonic 45 s, post-ictal suppression 35 s (sources/ictal.ts).
+    const gtc = appRun('awake', ['gtc-ictal'], undefined, 70).marks.filter((m) => m.id === 'gtc-ictal' && m.span != null);
+    check('boxes: tonic-clonic phases boxed, in order, at their lengths (tonic 10, clonic 45, suppression 35)',
+      gtc.map((m) => `${m.label}:${m.span}`).join(',') === 'Tonic phase:10,Clonic phase:45,Post-ictal suppression:35' ? 1 : 0, 1, 1);
+  }
+
+  // A continuous artifact has no events, only a presence, so it is one box from the
+  // moment it is on (owner, 2026-10-23). Until then it was an arrow every 1.5 s, and a
+  // muscle burst or a drift between two arrows went unannotated (the every-toggle
+  // check above found 1, 4 and 24 such stretches for muscle, sweat and bad electrodes).
+  console.log('\nContinuous artifacts: one box for as long as they last, on the rows they are on:');
+  const wholeRun = (r: ReturnType<typeof survey>) =>
+    r.marks.filter((m) => m.span != null && m.t <= 0.05 && m.t + m.span >= SECS - 0.05).length;
   for (const toggle of ['muscle', 'sweat', 'bad-electrodes']) {
     const r = survey('awake', [toggle], toggle);
-    // An arrow every 1.5 s (CONTINUOUS_MARK_S); the requirement is that none is 2 s from the next.
-    check(`arrows: ${toggle} longest stretch with no arrow (one every 1.5 s)`, r.longestGap, 0, 2, ' s');
+    check(`boxes: ${toggle} boxes over the whole run (one)`, wholeRun(r), 1, 1);
+    check(`boxes: ${toggle} marks besides that box`, r.marks.length - 1, 0, 0);
     check(`arrows: ${toggle} rows moved by half its largest row or more and never pointed at`, r.rowsLeftOut.length, 0, 0);
   }
 
-  console.log('\nECG and mains: under a millimetre on this montage, so one arrow each time and not ten:');
-  for (const toggle of ['ecg-artifact', '50hz']) {
-    const r = survey('awake', [toggle], toggle);
-    check(`arrows: ${toggle} longest stretch with no arrow`, r.longestGap, 0, 2, ' s');
-    check(`arrows: ${toggle} most rows pointed at for one occurrence, bipolar-ap at 7 uV/mm`,
-      Math.max(...r.marks.map((m) => m.rows.length)), 1, 1);
+  console.log('\nECG and mains: under a millimetre on this montage, so on one row and not ten:');
+  {
+    const ecg = survey('awake', ['ecg-artifact'], 'ecg-artifact');
+    check('arrows: ecg-artifact longest stretch with no arrow (one a beat)', ecg.longestGap, 0, 2, ' s');
+    check('arrows: ecg-artifact most rows pointed at for one occurrence, bipolar-ap at 7 uV/mm',
+      Math.max(...ecg.marks.map((m) => m.rows.length)), 1, 1);
+    const mains = survey('awake', ['50hz'], '50hz');
+    check('boxes: 50hz boxes over the whole run (one)', wholeRun(mains), 1, 1);
+    check('boxes: 50hz rows boxed, bipolar-ap at 7 uV/mm', Math.max(...mains.marks.map((m) => m.rows.length)), 1, 1);
   }
 
   console.log('\nSpindles: each kind pointed at where it is, not both everywhere:');
@@ -4683,6 +4869,60 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
       r.marks.filter((m) => m.rows.includes('Fp1-F3') && m.rows.includes('P3-O1')).length, 0, 0);
     check('arrows: spindles marks that are on neither (every spindle is frontal or centroparietal)',
       r.marks.length - frontal - posterior, 0, 0);
+  }
+}
+
+// The midline in sleep, as the app draws it with nothing switched on. The owner
+// found a two-second, ~50 uV, 7 Hz burst on Fz-Cz in N1 with only POSTS on
+// (2026-10-14): the background's frontal midline theta, a waking and drowsy rhythm
+// (eegpedia, "Midline theta rhythm (Ciganek)"), carried into sleep by the diffuse
+// sleep-theta gain and quadrupled there. Nothing caught it: the N1 midline check
+// above reads RMS over minutes, where an occasional burst disappears. This reads
+// it the way the eye does — does any one second stand out? With the diffuse sleep
+// theta alone, the largest 1 s window of 5-8 Hz on Fz-Cz is 1.8-2.1 times the
+// median one; with the burst it was 3.2-4.8 (seeds 3, 7, 11). The ceiling of 3
+// separates the two and has no other source.
+//
+// Since 2026-10-23 the midline theta rhythm is not in the background at all: it is
+// its own toggle (Midline Theta, sources/variants.ts), off unless chosen, because
+// nothing should be on the page that no toggle owns (owner: "whatever is present in
+// the signals should be by design"). So the waking states are read too.
+console.log('\nThe midline (app, nothing switched on): no theta burst stands out:');
+{
+  const fzcz = MONTAGES['bipolar-ap'].channels.find((c) => c.label === 'Fz-Cz')!;
+  const thetaRms = (x: Float64Array) => {
+    let p = 0;
+    for (let f = 5; f <= 8; f += 0.5) {
+      let re = 0, im = 0;
+      for (let i = 0; i < x.length; i++) {
+        re += x[i] * Math.cos(2 * Math.PI * f * i / FS);
+        im += x[i] * Math.sin(2 * Math.PI * f * i / FS);
+      }
+      p += re * re + im * im;
+    }
+    return Math.sqrt(p);
+  };
+  for (const state of ['awake', 'drowsy', 'n1', 'n2'] as const) {
+    let worst = 0;
+    for (const seed of [3, 7, 11]) {
+      const settings: SimSettings = {
+        speed: 30, sensitivity: 7, patientState: state, activePatterns: new Set(),
+        ictalParams: defaultIctalParamsMap(), artifactParams: defaultArtifactParams(),
+      };
+      const src = new SimulationSource(seed, FS);
+      src.useAppMode();
+      const n = 120 * FS, x = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        const v = src.next(settings);
+        x[i] = computeChannelVoltage(fzcz, 0, v, commonAverage(v));
+      }
+      const w: number[] = [];
+      for (let k = 0; k + FS <= n; k += FS) w.push(thetaRms(x.subarray(k, k + FS)));
+      w.sort((a, b) => a - b);
+      worst = Math.max(worst, w[w.length - 1] / w[Math.floor(w.length / 2)]);
+    }
+    check(`${state}: largest 1 s of 5-8 Hz on Fz-Cz / the median second, worst of 3 subjects (a midline burst made it 3.2-4.8)`,
+      worst, 1, 3);
   }
 }
 

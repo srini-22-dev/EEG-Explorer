@@ -44,6 +44,7 @@
 
 import { ARTIFACT_SOURCES, EmgGenerator, OCULAR_FIRST_EVENT_LEAD_SEC } from '../artifacts';
 import { Gaussian, deriveSeed } from '../rng';
+import { markQueue } from './transient';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
 
 const EPISODE_PERIOD = 10;
@@ -66,9 +67,10 @@ const CHEW_EMG_RMS_UV = 35;
 /**
  * The shared chew schedule. Deterministic from the subject seed and the sample
  * count, so the left and right generators — separate objects — compute the same
- * envelope sample for sample without talking to each other.
+ * envelope sample for sample without talking to each other. `onRun` hears of each
+ * run of chews as it starts, with how long it will be on the page.
  */
-function makeChewEnvelope(subjectSeed: number, dt: number) {
+function makeChewEnvelope(subjectSeed: number, dt: number, onRun: (span: number) => void) {
   const g = new Gaussian(deriveSeed(subjectSeed, 'chew-schedule'));
   const jit = (base: number, frac: number) => base * (1 + (g.uniform() - 0.5) * 2 * frac);
   let clock = 0;
@@ -94,6 +96,8 @@ function makeChewEnvelope(subjectSeed: number, dt: number) {
         });
       }
       episodeEnd = count * period;
+      const last = chews[count - 1];
+      onRun(last.at + last.len);
     }
     if (episodeStart < 0) return 0;
     const u = clock - episodeStart;
@@ -111,9 +115,12 @@ function makeChewEnvelope(subjectSeed: number, dt: number) {
 }
 
 function makeChewSide(seed: number, dt: number, subjectSeed: number): PatternGenerator {
-  const envelope = makeChewEnvelope(subjectSeed, dt);
+  // One box per run of chews on this side, from the first chew to the end of the last.
+  const marks = markQueue();
+  const envelope = makeChewEnvelope(subjectSeed, dt, (span) => marks.push({ span }));
   const emg = new EmgGenerator(seed, dt);   // this side's own motor units
   return {
+    takeMarks: () => marks.take(),
     next(ctx) {
       const env = envelope(ctx.enabled);
       const fuzz = emg.next();               // advance every sample: no stale noise on resume

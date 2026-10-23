@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Montage, ALL_ELECTRODES } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
-import { markRowSizes, markRows } from '../utils/markRows';
+import { markRowSizes, markRows, markRowSigns, markBlocks } from '../utils/markRows';
 import { SimulationSource } from '../engine/adapter';
 import type { ArtifactMark } from '../engine/engine';
 import { PATTERN_BY_ID } from '../utils/patterns';
@@ -68,10 +68,6 @@ const HISTORY_SEC = 60;
 const EVICT_CHUNK = 250;
 
 /** Index of the first element >= value in a sorted array. */
-// Annotation arrows: an artifact gets one on every row it is plainly on
-// (utils/markRows.ts), and its name once in this many seconds however often it
-// recurs.
-const LABEL_EVERY_S = 2.5;
 
 function lowerBound(arr: number[], value: number): number {
   let lo = 0, hi = arr.length;
@@ -167,12 +163,10 @@ export function EEGCanvas({
   const rawFrames = useRef<Record<string, number>[]>([]);
   // Artifact onsets reported by the engine, stamped with their sample time, for
   // the annotation arrows. Times, not rows, so they survive a montage change.
-  const marksRef = useRef<(ArtifactMark & { t: number; labelled: boolean })[]>([]);
-  // When each kind of artifact last had its name written beside an arrow. Every
-  // event gets an arrow, but a name on every chew or heartbeat buries the trace.
-  const lastLabelRef = useRef<Record<string, number>>({});
-  // For an artifact's fields and a montage: its size on each channel.
-  const markRowsRef = useRef(new WeakMap<object, Map<Montage, number[]>>());
+  const marksRef = useRef<(ArtifactMark & { t: number })[]>([]);
+  // For an artifact's fields and a montage: its size on each channel, and which
+  // way it moves each one.
+  const markRowsRef = useRef(new WeakMap<object, Map<Montage, { sizes: number[]; signs: number[] }>>());
 
   useEffect(() => {
     const frames = rawFrames.current;
@@ -256,10 +250,11 @@ export function EEGCanvas({
           const avgRef = commonAverage(allV);
           timeBuffer.current.push(lastT);
           for (const m of simSource.groundTruth.marks) {
-            const key = m.label ?? m.id;
-            const labelled = lastT - (lastLabelRef.current[key] ?? -Infinity) >= LABEL_EVERY_S;
-            if (labelled) lastLabelRef.current[key] = lastT;
-            marksRef.current.push({ ...m, t: lastT - (m.ago ?? 0), labelled });
+            const t = lastT - (m.ago ?? 0);
+            // A pattern that has stopped closes the box it opened (ArtifactMark.key).
+            const open = m.key != null ? marksRef.current.find(o => o.key === m.key && o.span === Infinity) : undefined;
+            if (open) open.span = t - open.t;
+            else marksRef.current.push({ ...m, t });
           }
           // `next()` reuses its return object, so keep a copy.
           rawFrames.current.push({ ...allV });
@@ -282,10 +277,12 @@ export function EEGCanvas({
           tb.splice(0, evict);
           rawFrames.current.splice(0, evict);
           for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i]?.splice(0, evict);
+          // A mark goes once all of it has aged out: a box is kept while its end is
+          // still in the buffer, and an open one (span Infinity) until it closes.
           const marks = marksRef.current;
-          let gone = 0;
-          while (gone < marks.length && marks[gone].t < tb[0]) gone++;
-          if (gone) marks.splice(0, gone);
+          let kept = 0;
+          for (const m of marks) if (m.t + (m.span ?? m.dur) >= tb[0]) marks[kept++] = m;
+          marks.length = kept;
         }
       }
 
@@ -487,20 +484,75 @@ export function EEGCanvas({
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
         const rowOfChannel = new Map(layout.filter(r => r.channelIndex >= 0).map(r => [r.channelIndex, r]));
+        // Every arrow carries its artifact's name (the owner, 2026-10-14: "all arrows
+        // should be annotated"; it was one name per artifact every 2.5 s). A name is
+        // left off only where the same name already covers that spot.
+        const drawnLabels: { x0: number; y0: number; x1: number; y1: number; text: string }[] = [];
         for (const m of marksRef.current) {
-          if (m.t + m.dur > tEnd) continue;      // still developing: its peak is not drawn yet
-          if (m.t < currentT - winSec) continue; // scrolled off
+          if (m.span == null && m.t + m.dur > tEnd) continue; // still developing: its peak is not drawn yet
+          if (m.t + (m.span ?? 0) < currentT - winSec) continue; // scrolled off
           // The rows this artifact is on, in this montage: every row within reach of
           // the largest gets an arrow — a blink is on all four frontopolar rows.
           let byMontage = markRowsRef.current.get(m.fields);
           if (!byMontage) { byMontage = new Map(); markRowsRef.current.set(m.fields, byMontage); }
-          let sizes = byMontage.get(montage);
-          if (!sizes) { sizes = markRowSizes(m.fields, montage); byMontage.set(montage, sizes); }
-          const channels = markRows(sizes, m.inUv ? currentSettings.sensitivity : undefined);
+          let rowInfo = byMontage.get(montage);
+          if (!rowInfo) {
+            rowInfo = { sizes: markRowSizes(m.fields, montage), signs: markRowSigns(m.fields, montage) };
+            byMontage.set(montage, rowInfo);
+          }
+          // A pattern acting on the whole background is on every EEG row (ArtifactMark.page),
+          // not the ECG, which is the heart.
+          const channels = m.page ? [...rowOfChannel.keys()].filter(c => montage.channels[c].active !== 'ECG') : markRows(rowInfo.sizes, m.inUv ? currentSettings.sensitivity : undefined, m.span != null ? Infinity : undefined);
           const j0 = lowerBound(tb, m.t);
           const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
           const color = PATTERN_COLOR[pid] ?? currentTheme.overlayText;
-          let named = !m.labelled;
+          const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
+          const label = (x: number, ty: number) => {
+            const textW = ctx.measureText(text).width;
+            const box = { x0: x - textW / 2 - 4, y0: ty - 7, x1: x + textW / 2 + 4, y1: ty + 7, text };
+            if (drawnLabels.some(b => b.text === text && b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) return;
+            drawnLabels.push(box);
+            ctx.fillStyle = currentTheme.overlayBg;
+            ctx.fillRect(box.x0, box.y0, textW + 8, 14);
+            ctx.fillStyle = currentTheme.overlayText;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, ty);
+          };
+          if (m.span != null) {
+            // An event with extent: a box from its start to its end (or to now, for a
+            // seizure's phase still running) around each chain block it is on.
+            const xa = Math.max(lblW, w - (currentT - m.t) * pxPerSec);
+            const xb = Math.min(w, w - (currentT - Math.min(m.t + m.span, tEnd)) * pxPerSec);
+            if (xb - xa < 2) continue;
+            for (const block of markBlocks(channels, montage)) {
+              const first = rowOfChannel.get(block[0]);
+              const last = rowOfChannel.get(block[block.length - 1]);
+              if (!first || !last) continue;
+              const y0 = (first.centerFrac - first.rowFrac / 2) * h + 2;
+              const y1 = (last.centerFrac + last.rowFrac / 2) * h - 2;
+              ctx.save();
+              ctx.globalAlpha = 0.08;
+              ctx.fillStyle = color;
+              ctx.fillRect(xa, y0, xb - xa, y1 - y0);
+              ctx.restore();
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.roundRect(xa, y0, xb - xa, y1 - y0, 5);
+              ctx.stroke();
+              const textW = ctx.measureText(text).width;
+              label(Math.min(xa + 6 + textW / 2, xb - textW / 2 - 4), y0 + 9);
+            }
+            continue;
+          }
+          // Which swing each arrow points at. A one-source artifact moves every row the
+          // way its field says, so the rows vote on which way this event went and each
+          // arrow then goes to its row's largest swing in that direction. Each row used
+          // to take its own largest swing either way, and a POSTS whose small negative
+          // after-wave happened to be larger on one row got its arrow there, from below,
+          // while the rest pointed at the peak.
+          const picks: { row: (typeof layout)[number]; data: number[]; j1: number; sign: number }[] = [];
+          let vote = 0;
           for (const c of channels) {
             const row = rowOfChannel.get(c);
             if (!row) continue;
@@ -510,6 +562,17 @@ export function EEGCanvas({
             let jp = j0;
             for (let j = j0 + 1; j <= j1; j++) {
               if (Math.abs(data[j] - data[j0]) > Math.abs(data[jp] - data[j0])) jp = j;
+            }
+            vote += rowInfo.signs[c] * (data[jp] - data[j0]);
+            picks.push({ row, data, j1, sign: rowInfo.signs[c] });
+          }
+          const polarity = Math.sign(vote);
+          for (const { row, data, j1, sign } of picks) {
+            const want = sign * polarity; // +1 the largest rise in uV, -1 the largest fall, 0 either
+            let jp = j0;
+            for (let j = j0 + 1; j <= j1; j++) {
+              const d = data[j] - data[j0], best = data[jp] - data[j0];
+              if (want === 0 ? Math.abs(d) > Math.abs(best) : want * d > want * best) jp = j;
             }
             const x = w - (currentT - tb[jp]) * pxPerSec;
             if (x < lblW + 6 || x > w - 4) continue;
@@ -530,17 +593,7 @@ export function EEGCanvas({
             ctx.moveTo(x, tip); ctx.lineTo(x - 4, tip + dir * 7); ctx.lineTo(x + 4, tip + dir * 7);
             ctx.closePath();
             ctx.fill();
-            if (named) continue;
-            // The name goes on one arrow of the event, and not on every event.
-            named = true;
-            const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
-            const textW = ctx.measureText(text).width;
-            const ty = tail + dir * 9;
-            ctx.fillStyle = currentTheme.overlayBg;
-            ctx.fillRect(x - textW / 2 - 4, ty - 7, textW + 8, 14);
-            ctx.fillStyle = currentTheme.overlayText;
-            ctx.textBaseline = 'middle';
-            ctx.fillText(text, x, ty);
+            label(x, tail + dir * 9);
           }
         }
 
@@ -613,12 +666,15 @@ export function EEGCanvas({
         ctx.restore();
       }
 
-      // 7. State + sensitivity label (top-right)
+      // 7. State + sensitivity label (top-right). It names only what the state's own
+      // background carries: K-complexes, spindles and REMs are toggles, and the label
+      // claimed them while they were off (owner, 2026-10-23: nothing on the page that
+      // is not there by design).
       {
         const stateLabel = {
           awake: 'Awake · PDR α', drowsy: 'Drowsy · θ',
-          n1: 'N1 Sleep', n2: 'N2 Sleep · K+Spindles', n3: 'N3 / SWS · δ',
-          rem: 'REM · low-voltage mixed + REMs',
+          n1: 'N1 Sleep', n2: 'N2 Sleep', n3: 'N3 / SWS · δ',
+          rem: 'REM · low-voltage mixed',
         }[currentSettings.patientState] ?? currentSettings.patientState;
 
         ctx.fillStyle    = currentTheme.stateTextColor;

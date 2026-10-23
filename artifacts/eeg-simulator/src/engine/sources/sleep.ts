@@ -31,8 +31,9 @@
 
 import { synchronousPatches } from '../forward';
 import { Gaussian, deriveSeed } from '../rng';
-import { TransientSource } from './transient';
+import { TransientSource, markQueue } from './transient';
 import { gaussian } from './morphology';
+import { VERTEX_FIELD } from './fields';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
 
 /** Per-event multiplicative jitter: base * (1 +- frac). */
@@ -45,6 +46,7 @@ const between = (g: Gaussian, lo: number, hi: number): number => lo + (hi - lo) 
 /** Wrap a `TransientSource` as a `PatternGenerator` (gate its output on `ctx.enabled`). */
 const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
   next: (ctx) => ts.next(ctx.enabled),
+  takeMarks: () => ts.takeMarks(),
 });
 
 const TWO_PI = 2 * Math.PI;
@@ -102,13 +104,20 @@ function spindleBurst(t: number, dur: number, freq: number, phase: number): numb
 // (12%) and a larger slower one 130 ms after (28%). The whole element spans
 // ~0.35 s, inside AASM's 0.5 s.
 //
-// Field: Cz with both central regions and, less, Fz/Pz — measured on the
-// double banana it gives F3-C3/C3-P3 ~85% of Fz-Cz/Cz-Pz, reversing at C3 and
-// C4 as well as Cz, and almost nothing on the temporal chains.
+// Field: maximal at the vertex and over both parasagittal chains (fields.ts,
+// VERTEX_FIELD, 2026-10-22): reversing at Cz on the midline and at C3/C4 on the
+// parasagittal chains, smaller on the Fp-F and P-O links beyond, small on the
+// temporal chains.
+//
+// The wider field has gentler slopes, so the same source size drew a smaller wave
+// on the bipolar rows. The owner judged the size on the double banana (about 4 mm
+// on Fz-Cz), so that is what is held: 99 uV at the source keeps Fz-Cz and Cz-Pz
+// where 65 uV had them, and puts the Cz-A1 median at ~87 uV (it was ~56), inside
+// the 50-150 uV teaching range above.
 // ---------------------------------------------------------------------------
 type VEvent = { onsets: number[]; amps: number[]; widths: number[] };
 
-const VWAVE_PEAK_UV = 65;
+const VWAVE_PEAK_UV = 99;
 const VWAVE_MAX_RUN = 3;
 
 function vertexElement(t: number, amp: number, w: number): number {
@@ -124,7 +133,7 @@ const vWave: PatternSourceDescriptor = {
   toggles: ['v-waves'],
   states: ['n1', 'n2'],
   stateIntrinsic: true,
-  spec: synchronousPatches('vwave', { Cz: 1, C3: 0.6, C4: 0.6, Fz: 0.45, Pz: 0.45 }, { extent: 0.3 }),
+  spec: synchronousPatches('vwave', VERTEX_FIELD, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<VEvent>(seed, dt, {
       schedule: { kind: 'periodic', period: 8, jitterFrac: 0.4 },
@@ -138,6 +147,12 @@ const vWave: PatternSourceDescriptor = {
         for (let k = 1; k < n; k++) onsets.push(onsets[k - 1] + between(g, 0.6, 1.1));
         for (let k = 0; k < n; k++) { amps.push(jit(g, VWAVE_PEAK_UV, 0.3)); widths.push(jit(g, 1, 0.2)); }
         return { onsets, amps, widths };
+      },
+      // A single wave is an arrow on it; a run is one box from its first wave to the
+      // end of its last (an element spans ~0.35 s at width 1).
+      mark: (e) => {
+        const last = e.onsets.length - 1;
+        return last === 0 ? { dur: 0.3 } : { span: e.onsets[last] + 0.35 * e.widths[last] };
       },
       morphology: (t, e) => {
         let v = 0;
@@ -175,14 +190,28 @@ const vWave: PatternSourceDescriptor = {
 //
 // 60% are followed by a spindle starting on the positive wave's decline ("often
 // but not always"), carried on the same frontally-weighted field — LE's figure
-// has exactly that frontocentral, diffuse spindle.
+// has exactly that frontocentral, diffuse spindle. How often is a choice under the
+// toggle (`KcSpindle`, owner 2026-10-22): none, sometimes (the 60%), always.
+//
+// The early positive phase (2026-10-22). The definitions are biphasic — IFCN,
+// AASM and NVKNF: a negative sharp wave followed by a positive component;
+// learningeeg: "biphasic". The K-complex literature also has a smaller positive
+// wave BEFORE the negative one: Laurino et al. (2014) name three peaks, "an early
+// short positive P200, a large negative N550 and a late and longer lasting
+// positive P900", and a 2019 review (Frontiers in Neuroscience 13:814, citing
+// Cote 2000, Colrain 2005, Rodenbeck 2006) "a smaller preceding positivity that
+// may not be visible by eye". So two events in three carry one, 10-30% of the
+// negative peak, 0.3 s ahead of it (P200 to N550 is ~350 ms) and short (sigma
+// 60 ms); the rest have none. The negative peak moved from 0.35 to 0.45 s into the
+// event to make room for it. Those numbers are this file's reading of "smaller"
+// and "may not be visible"; no source gives a ratio.
 // ---------------------------------------------------------------------------
 type KEvent = {
-  amp: number; posFrac: number;
+  amp: number; posFrac: number; prePos: number;
   spindle: boolean; spDelay: number; spDur: number; spFreq: number; spAmp: number; spPhase: number;
 };
 
-const KC_NEG_PEAK_S = 0.35;
+const KC_NEG_PEAK_S = 0.45;
 
 const kComplex: PatternSourceDescriptor = {
   id: 'kcomplex',
@@ -194,32 +223,52 @@ const kComplex: PatternSourceDescriptor = {
     Pz: 0.3, T3: 0.3, T4: 0.3, P3: 0.25, P4: 0.25, T5: 0.15, T6: 0.15, O1: 0.1, O2: 0.1,
   }, { extent: 0.3 }),
   make(seed, dt) {
+    // The early phase draws from its own stream, so every other draw — and every
+    // K-complex's time — is what it was before it existed.
+    const early = new Gaussian(deriveSeed(seed, 'kc-early-phase'));
+    let spindleMode: 'none' | 'sometimes' | 'always' = 'sometimes';
     const ts = new TransientSource<KEvent>(seed, dt, {
       // ~3 per minute (11-29 s apart): spontaneous K-complexes run at roughly
       // 1-3/min of N2 (COL).
       schedule: { kind: 'periodic', period: 20, jitterFrac: 0.45 },
-      duration: 3.4,
+      duration: 3.5,
       onset: (g) => ({
         amp: jit(g, 120, 0.3),
         posFrac: between(g, 0.45, 0.7),
-        spindle: g.uniform() < 0.6,
+        // The 60% draw is taken for every event whatever the option, so the option
+        // moves no other draw.
+        spindle: ((drawn: boolean) => spindleMode === 'always' || (spindleMode === 'sometimes' && drawn))(g.uniform() < 0.6),
         spDelay: between(g, 0.3, 0.45),
         spDur: jit(g, 1.3, 0.3),
         spFreq: between(g, 11.5, 14),
         spAmp: between(g, 0.1, 0.16),
         spPhase: TWO_PI * g.uniform(),
+        prePos: early.uniform() < 1 / 3 ? 0 : between(early, 0.1, 0.3),
       }),
+      // One box over the whole complex: from its early positive phase (2 sigma before
+      // that peak) or, without one, from the negative wave's rise (2.5 rise sigmas
+      // before its peak), to the end of the positive wave (2.5 sigmas after its peak)
+      // or of the spindle that follows it.
+      mark: (e) => {
+        const start = e.prePos > 0 ? KC_NEG_PEAK_S - 0.3 - 2 * 0.06 : KC_NEG_PEAK_S - 2.5 * 0.085;
+        const end = e.spindle ? KC_NEG_PEAK_S + e.spDelay + e.spDur : KC_NEG_PEAK_S + 0.42 + 2.5 * 0.17;
+        return { at: start, span: end - start };
+      },
       morphology: (t, e) => {
+        const pre = e.prePos * gaussian(t, KC_NEG_PEAK_S - 0.3, 0.06);
         const neg = -skewGauss(t, KC_NEG_PEAK_S, 0.085, 0.07);
         const pos = e.posFrac * gaussian(t, KC_NEG_PEAK_S + 0.42, 0.17);
-        let v = e.amp * (neg + pos);
+        let v = e.amp * (pre + neg + pos);
         if (e.spindle) {
           v += e.amp * e.spAmp * spindleBurst(t - (KC_NEG_PEAK_S + e.spDelay), e.spDur, e.spFreq, e.spPhase);
         }
         return v;
       },
     });
-    return asGenerator(ts);
+    return {
+      next: (ctx) => { spindleMode = ctx.kcSpindle; return ts.next(ctx.enabled); },
+      takeMarks: () => ts.takeMarks(),
+    };
   },
 };
 
@@ -259,6 +308,8 @@ function spindleSource(
           amp: jit(g, 15, 0.35),
           phase: TWO_PI * g.uniform(),
         }),
+        // The visible spindle: its envelope is over 10% of the peak in the middle 80%.
+        mark: (e) => ({ at: 0.1 * e.dur, span: 0.8 * e.dur }),
         morphology: (t, e) => e.amp * spindleBurst(t, e.dur, e.freq, e.phase),
       });
       return asGenerator(ts);
@@ -339,6 +390,7 @@ const posts: PatternSourceDescriptor = {
         dur: between(g, 0.09, 0.16),
         neg: g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0,
       }),
+      mark: () => ({ dur: 0.2 }),
       morphology: (t, e) => postsElement(t, e.amp, e.dur, e.neg),
     });
     // The other form. Its own stream, so choosing it leaves the singles' untouched.
@@ -359,6 +411,11 @@ const posts: PatternSourceDescriptor = {
         }
         return { onsets, amps, durs, negs };
       },
+      // One box from the first element to the end of the last (its afterwave included).
+      mark: (e) => {
+        const last = e.onsets.length - 1;
+        return { span: e.onsets[last] + e.durs[last] * (e.negs[last] > 0 ? 1.6 : 1) };
+      },
       morphology: (t, e) => {
         let v = 0;
         for (let k = 0; k < e.onsets.length; k++) v += postsElement(t - e.onsets[k], e.amps[k], e.durs[k], e.negs[k]);
@@ -370,6 +427,7 @@ const posts: PatternSourceDescriptor = {
         const inTrains = ctx.postsForm === 'trains';
         return singles.next(ctx.enabled && !inTrains) + trains.next(ctx.enabled && inTrains);
       },
+      takeMarks: () => [...singles.takeMarks(), ...trains.takeMarks()],
     };
   },
 };
@@ -414,14 +472,24 @@ const slowWaves: PatternSourceDescriptor = {
 // Morphology is what separates these from a saccade and from REM. A saccade is
 // a step; REM's rapid eye movements are "sharply contoured ... with a faster
 // upslope than downslope". Roving movements are neither — they are smooth,
-// slow, and irregular, drifting rather than jumping. So this is not built on
-// TransientSource (there is no event to schedule): it is a continuous generator,
-// two-pole low-pass filtered Gaussian noise with a ~0.3 Hz corner, which gives
-// a smooth aperiodic wander in the 0.2-0.5 Hz range roving movements occupy.
+// slow, and irregular, drifting rather than jumping.
+//
+// So each movement is a SWING: a smooth glide (half a cosine) from where the eyes
+// are to a point on the other side, 1.5-4 s long, to a distance drawn afresh each
+// time — side to side, slow, smooth and irregular. A swing every 1.5-4 s puts the
+// spectral peak near 0.2 Hz (IK-036 holds it to 0.12-0.6 Hz).
+//
+// Until 2026-10-23 this was two-pole low-pass filtered Gaussian noise (~0.3 Hz
+// corner, 42 uV RMS at the source) with no movements in it as such, so its arrows
+// had to be found in the trace — at each turn of the drift, through the display's
+// filter. The owner: "everything should have an intention, so annotations should be
+// easy, whatever is present in the signals should be by design." Now each swing is
+// drawn on purpose and says so: an arrow over the swing, which lands on its turn.
+// The distances (35-80 uV at the source) hold the old RMS, ~42 uV; the size and the
+// rate are a design, as before (IK-036 asserts neither).
 // ---------------------------------------------------------------------------
-const ROVING_CORNER_HZ = 0.3;
-const ROVING_PEAK_UV = 42;
-const ROVING_EASE_S = 1;
+const ROVING_SWING_S: [number, number] = [1.5, 4];
+const ROVING_SIDE_UV: [number, number] = [35, 80];
 
 const rovingEyes: PatternSourceDescriptor = {
   id: 'roving-eyes',
@@ -436,33 +504,28 @@ const rovingEyes: PatternSourceDescriptor = {
   },
   make(seed, dt) {
     const g = new Gaussian(seed);
-    // Two cascaded one-pole low-passes: a single pole leaves audible high-
-    // frequency roughness on the drift, which would read as noise on the
-    // frontal rows rather than as a slow roll.
-    const a = Math.exp(-2 * Math.PI * ROVING_CORNER_HZ * dt);
-    let s1 = 0, s2 = 0;
-    const step = () => { s1 = a * s1 + (1 - a) * g.next(); s2 = a * s2 + (1 - a) * s1; return s2; };
-    // Unit-variance calibration, measured rather than derived: the closed form
-    // for a two-pole cascade's output variance is fiddly enough to get wrong
-    // silently, and this runs once at construction. The same draws also serve as
-    // the filter's warm-up, so the first emitted sample is already mid-drift
-    // instead of climbing out of zero.
-    let sum = 0, sumSq = 0;
-    const CAL = 20000;
-    for (let i = 0; i < CAL; i++) { const v = step(); sum += v; sumSq += v * v; }
-    const sd = Math.sqrt(sumSq / CAL - (sum / CAL) ** 2) || 1;
-    let onFor = 0;
+    const marks = markQueue();
+    // The swing under way: from `from` to `to` (uV at the source) over `len` s, `t` in.
+    let from = 0, to = 0, len = 1, t = 0, side = g.uniform() < 0.5 ? -1 : 1, on = false;
+    const swing = () => {
+      from = to; side = -side; t = 0;
+      to = side * between(g, ...ROVING_SIDE_UV);
+      len = between(g, ...ROVING_SWING_S);
+      // The arrow's window is the whole swing: the display's low-frequency filter
+      // draws the turn up to ~0.9 s before the source reaches it at these rates, and
+      // the largest movement inside the swing, the way it went, is that turn.
+      marks.push({ dur: len });
+    };
     return {
+      takeMarks: () => marks.take(),
       next(ctx) {
-        // Keep filtering even when disabled, so the drift is already under way
-        // when the state changes mid-record — and ease it in over a second. It is
-        // mid-swing at that moment, and switched on at full size it began with a
-        // step of up to 40 uV at the source (71 uV on F8-T4 in one record,
-        // 2026-10-13): an eye movement faster than any roving one, with no arrow.
-        const v = step();
-        if (!ctx.enabled) { onFor = 0; return 0; }
-        onFor += dt;
-        return ROVING_PEAK_UV * (v / sd) * Math.min(1, onFor / ROVING_EASE_S);
+        // Switched on, the eyes start from the middle — no step, which is what
+        // the filtered drift needed an ease-in for (71 uV on F8-T4, 2026-10-13).
+        if (!ctx.enabled) { on = false; to = 0; marks.clear(); return 0; }
+        if (!on) { on = true; to = 0; swing(); }
+        t += dt;
+        if (t >= len) swing();
+        return from + (to - from) * (1 - Math.cos(Math.PI * t / len)) / 2;
       },
     };
   },
@@ -514,6 +577,7 @@ const remEyes: PatternSourceDescriptor = {
       // Direction alternates at random: the eyes track back and forth, so
       // successive movements are not all the same way.
       onset: (g) => ({ amp: jit(g, 1, 0.3), dir: g.uniform() < 0.5 ? -1 : 1 }),
+      mark: () => ({ dur: REM_RISE_SEC + REM_FALL_SEC }),
       morphology: (t, e) => {
         const peak = e.dir * e.amp * REM_PEAK_UV;
         if (t < REM_RISE_SEC) return peak * (t / REM_RISE_SEC);

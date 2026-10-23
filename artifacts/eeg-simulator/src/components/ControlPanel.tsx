@@ -373,6 +373,23 @@ export function ControlPanel({
                               </div>
                             </div>
                           )}
+                          {p.id === 'k-complex' && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Spindle after</Label>
+                              <div className="flex gap-1">
+                                {([['none', 'None'], ['sometimes', 'Sometimes'], ['always', 'Always']] as const).map(([k, label]) => (
+                                  <button key={k} onClick={() => updatePatternOptions({ kcSpindle: k })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                      (patternOptions.kcSpindle ?? 'sometimes') === k
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {p.id === 'gtc-ictal' && on && (
                             <div className="pt-2 pb-1 pl-1 space-y-1">
                               <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Muscle artifact</Label>

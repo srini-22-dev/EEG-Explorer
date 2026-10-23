@@ -185,7 +185,7 @@ conflict with §6.
 |---|---|
 | `pnpm --filter @workspace/scripts run validate` | **The regression gate.** Signal-model changes must leave it green. Also audits `INFORMING-KNOWLEDGE.md`'s statuses — see below. |
 | `pnpm run typecheck` | Full workspace typecheck (builds `lib/*` refs, then `artifacts/*` + `scripts`). |
-| `pnpm run dev` | Runs the simulator from the repo root; sets `PORT`/`BASE_PATH` itself via `cross-env`. |
+| `pnpm run dev` | Runs the simulator from the repo root and opens it in the browser; sets `PORT`/`BASE_PATH` itself via `cross-env`. `run-eeg-explorer.bat` does the same on a double-click, or just opens the page if it is already running. |
 | `pnpm run build` | Typecheck, then each package's `build`. |
 
 There is no unit-test runner. `scripts/src/validateEngine.ts` is the de facto test suite — a
@@ -233,7 +233,9 @@ Other useful commands:
 - **Adding a pattern requires two edits**: register it in `utils/patterns.ts` (which drives the
   toggle UI) *and* add a matching `PatternSourceDescriptor` in the relevant
   `src/engine/sources/*.ts` family (concatenated into `registry.ts`). Registering alone yields a
-  dead toggle.
+  dead toggle. **The descriptor must also annotate what it draws** — a `mark` on its
+  `TransientSource`, `takeMarks()`, or an `openBox` — because nothing on the page is there by
+  accident; gate Step 27 fails a toggle whose events have no arrow or box.
 - **`pnpm-workspace.yaml` sets `minimumReleaseAge: 1440`** as a supply-chain defense. Don't
   disable it or extend `minimumReleaseAgeExclude` beyond the existing allowlist unasked. Prefer
   `"catalog:"` over a pinned version for deps already in the catalog.

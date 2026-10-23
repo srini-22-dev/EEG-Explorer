@@ -15,7 +15,7 @@ import { sourceUnder, sourceBetween, synchronousPatches, type SourceSpec } from 
 import type { FocalPlacement } from '../../utils/simTypes';
 import { GENERALIZED_FRONTAL } from './fields';
 import { Gaussian } from '../rng';
-import { TransientSource } from './transient';
+import { TransientSource, markQueue } from './transient';
 import {
   gaussian, spikeSlowWave, epileptiformTransient, rhythmicSpikeWave, multiToneSignal, hashUnit,
   DELTA_TONES, DELTA_TONE_NORM,
@@ -29,6 +29,7 @@ const jit = (g: Gaussian, base: number, frac: number): number =>
 /** Wrap a `TransientSource` as a `PatternGenerator` (gate its output on `ctx.enabled`). */
 const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
   next: (ctx) => ts.next(ctx.enabled),
+  takeMarks: () => ts.takeMarks(),
 });
 
 // ---------------------------------------------------------------------------
@@ -76,12 +77,14 @@ function focalSpikeSources(
         // has to be no smaller than the largest that cutoff can reach (dur up to 1.15).
         duration: 1.05,
         onset: (g) => ({ amp: jit(g, 1, 0.2), dur: jit(g, 1, 0.15) }),
+        // The arrow on the spike (its peak 40 ms in, stretched by `dur`), not the slow wave.
+        mark: (e) => ({ dur: 0.08 * e.dur }),
         // `dur` here is not seconds — it is a per-event stretch factor (~0.85-1.15)
         // on spikeSlowWave's fixed-shape argument, giving each discharge a slightly
         // different spike/slow-wave width the way real interictal spikes vary.
         morphology: (t, e) => e.amp * spikeSlowWave(t / e.dur, ampSpike, ampSlow),
       });
-      return { next: (ctx) => ts.next(ctx.enabled && ctx.focalPlacement === focus) };
+      return { next: (ctx) => ts.next(ctx.enabled && ctx.focalPlacement === focus), takeMarks: () => ts.takeMarks() };
     },
   });
   return [
@@ -128,6 +131,8 @@ function morphologySource(
         schedule: { kind: 'periodic', period: 5, jitterFrac: 0.4 }, // ~3-7 s, as the focal foci
         duration: 1.05,
         onset: (g) => ({ amp: jit(g, 1, 0.2) }),
+        // The arrow on the spike or sharp wave (its peak 60 ms in), not the slow wave.
+        mark: () => ({ dur: 0.12 }),
         morphology: (t, e) => epileptiformTransient(t, ampSharp * e.amp, sigmaSharp, ampSlow * e.amp),
       });
       return asGenerator(ts);
@@ -178,6 +183,7 @@ const gsw3hz: PatternSourceDescriptor = {
       schedule: { kind: 'periodic', period: 5, jitterFrac: 0.4 }, // legacy nextEventTime(3,7)
       duration: 3.7, // upper bound on the jittered per-burst duration below
       onset: (g) => ({ dur: jit(g, 3, 0.2), freq: jit(g, 3.0, 0.06) }), // 2.82-3.18 Hz
+      mark: (e) => ({ span: e.dur }),
       morphology: (burstDt, e) => {
         if (burstDt >= e.dur) return 0; // TransientSource's fixed cap exceeds this event's actual length
         const cycleLen = 1 / e.freq;
@@ -216,6 +222,7 @@ const polyspikeWave: PatternSourceDescriptor = {
         count: Math.floor(2 + g.uniform() * 4), // 2-5 polyspikes
         amp: jit(g, 1, 0.25),
       }),
+      mark: () => ({ span: 3 }),
       morphology: (burstDt, e) => {
         // One complex is a positive trough with the polyspikes rising out of it,
         // then the negative slow wave: polyspikes and wave both up (see
@@ -286,25 +293,38 @@ const burstSuppression: PatternSourceDescriptor = {
     /** Onset time of the burst currently playing out, or -1 while suppressed. */
     let cycleOnset = -1;
     let burstDur = 0;
+    // Each burst and each suppression, boxed over the whole page as it begins: the
+    // pattern is the alternation, and it acts on the background everywhere.
+    const marks = markQueue();
 
     return {
-      next: () => 0,
+      // Switched off, the cycle starts again (a suppression first) when it is next
+      // switched on, as an event source does; it used to freeze and resume part-way
+      // through, which left that remainder without a box.
+      next: (ctx) => {
+        if (!ctx.enabled) { nextCycle = -1; cycleOnset = -1; marks.clear(); }
+        return 0;
+      },
+      takeMarks: () => marks.take(),
       // The engine only calls `gate()` while this descriptor is enabled (see
-      // registry.ts), so the clock only ever advances while the toggle is on —
-      // toggling off simply freezes the cycle rather than needing an explicit
-      // reset; toggling back on resumes it exactly where it paused.
+      // registry.ts), so the clock only ever advances while the toggle is on.
       gate: (ctx) => {
         clock += ctx.dt;
-        if (nextCycle < 0) nextCycle = clock + drawInterval();
+        if (nextCycle < 0) {
+          nextCycle = clock + drawInterval();
+          marks.push({ label: 'Suppression', span: nextCycle - clock, where: 'page' });
+        }
         if (cycleOnset < 0 && clock >= nextCycle) {
           cycleOnset = clock;
           burstDur = jit(g, 1.25, 0.6); // 0.5-2.0 s burst duration
+          marks.push({ label: 'Burst', span: burstDur, where: 'page' });
         }
         if (cycleOnset >= 0) {
           const bt = clock - cycleOnset;
           if (bt >= burstDur) {
             cycleOnset = -1;
             nextCycle = clock + drawInterval();
+            marks.push({ label: 'Suppression', span: nextCycle - clock, where: 'page' });
             return 0.04;
           }
           return 1.0 + 1.5 * gaussian(bt, burstDur / 2, burstDur / 4);
@@ -357,6 +377,9 @@ const HYPS_DELTA_REGIONS: HypsDeltaRegion[] = [
 const hypsDeltaSources: PatternSourceDescriptor[] = HYPS_DELTA_REGIONS.map((r): PatternSourceDescriptor => ({
   id: r.id,
   toggles: ['hypsarrhythmia'],
+  // Chaotic everywhere, with no events a reader would name one by one: the whole
+  // page boxed while it is on, by the source that also carries the band gate.
+  ...(r.id === 'hyps-delta-frontal' ? { openBox: { where: 'page' as const } } : {}),
   spec: sourceUnder(r.id, r.electrodes, { extent: 0.55 }),
   make() {
     return {

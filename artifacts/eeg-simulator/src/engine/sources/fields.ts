@@ -183,3 +183,27 @@ export const MID_TEMPORAL_REGIONAL: Record<string, number> = { T3: 1, F7: 0.35, 
 export const ANTERIOR_TEMPORAL_REGIONAL: Record<string, number> = {
   F7: 1, T3: 0.95, T5: 0.35, Fp1: 0.3, F3: 0.2, C3: 0.15, P3: 0.05, Fz: 0.05, Cz: 0.05,
 };
+
+/**
+ * The vertex wave: maximal at the vertex and spread over both parasagittal chains.
+ *
+ * IFCN glossary: "maximal at the vertex, negative relative to other areas".
+ * learningeeg's vertex-wave figure: "symmetric discharge maximal over the
+ * parasagittal and central chains", the wave on all four rows of each
+ * parasagittal chain and little on the temporal ones. That figure's rows are 30 px
+ * apart under a busy background and could not be read row by row reliably (two
+ * readings disagreed), so this is a DESIGN target set to give its picture, not a
+ * measurement: Cz 1, C3/C4 0.7, Fz/Pz 0.45, F3/F4 and P3/P4 0.3, T3/T4 0.12, the
+ * frontopolar, occipital, F7/F8 and T5/T6 electrodes 0 — fitted with fitField.ts.
+ * On the double banana it gives, as a share of the largest row: Fz-Cz/Cz-Pz 0.96
+ * and 1, F-C 0.68, C-P 0.74, Fp-F 0.48 and P-O 0.48 (each the same way as its
+ * neighbour: the reversal at C3/C4, the wave carrying on down the chain, smaller,
+ * as the owner described it on 2026-10-22), and on the temporal chains F7-T3 0.21,
+ * T3-T5 0.19. The patch set it replaces (Cz, C3/C4, Fz/Pz only) left F3/F4 and
+ * P3/P4 at 0.02 and 0.00 of the peak: Fp-F and P-O moved only because the
+ * frontopolar and occipital electrodes swung slightly the other way.
+ */
+export const VERTEX_FIELD: Record<string, number> = {
+  Cz: 1, C3: 0.75, C4: 0.75, Fz: 0.55, Pz: 0.55, P3: 0.4, P4: 0.4, F3: 0.35, F4: 0.35,
+  Fp1: 0.35, Fp2: 0.35, T3: 0.35, T4: 0.35, O1: 0.3, O2: 0.3, T5: 0.25, T6: 0.25, F7: 0.2, F8: 0.2,
+};

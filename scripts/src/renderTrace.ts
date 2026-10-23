@@ -305,6 +305,7 @@ function parseArgs(argv: string[]): RenderOpts {
       case '--posts': o.patternOptions = { ...o.patternOptions, postsForm: next() as 'singles' | 'trains' }; break;
       case '--focus': o.patternOptions = { ...o.patternOptions, focalPlacement: next() as 'under' | 'between' }; break;
       case '--muscle': o.patternOptions = { ...o.patternOptions, seizureMuscle: next() === 'on' }; break;
+      case '--kc-spindle': o.patternOptions = { ...o.patternOptions, kcSpindle: next() as 'none' | 'sometimes' | 'always' }; break;
       case '--skip': o.skipSeconds = Number(next()); break;
       case '--sensitivity': o.sensitivity = Number(next()) as SimSettings['sensitivity']; break;
       case '--speed': o.speed = Number(next()) as SimSettings['speed']; break;

@@ -28,6 +28,7 @@ import { sourceUnder, synchronousPatches } from '../forward';
 import { GENERALIZED_FRONTAL } from './fields';
 import { HopfOscillator } from '../oscillator';
 import { deriveSeed } from '../rng';
+import { markQueue } from './transient';
 import type { PatternSourceDescriptor } from './registry';
 
 const TWO_PI = 2 * Math.PI;
@@ -83,16 +84,25 @@ const photic: PatternSourceDescriptor = {
   make() {
     let clock = 0;
     let phase = 0;
+    // Each train boxed as it starts, with its flash rate: the stimulus is the
+    // annotation, as on a recording's photic channel, whether or not it drives.
+    const marks = markQueue();
+    let lastStep = -1;
 
     return {
+      takeMarks: () => marks.take(),
       next(ctx) {
-        if (!ctx.enabled) { clock = 0; phase = 0; return 0; }
+        if (!ctx.enabled) { clock = 0; phase = 0; lastStep = -1; marks.clear(); return 0; }
         clock += ctx.dt;
 
         const inSeries = clock % PHOTIC_SERIES;
         const step = Math.floor(inSeries / PHOTIC_STEP_LEN);
         const inStep = inSeries - step * PHOTIC_STEP_LEN;
         const freq = PHOTIC_STEPS[step];
+        if (step !== lastStep) {
+          marks.push({ label: `Photic ${freq} Hz`, span: PHOTIC_TRAIN });
+          lastStep = step;
+        }
 
         // The lamp is off between trains: no flashes, no driving.
         if (inStep > PHOTIC_TRAIN) return 0;
@@ -169,17 +179,27 @@ const hyperventilation: PatternSourceDescriptor = {
 
     let clock = 0;
     let env = 0; // shared with bandGate, which runs after next() each sample
+    // The procedure and the recovery after it, each boxed as it begins.
+    const marks = markQueue();
+    let lastPart = -1;
 
     return {
+      takeMarks: () => marks.take(),
       next(ctx) {
         // Advance the oscillators every sample so their phase is continuous
         // across the rest interval, exactly as `gen-slowing` does.
         const th = theta.next();
         const de = delta.next();
-        if (!ctx.enabled) { clock = 0; env = 0; return 0; }
+        if (!ctx.enabled) { clock = 0; env = 0; lastPart = -1; marks.clear(); return 0; }
         clock += ctx.dt;
 
         const inCycle = clock % HV_CYCLE;
+        const part = inCycle < HV_BUILD ? 0 : inCycle < HV_BUILD + HV_RECOVER ? 1 : 2;
+        if (part !== lastPart) {
+          if (part === 0) marks.push({ label: 'Hyperventilation', span: HV_BUILD });
+          if (part === 1) marks.push({ label: 'Post-HV recovery', span: HV_RECOVER });
+          lastPart = part;
+        }
         if (inCycle < HV_BUILD) {
           const u = inCycle / HV_BUILD;
           env = u * u;

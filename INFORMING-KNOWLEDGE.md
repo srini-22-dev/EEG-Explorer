@@ -290,7 +290,7 @@ centro-posterior rows C3-P3, P3-O1, C4-P4, P4-O2 with a transient-robust statist
 0.5–1.0 (currently 0.755), and `n1` is no louder than `drowsy` (currently 0.935). Going the other
 way, `n3` is 2–8× `n2` (currently 3.50). The N3/N1 contrast is asserted where AASM scores slow
 waves — frontal, ear-referenced (mean IQR of F3-A1 and F4-A2, montage `reference-ipsi`): `n3` is
-3–12× `n1` (currently 7.80). On the centro-posterior bipolar rows synchronized delta largely
+3–12× `n1` (currently 7.85). On the centro-posterior bipolar rows synchronized delta largely
 cancels, so the ratio there (2.35 on the same record) is not a measure of N3's amplitude.
 
 The frontopolar rows are deliberately excluded from the measurement: drowsiness and N1 bring slow

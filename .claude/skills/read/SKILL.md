@@ -562,12 +562,28 @@ is exactly that source.
   with its defaults on, not the app with everything switched off. POSTS come one at a time unless
   the trains form is chosen: `renderTrace --posts trains`, or the control under the POSTS toggle.
 - **Where the annotation arrows go is decided in `utils/markRows.ts`**, which the canvas and gate
-  Step 27 both call: every row carrying at least 35% of the artifact's largest row, the ten largest
-  at most, from the artifact's own field put through the montage. The arrows are a claim about
+  Step 27 both call: every row carrying at least 35% of the artifact's largest row (an arrow on the
+  ten largest at most; a box on all of them), from the artifact's own field put through the montage. The arrows are a claim about
   where an artifact is, so check them like one: Step 27 compares them with the artifact's
   on-minus-off contribution, event by event and row by row. Independent sources (the two kinds of
   spindle, the two jaw muscles) are marked separately; a field summed across them puts arrows on
   rows the event is not on.
+  Events with extent are boxes, not arrows (2026-10-22): a POSTS train, a run of vertex waves, a
+  spindle, a K-complex (box over its spindle), a chewing episode, each seizure phase. Every
+  pattern says what it drew (2026-10-23, owner: "whatever is present in the signals should be by
+  design"); nothing is found by thresholds any more: a `TransientSource` reports each event at its onset
+  through its `mark` option, other generators through `takeMarks()` (a `PatternMarkEvent`: arrow or
+  box, which rows), and a pattern with no events — mu, slowing, periodic discharges, hypsarrhythmia,
+  eyes open, the continuous artifacts — is one box while it is on (`openBox`, `markWhile`: span
+  Infinity until a mark with the same `key` closes it). `page` boxes every EEG row (burst-
+  suppression's bursts and suppressions). `markBlocks` splits the rows into one box per chain.
+  Gate Step 27 runs EVERY toggle as the app switches it on and fails any moment its contribution
+  moves a row 2 mm with no arrow or box over it ("by design: <id> events on the page with no arrow
+  or box"). A page showing something no mark explains is a source nobody owns: find it, then own
+  it (toggle + marks) or remove it — as the background's midline theta was, now its own toggle.
+  Roving eye movements are designed swings for the same reason (a glide side to side, 1.5-4 s):
+  their arrow's window is the whole swing, because the display's low-frequency filter draws the
+  turn up to ~0.9 s before the source reaches it.
 - **Which toggles can be on together is decided in `utils/toggleRules.ts`**, not in the engine: a
   table of states, requirements and exclusions (a blink needs Awake and open eyes; muscle is not
   available in REM; lambda needs open eyes), applied by pure functions the app makes every change
@@ -579,6 +595,15 @@ is exactly that source.
   isopotential) with its flanks opposed. The focal-spike toggles do both: `renderTrace --focus
   between`, or the Focus control under the toggle. `sourceBetween()` in `forward.ts` is the
   geometry (a true equidistant point, which `sourceUnder([a, b])` is not).
+  The temporal seizure is the exception: both of its placements are regional fields fitted to
+  learningeeg's left temporal seizure (`fields.ts`, `MID_` and `ANTERIOR_TEMPORAL_REGIONAL`), so its
+  flat link is flat because F7 and T3 see the same fitted voltage, not because of one patch.
+- **The tonic-clonic seizure has a muscle option, and it is off in scripts.** In the app the
+  seizure comes with its muscle artifact (`PatternOptions.seizureMuscle`, the Muscle artifact
+  control under the toggle): continuous through the tonic phase, a burst with each clonic jerk.
+  A script gets the discharge alone unless it asks — `renderTrace --muscle on`. Read the seizure's
+  own rhythm and field with it off, which is what every gate check on them does, and the page a
+  learner sees with it on.
 - **The gate prints ~750 lines and takes 20–30 minutes.** Piping it through `tail` hides the
   checks you changed. Redirect it to a file, run it in the background, and grep. Run nothing else
   heavy beside it: an audit or a batch of renders alongside doubles its time, and theirs. Batch

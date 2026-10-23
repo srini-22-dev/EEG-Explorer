@@ -45,6 +45,7 @@ export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   '6hz-sw':     { patternId: '6hz-sw',     targetRegion: 'all',            text: '6 Hz phantom spike-wave: brief, low-amplitude, posterior (FOLD)' },
   '14-6-pos':   { patternId: '14-6-pos',   targetRegion: 'right-temporal', text: '14 & 6 Hz positive bursts, posterior-temporal (light sleep)' },
   'bets':       { patternId: 'bets',       targetRegion: 'left-temporal',  text: 'BETS: tiny (<50 ms) temporal spikes, no slow wave' },
+  'midline-theta': { patternId: 'midline-theta', targetRegion: 'central', text: 'Midline theta: 4–7 Hz trains at Cz/Fz, awake or drowsy, benign' },
   'eyes-open':  { patternId: 'eyes-open',  targetRegion: 'all',            text: 'Eyes open: posterior alpha attenuates (Berger effect)' },
 
   // ── Artifacts ───────────────────────────────────────────────────────────

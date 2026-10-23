@@ -45,6 +45,7 @@ const jit = (g: Gaussian, base: number, frac: number): number =>
 /** Wrap a `TransientSource` as a `PatternGenerator` (gate its output on `ctx.enabled`). */
 const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
   next: (ctx) => ts.next(ctx.enabled),
+  takeMarks: () => ts.takeMarks(),
 });
 
 // One step of an Ornstein-Uhlenbeck process driven by uniform noise, matching
@@ -103,6 +104,8 @@ function muSide(id: string, weights: Record<string, number>): PatternSourceDescr
   return {
     id,
     toggles: ['mu-rhythm'],
+    // A rhythm with no events, only a presence: a box on its side while it is on.
+    openBox: {},
     spec: geom,
     make(seed, dt) {
       const g = new Gaussian(seed);
@@ -167,6 +170,8 @@ function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
         schedule: { kind: 'periodic', period: 3.5, jitterFrac: 0.43 }, // legacy 2-5 s
         duration: 1.5,
         onset: (g) => ({ amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3), freq: g.range(6, 11) }),
+        // The burst is the envelope's [0, dur]: 14% of its peak at either end.
+        mark: (e) => ({ span: e.dur }),
         morphology: (t, e) => {
           const env = gaussian(t, e.dur / 2, e.dur / 4);
           // Arches pointed on the negative side (see arciformSignal).
@@ -203,6 +208,9 @@ function rmtdSide(id: string, electrode: string): PatternSourceDescriptor {
         schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 }, // legacy 3-6 s
         duration: 4.0,
         onset: (g) => ({ amp: jit(g, 1, 0.1) }),
+        // The whole event: its envelope is still 27% of the peak at either end, which
+        // at 65 uV is visible, so a box over the middle alone left its edges out.
+        mark: () => ({ span: 4 }),
         morphology: (t, e) => {
           const env = gaussian(t, 2, 1.2);
           return 65 * e.amp * env * multiToneSignal(t, RMTD_TONES, RMTD_TONE_NORM);
@@ -247,6 +255,7 @@ const lambda: PatternSourceDescriptor = {
       // was 60 uV over 120-180 ms, briefer than the range given for it.
       duration: 0.3,
       onset: (g) => ({ amp: jit(g, 1, 0.25), dur: g.range(0.2, 0.3) }),
+      mark: (e) => ({ dur: e.dur }),
       morphology: (t, e) => (t < e.dur ? 50 * e.amp * Math.sin(Math.PI * t / e.dur) : 0),
     });
     return asGenerator(ts);
@@ -277,6 +286,7 @@ const pswy: PatternSourceDescriptor = {
       schedule: { kind: 'periodic', period: 3.75, jitterFrac: 0.33 }, // legacy 2.5-5.0 s
       duration: 2.0,
       onset: (g) => ({ dur: jit(g, 1.0, 0.3) }),
+      mark: (e) => ({ span: e.dur }),
       morphology: (t, e) => {
         if (t >= e.dur) return 0;
         const env = gaussian(t, e.dur / 2, e.dur / 3);
@@ -319,6 +329,7 @@ const sixHzSw: PatternSourceDescriptor = {
       // 1-2 s, as a whole number of 6 Hz cycles (6 to 12) so the run ends between
       // complexes rather than being cut off part-way through a wave.
       onset: (g) => ({ amp: jit(g, 1, 0.2), dur: Math.round(g.range(6, 12)) / 6 }),
+      mark: (e) => ({ span: e.dur }),
       morphology: (t, e) => {
         if (t >= e.dur) return 0;
         const cyc = t % (1 / 6);
@@ -365,6 +376,8 @@ const pos1406: PatternSourceDescriptor = {
       schedule: { kind: 'periodic', period: 6, jitterFrac: 0.33 }, // legacy 4-8 s
       duration: 1.0,
       onset: (g) => ({ ratio: jit(g, 0.6, 0.4) }),
+      // The whole event (its envelope is 14% of the peak at either end).
+      mark: () => ({ span: 1 }),
       morphology: (t, e) => {
         const env = gaussian(t, 0.5, 0.25);
         // 14 & 6 Hz POSITIVE bursts are named for their polarity: each arch is
@@ -408,6 +421,8 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
         schedule: { kind: 'periodic', period: 6.5, jitterFrac: 0.38 }, // legacy 4-9 s
         duration: 0.05,
         onset: (g) => ({ amp: jit(g, 1, 0.3), decay: jit(g, 60, 0.2) }),
+        // It is largest at its onset, so the arrow's window starts just before it.
+        mark: () => ({ at: -0.02, dur: 0.08 }),
         // Surface-negative, like the other sharp transients — small sharp spikes
         // have a steep negative ascending limb. Was positive, which under the
         // corrected negative-up canvas would point them the wrong way.
@@ -440,9 +455,62 @@ const betsR = betsSide('bets-r', 'T4');
 const eyesOpen: PatternSourceDescriptor = {
   id: 'eyes-open',
   toggles: ['eyes-open'],
+  // What it changes is the background (alpha blocked), not one region: a box over
+  // the whole page while the eyes are open.
+  openBox: { label: 'Eyes open', where: 'page' },
   spec: sourceUnder('eyes-open', ['Cz'], { extent: 0.5 }),
   make() {
     return { next: () => 0 };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Midline theta rhythm (Cigánek) — a 4-7 Hz arch-shaped or sinusoidal train over
+// the vertex, a normal variant of wakefulness and drowsiness. "The midline theta
+// rhythm is typically a 4- to 7-Hz arch-shaped or sinusoidal rhythm", "typically
+// maximum over CZ", in a table as "Midline (CZ, FZ), parasagittal", "Brief or
+// lasting many seconds", and "Midline theta is seen during wakefulness and
+// drowsiness" (Patterns of Unclear Significance, neupsykey.com); "4-7 Hz midline
+// (vertex)", "seen in awake or drowsy states", "normal variant" (EEG Atlas online,
+// Ciganek rhythm).
+//
+// It was part of the awake and drowsy BACKGROUND until 2026-10-23: a burst under Fz
+// every ~4.5 s with no toggle and no annotation. The owner: "everything should have
+// an intention, so annotations should be easy, whatever is present in the signals
+// should be by design" — so it is a toggle of its own, off unless chosen, each train
+// boxed.
+//
+// Sourced: the band, the vertex maximum with Fz and the parasagittal sites, the
+// states, and the size: eegpedia gives it as over 50 uV (recorded in the idea vault
+// on 2026-10-14; the page would not load to re-read on 2026-10-23), and 60 uV at the
+// source puts 62-72 uV at Cz against the ear, 40-49 at Fz (isolated peak, subjects
+// 3/7/11). A DESIGN, not sourced: the field's weights (no figure was traced), trains
+// of 2-7 s (inside "brief or lasting many seconds", short enough to see whole on a
+// page) and a mean gap of 8 s between them.
+// ---------------------------------------------------------------------------
+type MidlineThetaEvent = { amp: number; dur: number; freq: number };
+
+const midlineTheta: PatternSourceDescriptor = {
+  id: 'midline-theta',
+  toggles: ['midline-theta'],
+  states: ['awake', 'drowsy'],
+  spec: synchronousPatches('midline-theta', { Cz: 1, Fz: 0.7, Pz: 0.4, C3: 0.3, C4: 0.3 }, { extent: 0.3 }),
+  make(seed, dt) {
+    const ts = new TransientSource<MidlineThetaEvent>(seed, dt, {
+      schedule: { kind: 'renewal', meanInterval: 8 },
+      duration: 7,
+      onset: (g) => ({ amp: jit(g, 1, 0.2), dur: g.range(2, 7), freq: g.range(5, 7) }),
+      mark: (e) => ({ span: e.dur }),
+      morphology: (t, e) => {
+        if (t >= e.dur) return 0;
+        // One frequency per train, with 0.4 s raised-cosine edges so it starts and
+        // ends without a step.
+        const ramp = Math.min(1, t / 0.4, (e.dur - t) / 0.4);
+        const env = 0.5 - 0.5 * Math.cos(Math.PI * ramp);
+        return 60 * e.amp * env * Math.sin(2 * Math.PI * e.freq * t);
+      },
+    });
+    return asGenerator(ts);
   },
 };
 
@@ -456,4 +524,5 @@ export const VARIANT_SOURCES: PatternSourceDescriptor[] = [
   pos1406,
   betsL, betsR,
   eyesOpen,
+  midlineTheta,
 ];

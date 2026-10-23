@@ -60,6 +60,7 @@
 
 import { sourceUnder, sourceBetween, synchronousPatches } from '../forward';
 import { Gaussian } from '../rng';
+import { markQueue } from './transient';
 import { ARTIFACT_SOURCES, EmgGenerator } from '../artifacts';
 import { GENERALIZED_FRONTAL, MID_TEMPORAL_REGIONAL, ANTERIOR_TEMPORAL_REGIONAL, mirrored } from './fields';
 import {
@@ -110,10 +111,13 @@ const absenceIctal: PatternSourceDescriptor = {
     let clock = 0;
     let start = -1;
     let dur = 10;
+    let lastCycle = Infinity;
+    const spans = markQueue();  // a seizure's phases, reported as each begins, with its length
 
     return {
+      takeMarks: () => spans.take(),
       next(ctx) {
-        if (!ctx.enabled) { clock = 0; start = -1; return 0; }
+        if (!ctx.enabled) { clock = 0; start = -1; lastCycle = Infinity; spans.clear(); return 0; }
         clock += ctx.dt;
         if (start < 0) {
           start = clock + (ctx.ictalDelay ?? ABSENCE_DELAY);
@@ -123,6 +127,8 @@ const absenceIctal: PatternSourceDescriptor = {
         if (elapsed < 0) return 0;
 
         const cycle = elapsed % (dur + ABSENCE_GAP);
+        if (cycle < lastCycle) spans.push({ label: 'Absence seizure', span: dur });
+        lastCycle = cycle;
         if (cycle < dur) {
           // Both sweep endpoints carry the same multiplier, so the discharge
           // still slows by the same PROPORTION over its course whatever rate the
@@ -204,9 +210,12 @@ const gtcIctal: PatternSourceDescriptor = {
     let pidNext = -1;
     let pidAmp = 1;
 
-    const reset = () => { clock = 0; start = -1; pidOnset = -1; pidNext = -1; };
+    let phase = -1;
+    const spans = markQueue();  // a seizure's phases, reported as each begins, with its length
+    const reset = () => { clock = 0; start = -1; pidOnset = -1; pidNext = -1; phase = -1; spans.clear(); };
 
     return {
+      takeMarks: () => spans.take(),
       next(ctx) {
         if (!ctx.enabled) { reset(); return 0; }
         clock += ctx.dt;
@@ -215,6 +224,13 @@ const gtcIctal: PatternSourceDescriptor = {
         if (el2 < 0) return 0;
 
         const cycle = el2 % GTC_PERIOD;
+        const nowPhase = cycle < GTC_TONIC ? 0 : cycle < GTC_CLONIC_END ? 1 : cycle < GTC_SUPPRESSED_END ? 2 : 3;
+        if (nowPhase !== phase) {
+          if (nowPhase === 0) spans.push({ label: 'Tonic phase', span: GTC_TONIC });
+          if (nowPhase === 1) spans.push({ label: 'Clonic phase', span: GTC_CLONIC });
+          if (nowPhase === 2) spans.push({ label: 'Post-ictal suppression', span: GTC_SUPPRESSED });
+          phase = nowPhase;
+        }
 
         // The legacy amplitudes below were written for a patch whose strongest
         // electrode sat at ~0.75 of the source; the generalized field's sits at
@@ -385,14 +401,22 @@ function ftempGenerator(side: IctalHemisphere, placement: FocalPlacement) {
   return (): PatternGenerator => {
     let clock = 0;
     let start = -1;
+    let lastCycle = Infinity;
+    const spans = markQueue();  // a seizure's phases, reported as each begins, with its length
     return {
+      takeMarks: () => spans.take(),
       next(ctx) {
-        if (!ctx.enabled || ctx.focalPlacement !== placement) { clock = 0; start = -1; return 0; }
+        if (!ctx.enabled || ctx.focalPlacement !== placement) {
+          clock = 0; start = -1; lastCycle = Infinity; spans.clear(); return 0;
+        }
         clock += ctx.dt;
         if (start < 0) start = clock + (ctx.ictalDelay ?? FTEMP_DELAY);
         const el2 = clock - start;
         if (el2 < 0) return 0;
         const cycle = el2 % FTEMP_PERIOD;
+        // The onset side reports the seizure; the other side is its later spread.
+        if (cycle < lastCycle && ctx.ictalHemisphere === side) spans.push({ label: 'Focal temporal seizure', span: FTEMP_ACTIVE });
+        lastCycle = cycle;
         if (cycle >= FTEMP_ACTIVE) return 0;
 
         const pos = cycle / FTEMP_ACTIVE;
@@ -471,16 +495,21 @@ function ffrontGenerator(side: IctalHemisphere, placement: FocalPlacement) {
     const g = new Gaussian(seed);
     let clock = 0;
     let start = -1;
+    let lastCycle = Infinity;
+    const spans = markQueue();  // a seizure's phases, reported as each begins, with its length
     return {
+      takeMarks: () => spans.take(),
       next(ctx) {
         if (!ctx.enabled || ctx.ictalHemisphere !== side || ctx.focalPlacement !== placement) {
-          clock = 0; start = -1; return 0;
+          clock = 0; start = -1; lastCycle = Infinity; spans.clear(); return 0;
         }
         clock += ctx.dt;
         if (start < 0) start = clock + (ctx.ictalDelay ?? FFRONT_DELAY);
         const el2 = clock - start;
         if (el2 < 0) return 0;
         const cycle = el2 % FFRONT_PERIOD;
+        if (cycle < lastCycle) spans.push({ label: 'Focal frontal seizure', span: FFRONT_ACTIVE });
+        lastCycle = cycle;
         if (cycle >= FFRONT_ACTIVE) return 0;
 
         const pos = cycle / FFRONT_ACTIVE;

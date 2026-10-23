@@ -61,13 +61,13 @@ export default function App() {
   const updateArtifactParams = (patch: Partial<ArtifactParams>) =>
     setArtifactParams(prev => ({ ...prev, ...patch }));
 
-  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true });
+  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes' });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
     setPatternOptions(prev => ({ ...prev, ...patch }));
 
   const [theme, setTheme] = useState<EEGTheme>('green-paper');
   const [showAnnotations, setShowAnnotations] = useState(true);
-  const [graphHover, setGraphHover] = useState(true);
+  const [graphHover, setGraphHover] = useState(false);
   const [showSpectrum, setShowSpectrum] = useState(false);
   const [showRightSpectrum, setShowRightSpectrum] = useState(false);
   const [freezeYAxis, setFreezeYAxis] = useState(false);

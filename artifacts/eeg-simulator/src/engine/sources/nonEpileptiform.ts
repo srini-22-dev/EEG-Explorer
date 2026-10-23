@@ -28,6 +28,7 @@ const jit = (g: Gaussian, base: number, frac: number): number =>
 /** Wrap a `TransientSource` as a `PatternGenerator` (gate its output on `ctx.enabled`). */
 const asGenerator = <E>(ts: TransientSource<E>): PatternGenerator => ({
   next: (ctx) => ts.next(ctx.enabled),
+  takeMarks: () => ts.takeMarks(),
 });
 
 /**
@@ -73,6 +74,9 @@ function genSlowingPatch(site: string, carriesGate: boolean): PatternSourceDescr
   return {
     id,
     toggles: ['gen-slowing'],
+    // The whole background is slowed, so the whole page is boxed while it is on —
+    // by the patch that also carries the band gate, so once.
+    ...(carriesGate ? { openBox: { where: 'page' as const } } : {}),
     spec: sourceUnder(id, [site], { extent: GS_EXTENT }),
     make(seed, dt) {
       const theta = new HopfOscillator(deriveSeed(seed, 'theta'), dt, {
@@ -156,6 +160,8 @@ const firda: PatternSourceDescriptor = {
       schedule: { kind: 'periodic', period: 6, jitterFrac: 4 / 12 },
       duration: 3.95, // covers the jittered burst length (3 * [0.7, 1.3]) with margin
       onset: (g) => ({ dur: jit(g, 3, 0.3) }),
+      // The whole burst: its envelope is 14% of the peak at either end, ~18 uV at 130.
+      mark: (e) => ({ span: e.dur }),
       morphology: (t, e) => {
         if (t < 0 || t > e.dur) return 0;
         const env = gaussian(t, e.dur / 2, e.dur / 4); // burst envelope, peak mid-burst
@@ -195,6 +201,7 @@ const focalDeltaTemporal: PatternSourceDescriptor = {
       schedule: { kind: 'periodic', period: 4.5, jitterFrac: 3 / 9 },
       duration: 3.5, // covers the jittered burst length (2.5 * [0.7, 1.3]) with margin
       onset: (g) => ({ dur: jit(g, 2.5, 0.3) }),
+      mark: (e) => ({ span: e.dur }),
       morphology: (t, e) => {
         if (t < 0 || t > e.dur) return 0;
         return 80 * multiToneSignal(
@@ -272,6 +279,9 @@ const TRIPHASIC_GAP = { kind: 'periodic', period: 0.03, jitterFrac: 0.3 } as con
 const triphasic: PatternSourceDescriptor = {
   id: 'triphasic',
   toggles: ['triphasic'],
+  // Periodic: what a reader names is the run ("triphasic waves at ~1 Hz"), not each
+  // complex, so one box while it is on — on the rows of both halves, front and back.
+  openBox: { where: 'toggle' },
   // The anterior half: bilateral and frontally maximal, fading to nothing behind
   // the central row (the bifrontal field, fields.ts), so that the posterior half
   // below is what the back of the head sees — and sees LATE. It was one patch
@@ -353,6 +363,8 @@ type GpedEvent = { amp: number; morph: number };
 const gpeds: PatternSourceDescriptor = {
   id: 'gpeds',
   toggles: ['gpeds'],
+  // Periodic: the run is the finding (see triphasic), one box while it is on.
+  openBox: {},
   spec: synchronousPatches('gpeds', {
     Cz: 1, C3: 0.9, C4: 0.9, T3: 0.8, T4: 0.8, Fz: 0.6, Pz: 0.6, P3: 0.55, P4: 0.55, T5: 0.5, T6: 0.5,
     F3: 0.45, F4: 0.45, F7: 0.45, F8: 0.45, Fp1: 0.35, Fp2: 0.35, O1: 0.3, O2: 0.3,
@@ -418,6 +430,8 @@ const LPED_UV = 220;
 const lpeds: PatternSourceDescriptor = {
   id: 'lpeds',
   toggles: ['lpeds'],
+  // Periodic: the run is the finding (see triphasic), one box while it is on.
+  openBox: {},
   spec: synchronousPatches('lpeds', LEFT_TEMPORAL_REGIONAL, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<LpedEvent>(seed, dt, {

@@ -15,6 +15,17 @@
  */
 
 import { Gaussian } from '../rng';
+import type { PatternMarkEvent } from './registry';
+
+/** A generator's annotations, waiting for the engine (`PatternGenerator.takeMarks`). */
+export function markQueue() {
+  let pending: PatternMarkEvent[] = [];
+  return {
+    push(m: PatternMarkEvent) { pending.push(m); },
+    take() { const out = pending; pending = []; return out; },
+    clear() { pending = []; },
+  };
+}
 
 /**
  * Lead-in (seconds) before the FIRST event after a toggle is switched on. A
@@ -50,6 +61,12 @@ export type TransientOptions<E = void> = {
   onset?: (g: Gaussian) => E;
   /** Event duration in seconds; after this the event ends and the next is scheduled. */
   duration: number;
+  /**
+   * The event's annotation, from its own parameters, reported at its onset (see
+   * `PatternMarkEvent`; times from the onset). Omitted only where another source
+   * of the same pattern reports it.
+   */
+  mark?: (event: E) => PatternMarkEvent;
 };
 
 export class TransientSource<E = void> {
@@ -59,6 +76,8 @@ export class TransientSource<E = void> {
   private morphology: (dt: number, event: E) => number;
   private drawEvent?: (g: Gaussian) => E;
   private duration: number;
+  private markOf?: (event: E) => PatternMarkEvent;
+  private marks = markQueue();
 
   private clock = 0;
   /** Absolute time of the next scheduled onset; -1 until first scheduled. */
@@ -75,6 +94,7 @@ export class TransientSource<E = void> {
     this.morphology = opts.morphology;
     this.drawEvent = opts.onset;
     this.duration = opts.duration;
+    this.markOf = opts.mark;
   }
 
   private drawInterval(): number {
@@ -96,6 +116,7 @@ export class TransientSource<E = void> {
     if (!enabled) {
       this.onset = -1;
       this.nextOnset = -1;
+      this.marks.clear();
       // Keep the clock running so absolute-time morphologies stay continuous, but
       // it is only ever compared against freshly scheduled onsets.
       this.clock += this.dt;
@@ -120,6 +141,7 @@ export class TransientSource<E = void> {
       // plays out. Order matters for reproducibility: the interval that scheduled
       // this onset was already drawn, so these draws follow it deterministically.
       if (this.drawEvent) this.eventParams = this.drawEvent(this.g);
+      if (this.markOf) this.marks.push(this.markOf(this.eventParams));
     }
 
     if (this.onset >= 0) {
@@ -138,5 +160,10 @@ export class TransientSource<E = void> {
   /** True while an event is playing out. */
   get active(): boolean {
     return this.onset >= 0;
+  }
+
+  /** The annotations of the events begun since the last call (see `TransientOptions.mark`). */
+  takeMarks(): PatternMarkEvent[] {
+    return this.marks.take();
   }
 }

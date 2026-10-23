@@ -178,4 +178,13 @@ export type FocalPlacement = 'under' | 'between';
  * means off — the discharge alone, which is what a script measuring the seizure
  * wants; the app sets it on.
  */
-export type PatternOptions = { postsForm?: PostsForm; focalPlacement?: FocalPlacement; seizureMuscle?: boolean };
+export type PatternOptions = {
+  postsForm?: PostsForm; focalPlacement?: FocalPlacement; seizureMuscle?: boolean; kcSpindle?: KcSpindle;
+};
+
+/**
+ * Whether a K-complex is followed by a sleep spindle: never, sometimes (60% — the
+ * default; learningeeg: "often but not always followed by a sleep spindle"), or
+ * every time. A choice under the K-Complex toggle (owner, 2026-10-22).
+ */
+export type KcSpindle = 'none' | 'sometimes' | 'always';
