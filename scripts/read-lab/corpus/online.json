@@ -1,0 +1,723 @@
+{
+ "about": "Third-party reference figures for the reading lab. The image files are gitignored (licences below); this manifest is tracked so the corpus can be re-fetched and so every caption claim tested against it is recorded.",
+ "figures": [
+  {
+   "id": "aes-f07",
+   "files": [
+    "aes-f07.jpg",
+    "aes-f07.png"
+   ],
+   "size": [
+    800,
+    517
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f07/",
+   "source_image": "f07",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f08",
+   "files": [
+    "aes-f08.jpg",
+    "aes-f08.png"
+   ],
+   "size": [
+    800,
+    858
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f08/",
+   "source_image": "f08",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f09",
+   "files": [
+    "aes-f09.jpg",
+    "aes-f09.png"
+   ],
+   "size": [
+    764,
+    1053
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f09/",
+   "source_image": "f09",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f10",
+   "files": [
+    "aes-f10.jpg",
+    "aes-f10.png"
+   ],
+   "size": [
+    800,
+    586
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f10/",
+   "source_image": "f10",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f11",
+   "files": [
+    "aes-f11.jpg",
+    "aes-f11.png"
+   ],
+   "size": [
+    800,
+    616
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f11/",
+   "source_image": "f11",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f12",
+   "files": [
+    "aes-f12.jpg",
+    "aes-f12.png"
+   ],
+   "size": [
+    800,
+    563
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f12/",
+   "source_image": "f12",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f13",
+   "files": [
+    "aes-f13.jpg",
+    "aes-f13.png"
+   ],
+   "size": [
+    800,
+    707
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f13/",
+   "source_image": "f13",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f15",
+   "files": [
+    "aes-f15.jpg",
+    "aes-f15.png"
+   ],
+   "size": [
+    800,
+    661
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f15/",
+   "source_image": "f15",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "aes-f17",
+   "files": [
+    "aes-f17.jpg",
+    "aes-f17.png"
+   ],
+   "size": [
+    800,
+    594
+   ],
+   "source": "AES atlas",
+   "page": "https://www.ncbi.nlm.nih.gov/books/NBK390343/",
+   "figure_url": "https://www.ncbi.nlm.nih.gov/books/NBK390343/figure/f17/",
+   "source_image": "f17",
+   "mapping": "exact",
+   "licence": "CC BY-NC-SA (NCBI Bookshelf NBK390343); attribute, non-commercial, share-alike",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "ap-gradient",
+   "files": [
+    "ap-gradient.png",
+    "ap-gradient.webp"
+   ],
+   "size": [
+    1188,
+    732
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/normal-awake",
+   "source_image": "ap-gradient.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": [
+    4
+   ],
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [
+    {
+     "claim": "Frontal rows carry low-amplitude fast activity, posterior rows moderate-amplitude alpha (A-P gradient)",
+     "test": "iteration 1b PDR call: posterior alpha peak above aperiodic fit, and above frontal",
+     "result": "PASS - posterior 31.4 dB, frontal 0.0 dB; 11.75 Hz, confirmed by counting 12 peaks between the 1 s rules on a 3x crop"
+    }
+   ],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it.",
+   "montage_note": "one unlabelled chain, annotated anterior (top) to posterior (bottom); no L/R",
+   "px_per_sec": 400,
+   "px_per_sec_how": "solid 1 s rules 400 px apart; grid_period returns 80 = the dotted 0.2 s lines"
+  },
+  {
+   "id": "blinks",
+   "files": [
+    "blinks.png",
+    "blinks.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/artifacts",
+   "source_image": "Eye-Blinks-and-Chewing-and-Tongue-artifact.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "epi-phase-rev",
+   "files": [
+    "epi-phase-rev.png",
+    "epi-phase-rev.webp"
+   ],
+   "size": [
+    1696,
+    750
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/epileptiform",
+   "source_image": "phase-reversal-o1-circumferential-annotated.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "epi-spike-field",
+   "files": [
+    "epi-spike-field.png",
+    "epi-spike-field.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/epileptiform",
+   "source_image": "spike-criteria-5-field.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "frontal-muscle",
+   "files": [
+    "frontal-muscle.png",
+    "frontal-muscle.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/artifacts",
+   "source_image": "frontal-muscle-artifact.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "kc-spindles-posts",
+   "files": [
+    "kc-spindles-posts.png",
+    "kc-spindles-posts.webp"
+   ],
+   "size": [
+    1437,
+    669
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/normal-asleep",
+   "source_image": null,
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": [
+    4,
+    4,
+    4,
+    4,
+    2,
+    2,
+    2
+   ],
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [
+    {
+     "claim": "Stage II sleep: K-complex (high-amplitude wave) followed by a spindle, fronto-central",
+     "test": "negative control: PDR must not be called despite the spindle burst near the alpha band",
+     "result": "PASS - posterior 4.1 dB < frontopolar 4.5 dB, L/R gap 2.77 Hz, not called"
+    }
+   ],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it.",
+   "montage_note": "as term-alpha",
+   "px_per_sec": 104,
+   "px_per_sec_how": "grid_period 104; ECG R-R ~87 px -> 71 bpm"
+  },
+  {
+   "id": "mu",
+   "files": [
+    "mu.png",
+    "mu.webp"
+   ],
+   "size": [
+    1600,
+    669
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/normal-variants",
+   "source_image": "Mu-Rhythm-III.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": [
+    4,
+    4,
+    4,
+    4,
+    2,
+    2,
+    2
+   ],
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [
+    {
+     "claim": "Mu: arch-shaped alpha-band waves over the sensorimotor (central) rows, blocked by movement",
+     "test": "alpha-peak height on F3-C3/C3-P3/F4-C4/C4-P4 exceeds the posterior rows; PDR not called",
+     "result": "PASS - central 12.6 dB vs posterior 6.7 dB; PDR not called (posterior L/R gap 1.91 Hz)"
+    }
+   ],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it.",
+   "montage_note": "as term-alpha",
+   "px_per_sec": 104,
+   "px_per_sec_how": "grid_period 104; ECG R-R ~77 px -> 81 bpm"
+  },
+  {
+   "id": "ne-severe-slow",
+   "files": [
+    "ne-severe-slow.png",
+    "ne-severe-slow.webp"
+   ],
+   "size": [
+    1452,
+    824
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/nonepileptiform",
+   "source_image": "Severe-gen-slowing_comp.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "neo-33wk-7uV",
+   "files": [
+    "neo-33wk-7uV.png",
+    "neo-33wk-7uV.webp"
+   ],
+   "size": [
+    1696,
+    854
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/neonatal",
+   "source_image": "tiny-33-week-PMA-girl-with-excessive-discontinuity-and-attenuation (7uV)",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": 7,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "neo-encoches",
+   "files": [
+    "neo-encoches.png",
+    "neo-encoches.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/neonatal",
+   "source_image": "encoches-frontales (2-day or 12-day neonate)",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "neo-quiet-15uV",
+   "files": [
+    "neo-quiet-15uV.png",
+    "neo-quiet-15uV.webp"
+   ],
+   "size": [
+    1696,
+    854
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/neonatal",
+   "source_image": "quiet-sleep-in-4-day-full-term-girl-15uV.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": 15,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "ped-2mo",
+   "files": [
+    "ped-2mo.png",
+    "ped-2mo.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/pediatric",
+   "source_image": "normal-2-month-old-awake_1.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "ped-8mo",
+   "files": [
+    "ped-8mo.png",
+    "ped-8mo.webp"
+   ],
+   "size": [
+    1696,
+    854
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/pediatric",
+   "source_image": "Normal-awake-8-month-old.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "rp-gsw-annot",
+   "files": [
+    "rp-gsw-annot.png",
+    "rp-gsw-annot.webp"
+   ],
+   "size": [
+    1728,
+    838
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/rhythmicity-periodicity",
+   "source_image": "gsw-annotated.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "rp-gsw-clean",
+   "files": [
+    "rp-gsw-clean.png",
+    "rp-gsw-clean.webp"
+   ],
+   "size": [
+    1728,
+    838
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/rhythmicity-periodicity",
+   "source_image": "gsw-clean.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "sws",
+   "files": [
+    "sws.png",
+    "sws.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/normal-asleep",
+   "source_image": null,
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": [
+    4,
+    4,
+    4,
+    4,
+    2,
+    2,
+    2
+   ],
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [
+    {
+     "claim": "Slow-wave sleep: diffuse, synchronised, high-amplitude delta",
+     "test": "negative control: PDR must not be called (aggregate claim only - page is beyond the per-row competence envelope)",
+     "result": "PASS - posterior 3.8 dB, not called"
+    }
+   ],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it.",
+   "montage_note": "as term-alpha; occupancy well above 1 row-height, traces cross throughout",
+   "px_per_sec": 111,
+   "px_per_sec_how": "grid_period 111; ECG R-R ~74 px -> 90 bpm"
+  },
+  {
+   "id": "sz-tonic",
+   "files": [
+    "sz-tonic.png",
+    "sz-tonic.webp"
+   ],
+   "size": [
+    1696,
+    854
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/seizures",
+   "source_image": "Tonic-Seizure.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "term-alpha",
+   "files": [
+    "term-alpha.png",
+    "term-alpha.webp"
+   ],
+   "size": [
+    1492,
+    847
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/atlas",
+   "source_image": "alpha-activity.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": [
+    4,
+    4,
+    4,
+    4,
+    2,
+    2,
+    2
+   ],
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [
+    {
+     "claim": "Alpha activity: rhythmic alpha-band activity, posterior-maximal",
+     "test": "iteration 1b PDR call",
+     "result": "PASS - posterior 19.1 dB vs frontopolar 4.5 dB, L/R gap 0.06 Hz, 10.18 Hz"
+    }
+   ],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it.",
+   "montage_note": "double banana + T1/T2 chains + midline + red ECG",
+   "px_per_sec": 135,
+   "px_per_sec_how": "grid_period 135; ECG R-R ~116 px -> 70 bpm"
+  },
+  {
+   "id": "term-beta",
+   "files": [
+    "term-beta.png",
+    "term-beta.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/atlas",
+   "source_image": "beta-activity.webp",
+   "mapping": "exact",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "term-rdelta",
+   "files": [
+    "term-rdelta.png",
+    "term-rdelta.webp"
+   ],
+   "size": [
+    2336,
+    1551
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/atlas",
+   "source_image": "rhythmic-delta.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  },
+  {
+   "id": "vertex-wave",
+   "files": [
+    "vertex-wave.png",
+    "vertex-wave.webp"
+   ],
+   "size": [
+    1696,
+    837
+   ],
+   "source": "learningeeg.com",
+   "page": "https://www.learningeeg.com/normal-asleep",
+   "source_image": "Vertex wave.webp",
+   "mapping": "inferred",
+   "licence": "learningeeg.com - all rights reserved; local research copy only, never commit",
+   "montage_groups_read": null,
+   "sensitivity_uv_mm": null,
+   "speed_mm_s": null,
+   "claims": [],
+   "notes": "montage_groups_read and claims are filled in by the iteration that first uses the figure: groups READ off the label strip, claims PARAPHRASED from the caption (never verbatim), each claim with the measurement that tests it."
+  }
+ ]
+}

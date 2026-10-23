@@ -2,7 +2,10 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
+    // No rootDir: the engine validation scripts import the simulator's engine
+    // modules directly from artifacts/, which sits outside this package. These
+    // scripts are only ever run through tsx (never emitted), so constraining the
+    // source root buys nothing and blocks the import.
     "types": ["node"]
   },
   "include": ["src"]

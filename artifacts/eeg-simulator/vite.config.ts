@@ -32,7 +32,11 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
+    // The overlay turns any browser error event that carries no Error object into
+    // "(unknown runtime error)" with no message or stack — in practice a browser
+    // extension's script error or a "ResizeObserver loop" notice, neither of which
+    // the app can act on or is affected by. Real exceptions still show.
+    runtimeErrorOverlay({ filter: (e) => e.message !== '(unknown runtime error)' }),
     ...(process.env.NODE_ENV !== 'production' &&
     process.env.REPL_ID !== undefined
       ? [

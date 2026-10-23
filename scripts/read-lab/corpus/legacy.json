@@ -1,0 +1,346 @@
+{
+ "about": "The user's preliminary method-comparison corpus: 31 app renders (renderTrace, bipolar-ap unless the name says otherwise) left in scripts/ by earlier sessions. Usable for visual method comparison, not for scoring.",
+ "renders": [
+  {
+   "file": "scripts/awake-after-placement.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/awake-dipole.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/awake-no-mu.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/awake-pdr-fixed.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/awake-with-mu.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/badelec-on.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/blink-fixed.png",
+   "size": [
+    790,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/central-fast-after.png",
+   "size": [
+    790,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/drowsy-roving.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/ecg-upright.png",
+   "size": [
+    790,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/fix-s1234-t70.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 1234,
+   "skip_s": 70,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/fix-s3-t45.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 3,
+   "skip_s": 45,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/fix-s42-t45.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 42,
+   "skip_s": 45,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/fix-s777-t20.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 777,
+   "skip_s": 20,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/gated-s11-t30.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 11,
+   "skip_s": 30,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/r-s101-t30.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 101,
+   "skip_s": 30,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/r-s101-t90.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 101,
+   "skip_s": 90,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/r-s11-t30.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 11,
+   "skip_s": 30,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/r-s11-t90.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 11,
+   "skip_s": 90,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/r-s2024-t30.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 2024,
+   "skip_s": 30,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/r-s555-t30.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 555,
+   "skip_s": 30,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/regress.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/rem-sleep.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/reverted.png",
+   "size": [
+    1030,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/s3-t0.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 3,
+   "skip_s": 0,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/s3-t45.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 3,
+   "skip_s": 45,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/s42-t0.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 42,
+   "skip_s": 0,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/s42-t45.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": 42,
+   "skip_s": 45,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/trace-bipolar-ap-awake.png",
+   "size": [
+    1270,
+    824
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/trace-reference-car-awake.png",
+   "size": [
+    310,
+    832
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  },
+  {
+   "file": "scripts/trace-reference-ipsi-awake.png",
+   "size": [
+    2470,
+    832
+   ],
+   "seed": null,
+   "skip_s": null,
+   "scored": false,
+   "why_unscored": "rendered on an earlier engine version with no truth saved; regenerating from the same seed now draws a different record"
+  }
+ ]
+}

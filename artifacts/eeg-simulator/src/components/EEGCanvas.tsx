@@ -1,28 +1,82 @@
-import React, { useEffect, useRef } from 'react';
-import { Montage, ALL_ELECTRODES, GROUP_COLORS } from '../utils/montages';
-import { SimSettings } from '../utils/eegGenerator';
-import { computeChannelVoltage } from '../utils/computeChannel';
-import { getElectrodeVoltage } from '../utils/eegGenerator';
+import React, { useEffect, useRef, useState } from 'react';
+import { Montage, ALL_ELECTRODES } from '../utils/montages';
+import type { SimSettings } from '../utils/simTypes';
+import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
+import { markRowSizes, markRows, markRowSigns, markBlocks } from '../utils/markRows';
+import { SimulationSource } from '../engine/adapter';
+import type { ArtifactMark } from '../engine/engine';
+import { PATTERN_BY_ID } from '../utils/patterns';
+import { THEMES, EEGTheme } from '../utils/themes';
+import { EDUCATIONAL_ANNOTATIONS, PATTERN_COLOR, REGION_ORDER } from '../utils/annotations';
+import { Pause, Play } from 'lucide-react';
+import {
+  subscribe,
+  getHighlightState,
+  HighlightState,
+  setHoverChannels,
+  toggleClickChannel,
+  getChannelsUsingElectrode,
+} from '../utils/highlightStore';
+import {
+  PX_PER_MM_X,
+  MM_PER_ROW,
+  MINOR_GRID_PX,
+  pxPerMmFromHeight,
+  pxPerUV as calcPxPerUV,
+  ecgScale,
+  traceY,
+} from '../utils/displayGeometry';
 
 type EEGCanvasProps = {
   montage: Montage;
   settings: SimSettings;
   activeEffectsLabel: string;
+  theme: EEGTheme;
+  showAnnotations: boolean;
+  isFrozen: boolean;
+  setIsFrozen: (b: boolean) => void;
+  dataBuffer: React.MutableRefObject<number[][]>;
+  timeBuffer: React.MutableRefObject<number[]>;
+  // When false, hovering the traces no longer highlights a channel. The 3D
+  // brain electrode hover is independent and unaffected — hovering an electrode
+  // still cross-highlights its channels here, because that comes through
+  // hoveredElectrodes, not this canvas's own mouse-move.
+  graphHover?: boolean;
 };
 
-// ── Visual constants ────────────────────────────────────────────────────────
-const BG_EVEN  = '#c8e6c0';
-const BG_ODD   = '#bdddb5';
-const LABEL_BG = 'rgba(200,230,192,0.93)';
-
-const GRID_1S   = 'rgba(0,100,0,0.26)';
-const GRID_200  = 'rgba(0,100,0,0.10)';
-const GRID_H5MM = 'rgba(0,100,0,0.16)';
-const GRID_H1MM = 'rgba(0,100,0,0.07)';
-
-const PX_PER_MM_X = 4;   // horizontal: pixels per mm
-const MM_PER_ROW  = 10;  // each EEG channel = 10 mm vertically
 const GAP_UNITS   = 0.40; // fractional row-height gap between chain groups
+/**
+ * Seconds of signal kept behind the sweep.
+ *
+ * The buffers used to be trimmed to whatever was currently on screen, which made
+ * the retained history a function of canvas width and paper speed. Widening the
+ * window, dropping to 15 mm/s, or opening the 3D panel then asked for samples
+ * that had already been thrown away, and the trace restarted from the right-hand
+ * edge on blank paper. Storage is now decoupled from display: this is a floor,
+ * and the eviction below also never discards anything still visible, so the
+ * behaviour holds on any canvas at any speed.
+ */
+const HISTORY_SEC = 60;
+
+/**
+ * Samples of expired history tolerated before compacting the buffers.
+ *
+ * splice(0, n) costs O(buffer length) however small n is, so trimming every
+ * frame would rewrite a 15,000-sample buffer 60 times a second per channel.
+ * Draining a second at a time pays that cost once a second instead.
+ */
+const EVICT_CHUNK = 250;
+
+/** Index of the first element >= value in a sorted array. */
+
+function lowerBound(arr: number[], value: number): number {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < value) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
 
 type RowLayout = {
   channelIndex: number;  // -1 = spacer
@@ -53,26 +107,82 @@ function buildLayout(montage: Montage): RowLayout[] {
   });
 }
 
-export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasProps) {
+// Hit-test a pointer y-coordinate against row bands. x is intentionally ignored so
+// the label strip and the trace body behave identically for hover/click.
+function getChannelAtY(layout: RowLayout[], y: number, h: number): number | null {
+  for (const row of layout) {
+    if (row.channelIndex < 0) continue;
+    const top    = (row.centerFrac - row.rowFrac / 2) * h;
+    const bottom = (row.centerFrac + row.rowFrac / 2) * h;
+    if (y >= top && y < bottom) return row.channelIndex;
+  }
+  return null;
+}
+
+type Point = { x: number, y: number, t: number, v: number };
+
+export function EEGCanvas({
+  montage, settings, activeEffectsLabel,
+  theme, showAnnotations, isFrozen, setIsFrozen,
+  dataBuffer, timeBuffer, graphHover = true
+}: EEGCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const dataBuffer   = useRef<number[][]>([]);
-  const timeBuffer   = useRef<number[]>([]);
   const lastTimeRef  = useRef<number>(performance.now());
   const elapsedRef   = useRef<number>(0);
 
-  // Settings/label change on every pattern toggle, sensitivity tweak, etc. — but
-  // the render loop below must NOT tear down and restart for that. It reads the
-  // latest values through these refs each frame instead, so the sweep never
-  // resets; only an actual montage change (different channel set) clears the buffer.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const labelRef = useRef(activeEffectsLabel);
   labelRef.current = activeEffectsLabel;
+  const themeRef = useRef(THEMES[theme]);
+  themeRef.current = THEMES[theme];
+  const annotationsRef = useRef(showAnnotations);
+  annotationsRef.current = showAnnotations;
+  const frozenRef = useRef(isFrozen);
+  frozenRef.current = isFrozen;
+
+  // Highlight store state, mirrored into a ref (not React state) so the rAF
+  // render loop can read it every frame without triggering re-renders.
+  const highlightRef = useRef<HighlightState>(getHighlightState());
+  useEffect(() => {
+    return subscribe(() => { highlightRef.current = getHighlightState(); });
+  }, []);
+
+  // Measurement tool state
+  const measurePointsRef = useRef<{ a: Point | null, b: Point | null }>({ a: null, b: null });
+  const [hasMeasurePoints, setHasMeasurePoints] = useState(false);
+
+  // The engine and each sample's raw electrode voltages outlive a montage change.
+  // A montage only chooses which differences of the same electrodes to draw, so
+  // switching it re-derives every row from the retained frames: the page redraws
+  // the same stretch of EEG in the new montage — as re-montaging a recorded page
+  // does on a real reader — instead of blanking and restarting a new subject.
+  const simRef = useRef<SimulationSource | null>(null);
+  if (!simRef.current) { simRef.current = new SimulationSource(); simRef.current.useAppMode(); }
+  const rawFrames = useRef<Record<string, number>[]>([]);
+  // Artifact onsets reported by the engine, stamped with their sample time, for
+  // the annotation arrows. Times, not rows, so they survive a montage change.
+  const marksRef = useRef<(ArtifactMark & { t: number })[]>([]);
+  // For an artifact's fields and a montage: its size on each channel, and which
+  // way it moves each one.
+  const markRowsRef = useRef(new WeakMap<object, Map<Montage, { sizes: number[]; signs: number[] }>>());
 
   useEffect(() => {
-    dataBuffer.current = montage.channels.map(() => []);
-    timeBuffer.current = [];
+    const frames = rawFrames.current;
+    if (frames.length !== timeBuffer.current.length) {
+      // Buffers out of step (nothing recorded yet): start clean.
+      rawFrames.current = [];
+      timeBuffer.current = [];
+      marksRef.current = [];
+      dataBuffer.current = montage.channels.map(() => []);
+    } else {
+      const avg = frames.map(commonAverage);
+      dataBuffer.current = montage.channels.map(ch =>
+        frames.map((f, k) => computeChannelVoltage(ch, timeBuffer.current[k], f, avg[k])));
+    }
+    measurePointsRef.current = { a: null, b: null };
+    setHasMeasurePoints(false);
   }, [montage]);
 
   useEffect(() => {
@@ -84,59 +194,109 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Observe the container, not the window. The 3D panel's splitter changes this
+    // element's width without the window changing size at all, so a window-only
+    // listener left the backing store stale and the canvas CSS-stretched — which
+    // silently falsifies the mm/s and µV/mm calibration the display is built on.
+    // The equality guard matters: assigning canvas.width clears the canvas even
+    // when the value is unchanged, and a ResizeObserver fires on layout passes
+    // that did not actually change the size.
     const resize = () => {
-      canvas.width  = container.clientWidth;
-      canvas.height = container.clientHeight;
+      const cw = Math.max(1, Math.round(container.clientWidth));
+      const chh = Math.max(1, Math.round(container.clientHeight));
+      if (canvas.width === cw && canvas.height === chh) return;
+      canvas.width  = cw;
+      canvas.height = chh;
     };
     resize();
-    window.addEventListener('resize', resize);
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
 
     const layout = buildLayout(montage);
+    // Row units are fixed by the montage, so the total is summed once here rather
+    // than re-filtering the layout array on every frame.
+    const totalRowUnits = layout.reduce((s, r) => s + (r.channelIndex < 0 ? GAP_UNITS : 1), 0);
+    const simSource = simRef.current!;
 
     const render = (now: number) => {
-      const settings = settingsRef.current;
+      const currentSettings = settingsRef.current;
+      const currentTheme = themeRef.current;
 
       const dtMs = now - lastTimeRef.current;
       lastTimeRef.current = now;
-      const dt = Math.min(dtMs / 1000, 0.1);
-      elapsedRef.current += dt;
+      
+      // Only advance time if not frozen
+      if (!frozenRef.current) {
+        const dt = Math.min(dtMs / 1000, 0.1);
+        elapsedRef.current += dt;
+      }
       const currentT = elapsedRef.current;
 
-      const pxPerSec  = settings.speed * PX_PER_MM_X;
+      const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
       const winSec    = canvas.width / pxPerSec;
 
-      // ── Fill sample buffer at 250 Hz ──
-      const dtS  = 1 / 250;
-      let lastT  = timeBuffer.current.length > 0
-        ? timeBuffer.current[timeBuffer.current.length - 1]
-        : currentT - dt;
+      // ── Fill sample buffer at 250 Hz (only if not frozen) ──
+      if (!frozenRef.current) {
+        const dtS  = 1 / 250;
+        let lastT  = timeBuffer.current.length > 0
+          ? timeBuffer.current[timeBuffer.current.length - 1]
+          : currentT - dtS;
 
-      while (lastT < currentT) {
-        lastT += dtS;
-        const allV: Record<string, number> = {};
-        for (const el of ALL_ELECTRODES) allV[el] = getElectrodeVoltage(el, lastT, settings);
-        timeBuffer.current.push(lastT);
-        for (let i = 0; i < montage.channels.length; i++) {
-          if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
-          dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, settings, allV));
+        while (lastT < currentT) {
+          lastT += dtS;
+          // The engine is a stateful stream, so it must be advanced exactly once
+          // per sample and in order — it cannot be evaluated at an arbitrary t.
+          const allV = simSource.next(currentSettings);
+          const avgRef = commonAverage(allV);
+          timeBuffer.current.push(lastT);
+          for (const m of simSource.groundTruth.marks) {
+            const t = lastT - (m.ago ?? 0);
+            // A pattern that has stopped closes the box it opened (ArtifactMark.key).
+            const open = m.key != null ? marksRef.current.find(o => o.key === m.key && o.span === Infinity) : undefined;
+            if (open) open.span = t - open.t;
+            else marksRef.current.push({ ...m, t });
+          }
+          // `next()` reuses its return object, so keep a copy.
+          rawFrames.current.push({ ...allV });
+          for (let i = 0; i < montage.channels.length; i++) {
+            if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
+            dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, allV, avgRef));
+          }
         }
-      }
 
-      // Evict old samples
-      const cutoff = currentT - winSec;
-      let evict = 0;
-      while (timeBuffer.current[evict] < cutoff && evict < timeBuffer.current.length - 2) evict++;
-      if (evict > 0) {
-        timeBuffer.current.splice(0, evict);
-        for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i]?.splice(0, evict);
+        // Drop only what has aged out of the retention span — not what has merely
+        // scrolled off the canvas. `winSec` is in the max so a window wider than
+        // HISTORY_SEC (a 4K display at 15 mm/s) can never evict a sample it is
+        // still drawing. Carrying the surplus costs nothing to render: the draw
+        // loop binary-searches to the left edge rather than scanning past it.
+        const cutoff = currentT - Math.max(HISTORY_SEC, winSec);
+        const tb = timeBuffer.current;
+        let evict = 0;
+        while (evict < tb.length - 2 && tb[evict] < cutoff) evict++;
+        if (evict >= EVICT_CHUNK) {
+          tb.splice(0, evict);
+          rawFrames.current.splice(0, evict);
+          for (let i = 0; i < montage.channels.length; i++) dataBuffer.current[i]?.splice(0, evict);
+          // A mark goes once all of it has aged out: a box is kept while its end is
+          // still in the buffer, and an open one (span Infinity) until it closes.
+          const marks = marksRef.current;
+          let kept = 0;
+          for (const m of marks) if (m.t + (m.span ?? m.dur) >= tb[0]) marks[kept++] = m;
+          marks.length = kept;
+        }
       }
 
       // ── RENDER ──────────────────────────────────────────────────────────────
       const w = canvas.width;
       const h = canvas.height;
 
-      // 1. Base green paper
-      ctx.fillStyle = BG_EVEN;
+      // Width of the fixed channel-label strip on the left. Declared here rather
+      // than at its first draw (section 6) because the annotation overlay in
+      // section 5b also anchors to it.
+      const lblW = 66;
+
+      // 1. Base paper
+      ctx.fillStyle = currentTheme.bgEven;
       ctx.fillRect(0, 0, w, h);
 
       // 2. Alternating 1-second tinted bands (even seconds slightly darker)
@@ -147,89 +307,330 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
           if (s % 2 !== 0) continue;
           const x0 = w - (rightT - s)       * pxPerSec;
           const x1 = w - (rightT - (s + 1)) * pxPerSec;
-          ctx.fillStyle = BG_ODD;
+          ctx.fillStyle = currentTheme.bgOdd;
           ctx.fillRect(x0, 0, x1 - x0, h);
         }
       }
 
       // 3. Amplitude grid (px per mm vertical)
-      const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
-      const nSp     = layout.length - nonSp;
-      const totalU  = nonSp + nSp * GAP_UNITS;
-      const avgRowH = h / totalU;
-      const pxPerMm = avgRowH / MM_PER_ROW;
+      const pxPerMm = pxPerMmFromHeight(h, totalRowUnits);
 
-      // Horizontal lines: minor 1 mm, major 5 mm
-      for (let y = 0; y < h; y += pxPerMm) {
-        const is5mm = Math.abs(Math.round(y) % Math.round(pxPerMm * 5)) < 1;
+      // Grid lines are batched by style — one path for the 1 mm lines and one for
+      // the 5 mm lines — instead of a beginPath/stroke pair per line. At this
+      // canvas size that turns ~260 path submissions a frame into 4. stroke()
+      // carries fixed per-call overhead that dwarfs a two-point path, and the
+      // output is identical: the two sets never share a y, so drawing all of one
+      // before the other cannot change which line lands on top.
+      const step5 = Math.max(1, Math.round(pxPerMm * 5));
+      const is5mm = (y: number) => Math.abs(Math.round(y) % step5) < 1;
+
+      ctx.beginPath();
+      for (let y = 0; y < h; y += pxPerMm) if (!is5mm(y)) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.strokeStyle = currentTheme.gridH1mm;
+      ctx.lineWidth   = 0.3;
+      ctx.stroke();
+
+      ctx.beginPath();
+      for (let y = 0; y < h; y += pxPerMm) if (is5mm(y)) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.strokeStyle = currentTheme.gridH5mm;
+      ctx.lineWidth   = 0.55;
+      ctx.stroke();
+
+      // 4. Vertical time grid: minor 5 mm (fixed paper interval), major 1 s.
+      //
+      // Real ruled EEG paper is printed with a fixed physical grid — 5 mm
+      // minor squares — and the TIME each square represents changes with
+      // paper speed, not the reverse. This used to rule minor lines every
+      // 200 ms of elapsed time regardless of speed, which gave the correct
+      // physical spacing only at 25 mm/s and was wrong everywhere else (6.0
+      // mm at 30 mm/s, 2.0 mm at 10 mm/s). `pxOff` below is already a plain
+      // pixel offset (how far the sweep has travelled past the last whole
+      // second), so switching `minorW` from a time-derived quantity to a
+      // fixed physical one needs no other change to the scroll math.
+      {
+        const secW   = pxPerSec;
+        const minorW = MINOR_GRID_PX;
+        const pxOff  = (currentT % 1) * secW;
+        const isMajor = (x: number) => Math.abs((w - x + pxOff) % secW) < 1.8;
+
         ctx.beginPath();
-        ctx.strokeStyle = is5mm ? GRID_H5MM : GRID_H1MM;
-        ctx.lineWidth   = is5mm ? 0.55 : 0.3;
-        ctx.moveTo(0, y); ctx.lineTo(w, y);
+        for (let x = w - (pxOff % minorW); x > 0; x -= minorW) if (!isMajor(x)) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+        ctx.strokeStyle = currentTheme.grid200;
+        ctx.lineWidth   = 0.35;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let x = w - (pxOff % minorW); x > 0; x -= minorW) if (isMajor(x)) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+        ctx.strokeStyle = currentTheme.grid1s;
+        ctx.lineWidth   = 0.7;
         ctx.stroke();
       }
 
-      // 4. Vertical time grid: minor 200 ms, major 1 s
-      {
-        const secW   = pxPerSec;
-        const minorW = secW * 0.2;
-        const pxOff  = (currentT % 1) * secW;
-
-        for (let x = w - (pxOff % minorW); x > 0; x -= minorW) {
-          const isMajor = Math.abs((w - x + pxOff) % secW) < 1.8;
-          ctx.beginPath();
-          ctx.strokeStyle = isMajor ? GRID_1S : GRID_200;
-          ctx.lineWidth   = isMajor ? 0.7 : 0.35;
-          ctx.moveTo(x, 0); ctx.lineTo(x, h);
-          ctx.stroke();
-        }
-      }
-
       // 5. Waveform traces
-      const pxPerUV = pxPerMm / settings.sensitivity;
+      const pxPerUV = calcPxPerUV(pxPerMm, currentSettings.sensitivity);
+
+      // Index of the leftmost sample still on screen. The buffers now hold up to
+      // HISTORY_SEC of signal but only winSec of it is visible, so starting every
+      // channel at 0 and discarding the misses would walk several times more
+      // samples than it draws. Sample times are monotonic, so one binary search
+      // finds the left edge and all channels share it.
+      const firstVisible = lowerBound(timeBuffer.current, currentT - winSec);
+
+      // Cross-highlight: a channel is highlighted if it's directly hovered/clicked
+      // (from the canvas side) or if either of its electrodes is highlighted from
+      // the 3D head side.
+      const hl = highlightRef.current;
+      const highlightedChannels = new Set<number>(hl.hoveredChannels);
+      hl.clickedChannels.forEach(c => highlightedChannels.add(c));
+      const highlightedElectrodes = new Set<string>(hl.hoveredElectrodes);
+      hl.clickedElectrodes.forEach(e => highlightedElectrodes.add(e));
+      highlightedElectrodes.forEach(el => {
+        getChannelsUsingElectrode(el, montage).forEach(idx => highlightedChannels.add(idx));
+      });
+      const anyHighlight = highlightedChannels.size > 0;
+
+      // A detached electrode is flattened in the engine, but that only *looks*
+      // dead in a referential montage; in a bipolar chain the two derivations
+      // containing it correctly show the neighbour's activity, so the trace keeps
+      // moving and reads as still connected. Marking the affected rows makes the
+      // detachment legible in any montage without altering the waveform: the row
+      // still draws the true (flat or neighbour) signal, it is just labelled off.
+      const detached = currentSettings.artifactParams.detachedElectrodes;
+      const detachedSet = detached.length ? new Set(detached) : null;
+      const rowDetached = (ch: Montage['channels'][number]) =>
+        !!detachedSet && (detachedSet.has(ch.active) || (!!ch.reference && detachedSet.has(ch.reference)));
 
       for (const row of layout) {
         if (row.channelIndex < 0) continue;
         const i       = row.channelIndex;
         const ch      = montage.channels[i];
         const data    = dataBuffer.current[i] ?? [];
-        const rowH    = row.rowFrac * h;
         const centerY = row.centerFrac * h;
         const isECG   = ch.active === 'ECG';
+        const isHighlighted = highlightedChannels.has(i);
+        const dimmed  = anyHighlight && !isHighlighted;
 
-        // ECG: 1 mV = 10 mm (standard ECG scale), independent of sensitivity
-        const scale = isECG ? pxPerMm * 10 / 1000 : pxPerUV;
+        // ECG is a limb lead, not a scalp derivation — negative-up does not
+        // apply to it, so its scale is negated relative to the EEG rows
+        // (see ecgScale's doc comment: this is what puts the R wave up).
+        const scale = isECG ? ecgScale(pxPerMm) : pxPerUV;
 
-        // Baseline
+        if (rowDetached(ch)) {
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
+          ctx.fillRect(0, (row.centerFrac - row.rowFrac / 2) * h, w, row.rowFrac * h);
+        }
+
+        ctx.save();
+        if (dimmed) ctx.globalAlpha = 0.4;
+
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(0,80,0,0.13)';
+        ctx.strokeStyle = currentTheme.baselineColor;
         ctx.lineWidth = 0.4;
         ctx.moveTo(0, centerY); ctx.lineTo(w, centerY);
         ctx.stroke();
 
-        // Trace
         ctx.beginPath();
-        ctx.strokeStyle = GROUP_COLORS[ch.group];
-        ctx.lineWidth   = isECG ? 1.1 : 0.9;
+        ctx.strokeStyle = currentTheme.traceColors[ch.group];
+        ctx.lineWidth   = isHighlighted ? 2.2 : (isECG ? 1.1 : 0.9);
         let started = false;
 
-        for (let j = 0; j < data.length; j++) {
+        for (let j = firstVisible; j < data.length; j++) {
           const tDist = currentT - timeBuffer.current[j];
           const x = w - tDist * pxPerSec;
-          if (x < 0) continue;
-          // EEG convention: negative deflection = UP
-          const y = centerY - Math.max(-rowH * 1.35, Math.min(rowH * 1.35, data[j] * scale));
+          const v = data[j];
+          // Real EEG paper and clinical review systems never clip: a
+          // high-amplitude event is drawn at its true height and simply
+          // overruns into neighbouring channels, which is how reviewers judge
+          // amplitude at a glance. Only guard against non-finite values —
+          // that protects canvas rendering, it does not limit amplitude.
+          if (!Number.isFinite(v)) continue;
+          // Clinical EEG is drawn NEGATIVE-UP: a channel whose active input is
+          // more positive than its reference deflects DOWNWARD. That is the
+          // convention every reader is trained on and the reason a blink — which
+          // drives Fp1/Fp2 positive via Bell's phenomenon — reads as a downward
+          // frontopolar deflection (IK-001).
+          //
+          // Canvas y grows downward, so negative-up is `centerY + v * scale`,
+          // not `centerY - v * scale` — that is what `traceY` (shared with
+          // renderTrace.ts via displayGeometry.ts) encodes. This previously
+          // read `centerY - v`, which inverted every trace in the app. It
+          // looked right only for the patterns whose morphology had been
+          // written pre-inverted to compensate; the ones stated in true scalp
+          // polarity (V-waves, K-complexes, POSTS, lambda, triphasics, blink)
+          // all rendered upside down. Fixing the convention here is what lets
+          // every generator speak plain physiological sign. The ECG row is the
+          // one exception to negative-up (see `scale` above / `ecgScale`).
+          const y = traceY(centerY, v, scale);
           if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
+        ctx.restore();
+      }
+
+      // 5b. Annotations — a universal teaching legend. Every active pattern that
+      // has a cue contributes one line; they are sorted so the stack runs in the
+      // same top-to-bottom order as the montage rows they describe, and stacked
+      // with a fixed pitch so no two ever overlap however many are on at once.
+      // The cue names its own channels; the arrows drawn first are for the things
+      // that come and go — artifacts and the sleep graphoelements — which are
+      // easiest to learn by being pointed at.
+      if (annotationsRef.current) {
+        // Arrows. Every artifact and sleep graphoelement the engine reports
+        // (ArtifactMark) gets one on each row it is large on in this montage, at
+        // the moment of its largest excursion on that row. They are anchored to a
+        // sample time, so they scroll with the waves they point at.
+        const tb = timeBuffer.current;
+        const tEnd = tb.length ? tb[tb.length - 1] : -Infinity;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        const rowOfChannel = new Map(layout.filter(r => r.channelIndex >= 0).map(r => [r.channelIndex, r]));
+        // Every arrow carries its artifact's name (the owner, 2026-10-14: "all arrows
+        // should be annotated"; it was one name per artifact every 2.5 s). A name is
+        // left off only where the same name already covers that spot.
+        const drawnLabels: { x0: number; y0: number; x1: number; y1: number; text: string }[] = [];
+        for (const m of marksRef.current) {
+          if (m.span == null && m.t + m.dur > tEnd) continue; // still developing: its peak is not drawn yet
+          if (m.t + (m.span ?? 0) < currentT - winSec) continue; // scrolled off
+          // The rows this artifact is on, in this montage: every row within reach of
+          // the largest gets an arrow — a blink is on all four frontopolar rows.
+          let byMontage = markRowsRef.current.get(m.fields);
+          if (!byMontage) { byMontage = new Map(); markRowsRef.current.set(m.fields, byMontage); }
+          let rowInfo = byMontage.get(montage);
+          if (!rowInfo) {
+            rowInfo = { sizes: markRowSizes(m.fields, montage), signs: markRowSigns(m.fields, montage) };
+            byMontage.set(montage, rowInfo);
+          }
+          // A pattern acting on the whole background is on every EEG row (ArtifactMark.page),
+          // not the ECG, which is the heart.
+          const channels = m.page ? [...rowOfChannel.keys()].filter(c => montage.channels[c].active !== 'ECG') : markRows(rowInfo.sizes, m.inUv ? currentSettings.sensitivity : undefined, m.span != null ? Infinity : undefined);
+          const j0 = lowerBound(tb, m.t);
+          const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
+          const color = PATTERN_COLOR[pid] ?? currentTheme.overlayText;
+          const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
+          const label = (x: number, ty: number) => {
+            const textW = ctx.measureText(text).width;
+            const box = { x0: x - textW / 2 - 4, y0: ty - 7, x1: x + textW / 2 + 4, y1: ty + 7, text };
+            if (drawnLabels.some(b => b.text === text && b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) return;
+            drawnLabels.push(box);
+            ctx.fillStyle = currentTheme.overlayBg;
+            ctx.fillRect(box.x0, box.y0, textW + 8, 14);
+            ctx.fillStyle = currentTheme.overlayText;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, ty);
+          };
+          if (m.span != null) {
+            // An event with extent: a box from its start to its end (or to now, for a
+            // seizure's phase still running) around each chain block it is on.
+            const xa = Math.max(lblW, w - (currentT - m.t) * pxPerSec);
+            const xb = Math.min(w, w - (currentT - Math.min(m.t + m.span, tEnd)) * pxPerSec);
+            if (xb - xa < 2) continue;
+            for (const block of markBlocks(channels, montage)) {
+              const first = rowOfChannel.get(block[0]);
+              const last = rowOfChannel.get(block[block.length - 1]);
+              if (!first || !last) continue;
+              const y0 = (first.centerFrac - first.rowFrac / 2) * h + 2;
+              const y1 = (last.centerFrac + last.rowFrac / 2) * h - 2;
+              ctx.save();
+              ctx.globalAlpha = 0.08;
+              ctx.fillStyle = color;
+              ctx.fillRect(xa, y0, xb - xa, y1 - y0);
+              ctx.restore();
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.roundRect(xa, y0, xb - xa, y1 - y0, 5);
+              ctx.stroke();
+              const textW = ctx.measureText(text).width;
+              label(Math.min(xa + 6 + textW / 2, xb - textW / 2 - 4), y0 + 9);
+            }
+            continue;
+          }
+          // Which swing each arrow points at. A one-source artifact moves every row the
+          // way its field says, so the rows vote on which way this event went and each
+          // arrow then goes to its row's largest swing in that direction. Each row used
+          // to take its own largest swing either way, and a POSTS whose small negative
+          // after-wave happened to be larger on one row got its arrow there, from below,
+          // while the rest pointed at the peak.
+          const picks: { row: (typeof layout)[number]; data: number[]; j1: number; sign: number }[] = [];
+          let vote = 0;
+          for (const c of channels) {
+            const row = rowOfChannel.get(c);
+            if (!row) continue;
+            const data = dataBuffer.current[row.channelIndex] ?? [];
+            if (j0 >= data.length) continue;
+            const j1 = Math.min(data.length - 1, lowerBound(tb, m.t + m.dur));
+            let jp = j0;
+            for (let j = j0 + 1; j <= j1; j++) {
+              if (Math.abs(data[j] - data[j0]) > Math.abs(data[jp] - data[j0])) jp = j;
+            }
+            vote += rowInfo.signs[c] * (data[jp] - data[j0]);
+            picks.push({ row, data, j1, sign: rowInfo.signs[c] });
+          }
+          const polarity = Math.sign(vote);
+          for (const { row, data, j1, sign } of picks) {
+            const want = sign * polarity; // +1 the largest rise in uV, -1 the largest fall, 0 either
+            let jp = j0;
+            for (let j = j0 + 1; j <= j1; j++) {
+              const d = data[j] - data[j0], best = data[jp] - data[j0];
+              if (want === 0 ? Math.abs(d) > Math.abs(best) : want * d > want * best) jp = j;
+            }
+            const x = w - (currentT - tb[jp]) * pxPerSec;
+            if (x < lblW + 6 || x > w - 4) continue;
+            const centerY = row.centerFrac * h;
+            const y = traceY(centerY, data[jp], pxPerUV);
+            // Come at the wave from the side it points to: from above for an upward
+            // deflection (and for a continuous artifact, which has no direction),
+            // from below for a downward one.
+            const dir = y <= traceY(centerY, data[j0], pxPerUV) ? -1 : 1;
+            const tip = y + dir * 5, tail = y + dir * 22;
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(x, tail); ctx.lineTo(x, tip + dir * 5);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, tip); ctx.lineTo(x - 4, tip + dir * 7); ctx.lineTo(x + 4, tip + dir * 7);
+            ctx.closePath();
+            ctx.fill();
+            label(x, tail + dir * 9);
+          }
+        }
+
+        const cues = [];
+        for (const pattern of currentSettings.activePatterns) {
+          const ann = EDUCATIONAL_ANNOTATIONS[pattern];
+          const between = currentSettings.patternOptions?.focalPlacement === 'between';
+          if (ann) cues.push({ text: (between && ann.textBetween) || ann.text, color: PATTERN_COLOR[pattern] ?? currentTheme.overlayText, order: REGION_ORDER[ann.targetRegion] });
+        }
+        cues.sort((a, b) => a.order - b.order);
+
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const x0 = lblW + 10;       // clear of the label strip
+        const pitch = 21;
+        let cy = 52;                // below the freeze button in the top-left
+        for (const cue of cues) {
+          if (cy > h - 28) break;   // ran out of vertical room; drop the rest
+          const textW = ctx.measureText(cue.text).width;
+          ctx.fillStyle = currentTheme.overlayBg;
+          ctx.fillRect(x0 - 6, cy - 9, textW + 18, 18);
+          // Category-coloured tab on the left edge ties the cue to its control-
+          // panel section at a glance.
+          ctx.fillStyle = cue.color;
+          ctx.fillRect(x0 - 6, cy - 9, 3, 18);
+          ctx.fillStyle = currentTheme.overlayText;
+          ctx.fillText(cue.text, x0 + 4, cy);
+          cy += pitch;
+        }
       }
 
       // 6. Channel label strip
-      const lblW = 66;
-      ctx.fillStyle = LABEL_BG;
+      ctx.fillStyle = currentTheme.labelBg;
       ctx.fillRect(0, 0, lblW, h);
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(0,80,0,0.32)';
+      ctx.strokeStyle = currentTheme.baselineColor;
       ctx.lineWidth = 0.8;
       ctx.moveTo(lblW, 0); ctx.lineTo(lblW, h);
       ctx.stroke();
@@ -237,39 +638,64 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
       for (const row of layout) {
         if (row.channelIndex < 0) continue;
         const ch = montage.channels[row.channelIndex];
-        ctx.fillStyle    = GROUP_COLORS[ch.group];
-        ctx.font         = 'bold 9.5px "Courier New", monospace';
+        const isHighlighted = highlightedChannels.has(row.channelIndex);
+        const dimmed = anyHighlight && !isHighlighted;
+
+        ctx.save();
+        if (dimmed) ctx.globalAlpha = 0.4;
+        if (isHighlighted) {
+          ctx.fillStyle = 'rgba(255, 215, 0, 0.25)';
+          ctx.fillRect(0, row.centerFrac * h - 7, lblW, 14);
+        }
+        const isDetached = rowDetached(ch);
+        ctx.fillStyle    = isDetached ? '#f59e0b' : currentTheme.traceColors[ch.group];
+        ctx.font         = isHighlighted ? 'bold 10.5px "Courier New", monospace' : 'bold 9.5px "Courier New", monospace';
         ctx.textAlign    = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(ch.label, 4, row.centerFrac * h);
+        // A hollow amber dot at the strip's edge flags the dead electrode — the
+        // one signal that survives dimming and reads at a glance without parsing
+        // the label text.
+        if (isDetached) {
+          ctx.beginPath();
+          ctx.arc(lblW - 6, row.centerFrac * h, 2.6, 0, Math.PI * 2);
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+        ctx.restore();
       }
 
-      // 7. State + sensitivity label (top-right)
+      // 7. State + sensitivity label (top-right). It names only what the state's own
+      // background carries: K-complexes, spindles and REMs are toggles, and the label
+      // claimed them while they were off (owner, 2026-10-23: nothing on the page that
+      // is not there by design).
       {
         const stateLabel = {
           awake: 'Awake · PDR α', drowsy: 'Drowsy · θ',
-          n1: 'N1 Sleep', n2: 'N2 Sleep · K+Spindles', n3: 'N3 / SWS · δ',
-        }[settings.patientState] ?? settings.patientState;
+          n1: 'N1 Sleep', n2: 'N2 Sleep', n3: 'N3 / SWS · δ',
+          rem: 'REM · low-voltage mixed',
+        }[currentSettings.patientState] ?? currentSettings.patientState;
 
-        ctx.fillStyle    = 'rgba(0,60,0,0.60)';
+        ctx.fillStyle    = currentTheme.stateTextColor;
         ctx.font         = '11px sans-serif';
         ctx.textAlign    = 'right';
         ctx.textBaseline = 'top';
-        ctx.fillText(`${stateLabel}   ${settings.sensitivity} µV/mm · ${settings.speed} mm/s`, w - 12, 6);
+        ctx.fillText(`${stateLabel}   ${currentSettings.sensitivity} µV/mm · ${currentSettings.speed} mm/s`, w - 12, 6);
       }
 
-      // 8. Calibration bar — 100 µV
+      // 8. Calibration bar
       {
         const calibPx = 100 * pxPerUV;
         const cbX = w - 16, cbY = h - 14;
-        ctx.strokeStyle = '#6b4400';
+        ctx.strokeStyle = currentTheme.calibColor;
         ctx.lineWidth   = 2;
         ctx.beginPath();
         ctx.moveTo(cbX, cbY);             ctx.lineTo(cbX, cbY - calibPx);
         ctx.moveTo(cbX - 4, cbY);         ctx.lineTo(cbX + 4, cbY);
         ctx.moveTo(cbX - 4, cbY - calibPx); ctx.lineTo(cbX + 4, cbY - calibPx);
         ctx.stroke();
-        ctx.fillStyle    = '#6b4400';
+        ctx.fillStyle    = currentTheme.calibColor;
         ctx.font         = '9px sans-serif';
         ctx.textAlign    = 'right';
         ctx.textBaseline = 'middle';
@@ -279,30 +705,211 @@ export function EEGCanvas({ montage, settings, activeEffectsLabel }: EEGCanvasPr
       // 9. Active patterns overlay bar
       const activeLabel = labelRef.current;
       if (activeLabel) {
-        ctx.fillStyle = 'rgba(0,40,0,0.68)';
+        ctx.fillStyle = currentTheme.overlayBg;
         ctx.fillRect(lblW + 2, h - 20, w - lblW - 20, 18);
-        ctx.fillStyle    = '#a0e8a0';
+        ctx.fillStyle    = currentTheme.overlayText;
         ctx.font         = '10px sans-serif';
         ctx.textAlign    = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(`● ${activeLabel}`, lblW + 8, h - 11);
+      }
+      
+      // 10. Measurement Tool Render
+      if (frozenRef.current) {
+        const { a, b } = measurePointsRef.current;
+        
+        ctx.strokeStyle = '#ef4444';
+        ctx.fillStyle = '#ef4444';
+        ctx.lineWidth = 1;
+        
+        if (a) {
+          ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(a.x, 0); ctx.lineTo(a.x, h); ctx.setLineDash([5, 5]); ctx.stroke(); ctx.setLineDash([]);
+        }
+        if (b) {
+          ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(b.x, 0); ctx.lineTo(b.x, h); ctx.setLineDash([5, 5]); ctx.stroke(); ctx.setLineDash([]);
+        }
+        
+        if (a && b) {
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); 
+          ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+          
+          const dt = Math.abs(b.t - a.t);
+          const dv = Math.abs(b.v - a.v);
+          const freq = dt > 0 ? (1 / dt).toFixed(1) : '0';
+          const text = `${(dt * 1000).toFixed(0)} ms | ${dv.toFixed(1)} µV | ${freq} Hz`;
+          
+          const midX = (a.x + b.x) / 2;
+          const midY = (a.y + b.y) / 2 - 15;
+          const tw = ctx.measureText(text).width + 12;
+          
+          ctx.fillStyle = 'rgba(0,0,0,0.8)';
+          ctx.fillRect(midX - tw/2, midY - 10, tw, 20);
+          ctx.fillStyle = '#fff';
+          ctx.textAlign = 'center';
+          ctx.fillText(text, midX, midY);
+        }
       }
 
       rafId = requestAnimationFrame(render);
     };
 
     rafId = requestAnimationFrame(render);
-    return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', resize); };
-    // Intentionally scoped to `montage` only — a montage switch is the one case
-    // that legitimately needs a fresh loop (different channel set, buffer reset
-    // above). Everything else (patterns, state, speed, sensitivity) flows in via
-    // settingsRef/labelRef each frame so the sweep is never interrupted.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, [montage]);
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (!frozenRef.current) {
+      // Not frozen: clicks toggle a persistent channel highlight instead of measuring.
+      const rect = canvas.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
+      if (idx !== null) toggleClickChannel(idx);
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const currentSettings = settingsRef.current;
+    const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
+    const currentT = elapsedRef.current;
+    const w = canvas.width;
+    const h = canvas.height;
+    
+    const clickT = currentT - (w - x) / pxPerSec;
+    
+    const layout = buildLayout(montage);
+    let closestRow = layout[0];
+    let minDist = Infinity;
+    
+    for (const row of layout) {
+      if (row.channelIndex < 0) continue;
+      const centerY = row.centerFrac * h;
+      const dist = Math.abs(y - centerY);
+      if (dist < minDist) {
+        minDist = dist;
+        closestRow = row;
+      }
+    }
+    
+    const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
+    const nSp     = layout.length - nonSp;
+    const totalU  = nonSp + nSp * GAP_UNITS;
+    const pxPerMm = pxPerMmFromHeight(h, totalU);
+    const pxPerUV = calcPxPerUV(pxPerMm, currentSettings.sensitivity);
+
+    const centerY = closestRow.centerFrac * h;
+    // Invert exactly the mapping the renderer used to draw this row. `traceY` is
+    // `centerY + v * scale`, so the inverse is `(y - centerY) / scale` — and
+    // `scale` must be the SAME one that row was drawn with, or the caliper
+    // measures a curve it did not plot.
+    //
+    // Two bugs lived here. It read `(centerY - y)`, i.e. positive-up, reporting
+    // the opposite sign to the trace it sat on; the readout displays |Δv| so no
+    // number on screen was wrong, but the stored value was. And it applied the
+    // EEG `pxPerUV` to every row including ECG, which is drawn through
+    // `ecgScale` — a different unit conversion (mV, not µV) and, since the ECG
+    // row is a limb lead rather than a scalp derivation, a negated one. Measuring
+    // the ECG row therefore gave both the wrong sign and a magnitude off by
+    // roughly 14x at 7 µV/mm. Branching on the row is the whole fix.
+    const rowIsECG = closestRow.channelIndex >= 0
+      && montage.channels[closestRow.channelIndex]?.label === 'ECG';
+    const clickScale = rowIsECG ? ecgScale(pxPerMm) : pxPerUV;
+    const clickV = (y - centerY) / clickScale;
+    
+    const point = { x, y, t: clickT, v: clickV };
+    
+    const currentPoints = measurePointsRef.current;
+    if (!currentPoints.a || (currentPoints.a && currentPoints.b)) {
+      measurePointsRef.current = { a: point, b: null };
+    } else {
+      measurePointsRef.current = { a: currentPoints.a, b: point };
+    }
+    setHasMeasurePoints(!hasMeasurePoints);
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!graphHover) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
+    setHoverChannels(idx !== null ? new Set([idx]) : new Set());
+  };
+
+  const handleCanvasMouseLeave = () => {
+    setHoverChannels(new Set());
+  };
+
+  // Turning graph hover off mid-hover would otherwise leave the last hovered
+  // channel stuck highlighted, since no further mouse-move fires to clear it.
+  useEffect(() => {
+    if (!graphHover) setHoverChannels(new Set());
+  }, [graphHover]);
+
+  // Keyboard transport. Freezing the trace and measuring on it is the single
+  // most useful thing a learner can do here, and it was reachable only through
+  // one small unlabelled button. Space is the freeze/resume key every clinical
+  // review system uses; Escape clearing the calipers saves a throwaway third
+  // click just to begin a new measurement (a third click currently restarts the
+  // pair anyway, but only after the old one is still on screen).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      // Never steal the key from a control that already means something by it:
+      // Space types into the pattern search box and activates focused buttons
+      // and switches.
+      if (el && (el.isContentEditable
+        || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName)
+        || el.getAttribute('role') === 'switch')) return;
+      if (e.code === 'Space') {
+        e.preventDefault();          // otherwise the page scrolls
+        setIsFrozen(!frozenRef.current);
+      } else if (e.key === 'Escape' && frozenRef.current) {
+        measurePointsRef.current = { a: null, b: null };
+        setHasMeasurePoints(v => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setIsFrozen]);
 
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>
-      <canvas ref={canvasRef} className="block w-full h-full" />
+      <canvas
+        ref={canvasRef}
+        className={`block w-full h-full ${isFrozen ? 'cursor-crosshair' : ''}`}
+        onClick={handleCanvasClick}
+        onMouseMove={handleCanvasMouseMove}
+        onMouseLeave={handleCanvasMouseLeave}
+      />
+      <div className="absolute top-2 left-[70px] z-10 flex gap-2">
+        <button 
+          onClick={() => setIsFrozen(!isFrozen)}
+          className={`flex items-center justify-center w-8 h-8 rounded shadow-sm border transition-colors ${
+            isFrozen 
+              ? 'bg-amber-500/90 border-amber-600 text-white hover:bg-amber-600' 
+              : 'bg-white/80 border-slate-300 text-slate-700 hover:bg-white'
+          }`}
+          title={isFrozen ? 'Resume EEG (Space)' : 'Freeze EEG for measurement (Space)'}
+        >
+          {isFrozen ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+        </button>
+        {/* The measuring workflow is not guessable from a pause button, so it is
+            spelled out while frozen — that is the only time it applies. */}
+        {isFrozen && (
+          <div className="flex items-center h-8 px-2 rounded bg-black/70 text-[11px] text-amber-200 whitespace-nowrap pointer-events-none">
+            Click two points to measure · Esc clears · Space resumes
+          </div>
+        )}
+      </div>
     </div>
   );
 }

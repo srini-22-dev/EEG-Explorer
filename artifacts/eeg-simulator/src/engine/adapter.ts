@@ -1,0 +1,129 @@
+/**
+ * Bridge between the streaming engine and the app's per-sample rendering loop.
+ *
+ * The canvas wants a map of electrode voltages for each successive sample; the
+ * engine produces exactly that, but as a stateful stream that must be advanced
+ * in order. This adapter owns the engine instance and keeps the sample clock.
+ *
+ * All clinical content — background, rhythms, sleep grapho-elements, benign
+ * variants, abnormalities, epileptiform and ictal patterns, and artifacts — now
+ * lives inside the engine as forward-modelled sources. The adapter's only job is
+ * to translate the UI's `activePatterns` set into engine toggles each sample and
+ * copy the resulting electrode potentials out; it no longer adds any voltage of
+ * its own.
+ */
+
+import { EegEngine } from './engine';
+import type { PatientState, SimSettings } from '../utils/simTypes';
+
+// Long enough that the onset arrives on a page that already shows two seconds of
+// the record it interrupts; short enough that the toggle does not seem dead.
+const APP_ICTAL_ONSET_DELAY_S = 2;
+
+export class SimulationSource {
+  private engine: EegEngine;
+  private buf: Float64Array;
+  private voltages: Record<string, number> = {};
+  private state: PatientState = 'awake';
+  readonly dt: number;
+
+  /** Elapsed simulated time, seconds. Advances only when `next()` is called. */
+  t = 0;
+
+  constructor(seed = Math.floor(Math.random() * 1e9), fs = 250) {
+    // ~3 time constants of the 0.25 Hz recording-chain high-pass, so the amplifier
+    // filters are settled before the first displayed sample (see EegEngine `warmup`).
+    this.engine = new EegEngine({ seed, fs, warmup: 2 });
+    this.buf = new Float64Array(this.engine.electrodes.length);
+    this.dt = 1 / fs;
+    for (const name of this.engine.electrodes) this.voltages[name] = 0;
+    // ECG is a recorded display channel, not a scalp electrode, so the engine
+    // supplies it separately rather than through the leadfield projection.
+    this.voltages['ECG'] = 0;
+  }
+
+  setPatientState(state: PatientState) {
+    if (state === this.state) return;
+    this.state = state;
+    this.engine.setPatientState(state);
+  }
+
+  /**
+   * Run as the app does: the toggles alone decide what is on the page (see
+   * `EegEngine.setStateDrivesIntrinsic` and `setBackgroundMu`), and artifact onsets
+   * are reported for the annotation arrows. The scripts that share this class do
+   * not call it.
+   */
+  useAppMode() {
+    this.engine.setStateDrivesIntrinsic(false);
+    this.engine.setBackgroundMu(false);
+    this.engine.setIctalOnsetDelay(APP_ICTAL_ONSET_DELAY_S);
+    this.engine.setArtifactMarks(true);
+  }
+
+  /**
+   * Advance one sample and return the electrode voltage map.
+   *
+   * The returned object is reused between calls to avoid allocating 21 numbers
+   * 250 times a second; callers must consume it before the next call.
+   */
+  next(settings: SimSettings): Record<string, number> {
+    this.setPatientState(settings.patientState as PatientState);
+
+    // The engine's own artifact generators (own topographies, leadfield-
+    // projected) are gated by the "Artifacts"
+    // toggles, read fresh every sample so a checkbox flips instantly without
+    // rebuilding the engine (see `EegEngine.setArtifactGates`'s doc comment).
+    // `chewing` is a pattern source, not an engine artifact generator, so it is
+    // handled by `setActivePatterns` below rather than here.
+    const ap = settings.activePatterns;
+    this.engine.setArtifactGates({
+      blink: ap.has('blink'),
+      eyeOpening: ap.has('eye-opening'),
+      saccade: ap.has('eye-movement'),
+      emg: ap.has('muscle'),
+      pop: ap.has('electrode-pop'),
+      // Pre-existing bad electrodes. Gated like every other artifact, which
+      // it was not until 2026-09-02: defects applied unconditionally and hit
+      // 84% of subjects, so the default record had two rows in grass with
+      // every toggle off. A learner who has turned everything off should see
+      // a clean record -- that is what the toggles mean.
+      defects: ap.has('bad-electrodes'),
+      sweat: ap.has('sweat'),
+      line: ap.has('50hz'),
+      // Cardiac scalp contamination is distinct from the ECG display channel at
+      // the bottom of the montage: that one is always on and is the *reference*
+      // a reader checks a suspect transient against, while this is the QRS
+      // leaking into the scalp electrodes. Both had to exist before the toggle
+      // was worth exposing, which is why this stayed hard-off until now.
+      ecgScalp: ap.has('ecg-artifact'),
+      movement: ap.has('movement'),
+    });
+
+    // The contextual settings behind those same toggles — which electrode pops,
+    // which muscles are contracting, mains frequency, heart rate. The engine
+    // short-circuits on an unchanged object reference, so passing it every
+    // sample costs one comparison.
+    this.engine.setArtifactParams(settings.artifactParams);
+
+    // Every non-artifact clinical toggle (sleep, variants, abnormalities,
+    // epileptiform, ictal, chewing) is a pattern source inside the engine.
+    this.engine.setActivePatterns(ap);
+    this.engine.setIctalParams(settings.ictalParams);
+    this.engine.setPatternOptions(settings.patternOptions);
+
+    this.engine.next(this.buf);
+    this.t += this.dt;
+
+    const names = this.engine.electrodes;
+    for (let i = 0; i < names.length; i++) {
+      this.voltages[names[i]] = this.buf[i];
+    }
+    this.voltages['ECG'] = this.engine.ecgChannelValue;
+    return this.voltages;
+  }
+
+  get groundTruth() {
+    return this.engine.groundTruth;
+  }
+}

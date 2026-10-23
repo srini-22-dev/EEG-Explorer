@@ -1,0 +1,25 @@
+{
+ "about": "Blind visual reads of corpus/blind/*.png (readCorpus.ts --blind 10 --blind-seed 20260910), written BEFORE corpus/blind-truth/ was opened. By eye only; no extraction code run on these pages. pdr_hz is a count of cycles per 1 s rule, where given.",
+ "answers": {
+  "da6e7c99": {"montage": "reference-ipsi", "state": "n2", "pdr": false, "pdr_hz": null, "patterns": [],
+               "notes": "bilateral positive sharp transients on T5/O1/T6/O2 (POSTS); vertex wave Fz/Cz/Pz ~6.4 s; spindle-like burst central at ~0.5 s; diffuse theta"},
+  "dbd39be8": {"montage": "bipolar-transverse", "state": "awake", "pdr": false, "pdr_hz": null, "patterns": ["focal-delta-temporal"],
+               "notes": "mixed-colour rows with no chain gaps = transverse; rows 8/9 carry ~1 Hz rounded waves of opposite polarity (phase reversal at their shared electrode); rows 1 and 16 near-flat"},
+  "63a5c6a9": {"montage": "bipolar-ap", "state": "n1", "pdr": false, "pdr_hz": null, "patterns": ["muscle"],
+               "notes": "posterior-positive sharp transients on P3-O1/P4-O2/T5-O1/T6-O2 every ~2.5 s (POSTS); vertex-like complex Fz-Cz/Cz-Pz ~3.8 s; central rhythmic theta; short frontal EMG bursts 1-2 s"},
+  "4065ffe0": {"montage": "bipolar-ap", "state": "n2", "pdr": false, "pdr_hz": null, "patterns": [],
+               "notes": "low voltage (probably high sensitivity number); POSTS on P3-O1/P4-O2; K-complex with Cz phase reversal ~9 s followed by a fast rhythmic burst (spindle)"},
+  "a3935998": {"montage": "reference-ipsi", "state": "n2", "pdr": false, "pdr_hz": null, "patterns": ["blink"],
+               "notes": "POSTS on T5/O1/T6/O2; repeated frontal deflections on Fp1/F7/F3 and Fp2/F8/F4, largest ~7.7 s going down first (Fp positive) = blinks; central sharp rhythmic theta; T3/T4 fast"},
+  "30f42a8f": {"montage": "reference-ipsi", "state": "awake", "pdr": true, "pdr_hz": 10, "patterns": ["mu-rhythm", "eye-movement"],
+               "notes": "largest rhythmic alpha-band activity on C3/C4 (rows 4/12) = mu; moderate alpha O1/O2; slow opposite-polarity deflections on F7 vs F8 (lateral eye movement)"},
+  "ff5889d2": {"montage": "reference-ipsi", "state": "awake", "pdr": true, "pdr_hz": 10, "patterns": ["focal-spikes-lt"],
+               "notes": "high-amplitude posterior alpha T5/P3/O1 and T6/P4/O2, bilateral; single left-sided sharp transient with after-going slow wave ~4.1 s on Fp1/F7/F3/T3/C3 only (right side silent)"},
+  "a48fc43d": {"montage": "bipolar-ap", "state": "n3", "pdr": false, "pdr_hz": null, "patterns": [],
+               "notes": "clinical renderer; ACNS temporal-chain-first order read off labels; very high occupancy, traces cross everywhere - only aggregate claims admissible; diffuse high-amplitude slow activity; dense all-row burst ~8.3 s (movement?)"},
+  "802970dd": {"montage": "reference-ipsi", "state": "n2", "pdr": false, "pdr_hz": null, "patterns": [],
+               "notes": "POSTS T5/O1/T6/O2; vertex wave ~3.2 s broad field; spindle burst central ~7.8 s; slow frontal waves at the end"},
+  "9a1a2db1": {"montage": "bipolar-ap", "state": "rem", "pdr": false, "pdr_hz": null, "patterns": [],
+               "notes": "low-voltage mixed parasagittal rows; very large sharply contoured 3-4 Hz waves on Fz-Cz/Cz-Pz (sawtooth?); slow frontal undulations (eye movements?). Midline bipolar rows far larger than parasagittal ones - check whether that is realistic"}
+ }
+}

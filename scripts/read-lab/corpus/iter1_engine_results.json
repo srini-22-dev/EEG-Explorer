@@ -1,0 +1,2738 @@
+[
+ {
+  "id": "app_bipolar-ap_awake_s1234_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.5432499229280705,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.701247945042066,
+   "front_db": 9.510572166033104,
+   "lr_gap": 0.0010235517572461106,
+   "freq": 12.070313119092667
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s1234_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.5432499229280705,
+  "true_geom": {
+   "present": true,
+   "post_db": 21.07990597966461,
+   "front_db": 9.847011185906746,
+   "lr_gap": 0.005898743860457856,
+   "freq": 12.072770989184718
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s1234_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.5425904353962518,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.977008146812814,
+   "front_db": 6.486056077217468,
+   "lr_gap": 0.00690772605308787,
+   "freq": 10.435598729414643
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s1234_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.5425904353962518,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.234387478841533,
+   "front_db": 7.296143234648132,
+   "lr_gap": 0.002978646507660443,
+   "freq": 10.434553629929908
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s3_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.6618463394958832,
+  "true_geom": {
+   "present": true,
+   "post_db": 19.510205680567317,
+   "front_db": 7.8174730728125414,
+   "lr_gap": 0.05119805820436696,
+   "freq": 10.560236928390728
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s3_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.6618463394958832,
+  "true_geom": {
+   "present": true,
+   "post_db": 19.807028522638053,
+   "front_db": 8.38502776038985,
+   "lr_gap": 0.06552325954903893,
+   "freq": 10.555509973068183
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s3_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.5699569389672371,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.309060567927183,
+   "front_db": 6.576807823827899,
+   "lr_gap": 0.7503054622920331,
+   "freq": 10.272430685563808
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s3_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.5699569389672371,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.62486738006995,
+   "front_db": 6.72068123273926,
+   "lr_gap": 0.747578262714967,
+   "freq": 10.27369942274416
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s42_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.6609252048247749,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.506432000523613,
+   "front_db": 6.451478389404502,
+   "lr_gap": 0.001870207226200904,
+   "freq": 11.54429516783367
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s42_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.6609252048247749,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.874688896297627,
+   "front_db": 6.558216293132695,
+   "lr_gap": 0.002759643509419263,
+   "freq": 11.545692586151274
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s42_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.68115234375,
+  "alpha_share": 0.5398540054993008,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.959272017650775,
+   "front_db": 7.549892551161714,
+   "lr_gap": 0.04381374323061671,
+   "freq": 10.327820551250987
+  }
+ },
+ {
+  "id": "app_bipolar-ap_awake_s42_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.68115234375,
+  "alpha_share": 0.5398540054993008,
+  "true_geom": {
+   "present": true,
+   "post_db": 19.204186638983465,
+   "front_db": 7.962233951281864,
+   "lr_gap": 0.0407052654521074,
+   "freq": 10.329217970682507
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s1234_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.17357799212708044,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.259461649122475,
+   "front_db": 5.04774137130264,
+   "lr_gap": 0.012707273728853608,
+   "freq": 12.124490674937345
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s1234_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.17357799212708044,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.746974809480818,
+   "front_db": 5.771987475331675,
+   "lr_gap": 0.013052493148041577,
+   "freq": 12.156774496534148
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s1234_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.43701171875,
+  "alpha_share": 0.2727759286810206,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.26284030345454,
+   "front_db": 2.633420412100043,
+   "lr_gap": 0.018217538506451803,
+   "freq": 10.425713374763825
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s1234_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.43701171875,
+  "alpha_share": 0.2727759286810206,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.603998612941798,
+   "front_db": 3.000094243044219,
+   "lr_gap": 0.02003591478749378,
+   "freq": 10.424205519841447
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s3_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.3994140625,
+  "alpha_share": 0.30610384012079633,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.26408894203303,
+   "front_db": 2.2766238340092517,
+   "lr_gap": 0.037338220546734746,
+   "freq": 10.56778330232825
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s3_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.3994140625,
+  "alpha_share": 0.30610384012079633,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.734119440782788,
+   "front_db": 3.7640976243209936,
+   "lr_gap": 0.046581111185233226,
+   "freq": 10.54871087117726
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s3_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.2657663468446134,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.965974994587008,
+   "front_db": 1.188949389879351,
+   "lr_gap": 0.7727667044099764,
+   "freq": 10.300206087828048
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s3_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.2657663468446134,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.161769928418547,
+   "front_db": 2.5178025921983207,
+   "lr_gap": 0.7769543221439612,
+   "freq": 10.293450979409354
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s42_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 8.36181640625,
+  "alpha_share": 0.34655802447319684,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.763826237292928,
+   "front_db": 5.295380229131448,
+   "lr_gap": 0.007371713305170502,
+   "freq": 11.54107391276626
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s42_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 8.36181640625,
+  "alpha_share": 0.34655802447319684,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.096008809199716,
+   "front_db": 6.0000198983751805,
+   "lr_gap": 0.0007231995468259811,
+   "freq": 11.544830556931576
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s42_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.521484375,
+  "alpha_share": 0.2166032814836459,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.605354507759069,
+   "front_db": 1.1180631308409907,
+   "lr_gap": 0.026106288626564833,
+   "freq": 10.36082129954844
+  }
+ },
+ {
+  "id": "app_bipolar-ap_drowsy_s42_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.521484375,
+  "alpha_share": 0.2166032814836459,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.016530857464552,
+   "front_db": 1.3801322258898696,
+   "lr_gap": 0.01490709873573337,
+   "freq": 10.353352295986223
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s1234_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.40869140625,
+  "alpha_share": 0.05852633481281616,
+  "true_geom": {
+   "present": false,
+   "post_db": 5.520378945619992,
+   "front_db": 1.0703487213974965,
+   "lr_gap": 0.8139807493483051,
+   "freq": 8.808275783708357
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s1234_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.40869140625,
+  "alpha_share": 0.05852633481281616,
+  "true_geom": {
+   "present": false,
+   "post_db": 4.155309453708339,
+   "front_db": 2.0610951207754478,
+   "lr_gap": 0.2103368895658484,
+   "freq": 9.091262197214471
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s1234_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.7138671875,
+  "alpha_share": 0.05470828109026492,
+  "true_geom": {
+   "present": false,
+   "post_db": 1.9194590575848243,
+   "front_db": 0.7203488803700129,
+   "lr_gap": 0.29295838645473893,
+   "freq": 8.839296285294122
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s1234_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.7138671875,
+  "alpha_share": 0.05470828109026492,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.6313695704391575,
+   "front_db": 0.795819148001415,
+   "lr_gap": 0.09398867713418468,
+   "freq": 8.68728254939285
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s3_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.09248177660385164,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.3850588196656597,
+   "front_db": 2.154206731679874,
+   "lr_gap": 1.125885709084221,
+   "freq": 12.695241284173798
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s3_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.09248177660385164,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.562264257956827,
+   "front_db": 2.570786903844976,
+   "lr_gap": 3.4593845480229,
+   "freq": 10.248887153096542
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s3_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 7.8125,
+  "alpha_share": 0.15405383690714924,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.062273336350614,
+   "front_db": 1.939182120277049,
+   "lr_gap": 0.4490983055242097,
+   "freq": 10.646965003146775
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s3_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 7.8125,
+  "alpha_share": 0.15405383690714924,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.145289810555385,
+   "front_db": 1.6982980804764023,
+   "lr_gap": 1.9578831376771753,
+   "freq": 11.805114854728595
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s42_t0_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.16455078125,
+  "alpha_share": 0.06677004180858878,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.425270801762791,
+   "front_db": 5.057352188973786,
+   "lr_gap": 0.033083072383390366,
+   "freq": 7.686139187580737
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s42_t0_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.16455078125,
+  "alpha_share": 0.06677004180858878,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.440260823419117,
+   "front_db": 5.299656201045956,
+   "lr_gap": 0.057153089159576176,
+   "freq": 7.698384871705041
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s42_t45_15uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.34765625,
+  "alpha_share": 0.06188559943366339,
+  "true_geom": {
+   "present": false,
+   "post_db": 2.887077747635776,
+   "front_db": 0.0,
+   "lr_gap": 0.055366174633761034,
+   "freq": 7.5778170405829774
+  }
+ },
+ {
+  "id": "app_bipolar-ap_n2_s42_t45_7uV",
+  "renderer": "app",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.34765625,
+  "alpha_share": 0.06188559943366339,
+  "true_geom": {
+   "present": false,
+   "post_db": 4.512340210395343,
+   "front_db": 0.0,
+   "lr_gap": 0.2591543747453784,
+   "freq": 7.613441570682573
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s1234_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.683978097443984,
+  "true_geom": {
+   "present": true,
+   "post_db": 23.349343555842218,
+   "front_db": 17.233226140644625,
+   "lr_gap": 0.03574062187916027,
+   "freq": 12.079758830325892
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s1234_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.683978097443984,
+  "true_geom": {
+   "present": true,
+   "post_db": 23.490824122171418,
+   "front_db": 18.1296922931748,
+   "lr_gap": 0.036424670658689706,
+   "freq": 12.080719951930128
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s1234_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7465380428725136,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.876275971274364,
+   "front_db": 13.827506301145345,
+   "lr_gap": 0.04209918581263494,
+   "freq": 10.434771506199326
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s1234_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7465380428725136,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.29351253157554,
+   "front_db": 14.377347164427267,
+   "lr_gap": 0.04700703299983644,
+   "freq": 10.437104317755848
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s3_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7942498479427673,
+  "true_geom": {
+   "present": true,
+   "post_db": 21.309102136548532,
+   "front_db": 12.152498925538605,
+   "lr_gap": 0.13040987981662866,
+   "freq": 10.56571837337888
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s3_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7942498479427673,
+  "true_geom": {
+   "present": true,
+   "post_db": 21.42067332517491,
+   "front_db": 12.68341969269379,
+   "lr_gap": 0.12401125953256908,
+   "freq": 10.568218423869116
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s3_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.7328233638360528,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.69389576309672,
+   "front_db": 12.556356014311426,
+   "lr_gap": 0.7622369500203341,
+   "freq": 10.272485330288378
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s3_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.7328233638360528,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.884824360669505,
+   "front_db": 13.608371183867536,
+   "lr_gap": 0.7571249807974603,
+   "freq": 10.270291060380892
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s42_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.7342140257276891,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.098418354064712,
+   "front_db": 12.940436942435372,
+   "lr_gap": 0.00713100270206013,
+   "freq": 11.541156873750989
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s42_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.7342140257276891,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.206844492538323,
+   "front_db": 12.589356353545806,
+   "lr_gap": 0.010536500727285514,
+   "freq": 11.542705367014989
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s42_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.7421875,
+  "alpha_share": 0.6541866838399533,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.637956758905442,
+   "front_db": 13.40867214870802,
+   "lr_gap": 0.0857383493964523,
+   "freq": 10.3245816603947
+  }
+ },
+ {
+  "id": "app_reference-ipsi_awake_s42_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.7421875,
+  "alpha_share": 0.6541866838399533,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.7653507377717,
+   "front_db": 13.955410219263664,
+   "lr_gap": 0.08448085935664018,
+   "freq": 10.32608617500069
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s1234_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 11.962890625,
+  "alpha_share": 0.2826776912781559,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.747772514289323,
+   "front_db": 9.832144334348847,
+   "lr_gap": 0.20203634676350823,
+   "freq": 12.218507455078658
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s1234_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 11.962890625,
+  "alpha_share": 0.2826776912781559,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.3262782281519,
+   "front_db": 10.79752886160719,
+   "lr_gap": 0.23130606807777276,
+   "freq": 12.188139452525256
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s1234_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.498046875,
+  "alpha_share": 0.4612362590360421,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.17470321845903,
+   "front_db": 7.242527167535252,
+   "lr_gap": 0.05252840431143291,
+   "freq": 10.4395434390755
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s1234_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.498046875,
+  "alpha_share": 0.4612362590360421,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.43911066083688,
+   "front_db": 7.764895071998383,
+   "lr_gap": 0.051305589585282974,
+   "freq": 10.440972365406024
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s3_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.1318359375,
+  "alpha_share": 0.5063533827480045,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.95066616479292,
+   "front_db": 3.9128004397395237,
+   "lr_gap": 0.08130205355837283,
+   "freq": 10.610234695398184
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s3_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.1318359375,
+  "alpha_share": 0.5063533827480045,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.153756636431417,
+   "front_db": 3.9185572164864304,
+   "lr_gap": 0.06104421736327126,
+   "freq": 10.620411997577719
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s3_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.4374747471990621,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.04262693162643,
+   "front_db": 5.304802259090749,
+   "lr_gap": 0.8309367776946761,
+   "freq": 10.273299277107238
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s3_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.4374747471990621,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.399856145726844,
+   "front_db": 5.52379820294229,
+   "lr_gap": 0.834597583989952,
+   "freq": 10.272437837586637
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s42_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.41395333489577674,
+  "true_geom": {
+   "present": true,
+   "post_db": 15.761496270356638,
+   "front_db": 6.113863605541299,
+   "lr_gap": 0.01097176637542674,
+   "freq": 11.545771215889243
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s42_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.41395333489577674,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.099913141093985,
+   "front_db": 6.325539701092707,
+   "lr_gap": 0.009578051995781323,
+   "freq": 11.545971900373173
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s42_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 8.056640625,
+  "alpha_share": 0.30773755418530613,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.185955839824654,
+   "front_db": 6.8928042986047515,
+   "lr_gap": 0.09320462398848761,
+   "freq": 10.310269278608484
+  }
+ },
+ {
+  "id": "app_reference-ipsi_drowsy_s42_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 8.056640625,
+  "alpha_share": 0.30773755418530613,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.50799779952982,
+   "front_db": 7.35767888870025,
+   "lr_gap": 0.09599434875294754,
+   "freq": 10.31390750309017
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s1234_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.591796875,
+  "alpha_share": 0.06487455335062836,
+  "true_geom": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 2.78645396277485,
+   "lr_gap": null,
+   "freq": null
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s1234_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.591796875,
+  "alpha_share": 0.06487455335062836,
+  "true_geom": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 2.3833062929190816,
+   "lr_gap": null,
+   "freq": null
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s1234_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.06405348903980271,
+  "true_geom": {
+   "present": false,
+   "post_db": 5.246153816901653,
+   "front_db": 0.0,
+   "lr_gap": 0.028456480771700043,
+   "freq": 8.993751918332439
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s1234_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.06405348903980271,
+  "true_geom": {
+   "present": false,
+   "post_db": 5.161421448830843,
+   "front_db": 1.0947170493419702,
+   "lr_gap": 0.19654035570313688,
+   "freq": 8.926149883567799
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s3_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.1399811562456601,
+  "true_geom": {
+   "present": false,
+   "post_db": 7.079257169902111,
+   "front_db": 3.5373403234484373,
+   "lr_gap": 0.0055027232660425085,
+   "freq": 8.46920761174491
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s3_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.1399811562456601,
+  "true_geom": {
+   "present": false,
+   "post_db": 7.441259752963671,
+   "front_db": 3.859782272382374,
+   "lr_gap": 0.04872834243264812,
+   "freq": 8.44749505121013
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s3_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 9.521484375,
+  "alpha_share": 0.18268064529291322,
+  "true_geom": {
+   "present": false,
+   "post_db": 9.522811749028797,
+   "front_db": 0.0,
+   "lr_gap": 2.264793117067864,
+   "freq": 11.394512906176093
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s3_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 9.521484375,
+  "alpha_share": 0.18268064529291322,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.0090480467834,
+   "front_db": 0.0,
+   "lr_gap": 1.4706508615944571,
+   "freq": 10.279640874166155
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s42_t0_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.07384623656148644,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.233113597512014,
+   "front_db": 2.8484631495680715,
+   "lr_gap": 0.002436249994386408,
+   "freq": 7.725546571955931
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s42_t0_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.07384623656148644,
+  "true_geom": {
+   "present": false,
+   "post_db": 7.0178271245407124,
+   "front_db": 3.6025808086115223,
+   "lr_gap": 0.050711696760679104,
+   "freq": 7.748063562876292
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s42_t45_15uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.05902996278962864,
+  "true_geom": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 0.8960726378108435,
+   "lr_gap": null,
+   "freq": null
+  }
+ },
+ {
+  "id": "app_reference-ipsi_n2_s42_t45_7uV",
+  "renderer": "app",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.05902996278962864,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.15926489983205,
+   "front_db": 1.05020871827469,
+   "lr_gap": null,
+   "freq": 7.607194902499987
+  }
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s1234_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.5432499229280705,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.701247945042066,
+   "front_db": 9.510572166033104,
+   "lr_gap": 0.0010235517572461106,
+   "freq": 12.070313119092667
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.701247945042066,
+   "front_db": 9.510572166033104,
+   "lr_gap": 0.0010235517572461106,
+   "freq": 12.070313119092667
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s1234_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.5432499229280705,
+  "true_geom": {
+   "present": true,
+   "post_db": 21.07990597966461,
+   "front_db": 9.847011185906746,
+   "lr_gap": 0.005898743860457856,
+   "freq": 12.072770989184718
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 21.079905910794146,
+   "front_db": 9.847011185906746,
+   "lr_gap": 0.005898747288787476,
+   "freq": 12.07277099261305
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s1234_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.5425904353962518,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.977008146812814,
+   "front_db": 6.486056077217468,
+   "lr_gap": 0.00690772605308787,
+   "freq": 10.435598729414643
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.977008146812814,
+   "front_db": 6.486056077217468,
+   "lr_gap": 0.00690772605308787,
+   "freq": 10.435598729414643
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s1234_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.5425904353962518,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.234387478841533,
+   "front_db": 7.296143234648132,
+   "lr_gap": 0.002978646507660443,
+   "freq": 10.434553629929908
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 18.234387478841533,
+   "front_db": 7.296143234648132,
+   "lr_gap": 0.002978646507660443,
+   "freq": 10.434553629929908
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s3_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.6618463394958832,
+  "true_geom": {
+   "present": true,
+   "post_db": 19.510205680567317,
+   "front_db": 7.8174730728125414,
+   "lr_gap": 0.05119805820436696,
+   "freq": 10.560236928390728
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 19.510205680567317,
+   "front_db": 7.8174730728125414,
+   "lr_gap": 0.05119805820436696,
+   "freq": 10.560236928390728
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s3_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.6618463394958832,
+  "true_geom": {
+   "present": true,
+   "post_db": 19.807028522638053,
+   "front_db": 8.38502776038985,
+   "lr_gap": 0.06552325954903893,
+   "freq": 10.555509973068183
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 19.807028522638053,
+   "front_db": 8.38502776038985,
+   "lr_gap": 0.06552325954903893,
+   "freq": 10.555509973068183
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s3_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.5699569389672371,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.309060567927183,
+   "front_db": 6.576807823827899,
+   "lr_gap": 0.7503054622920331,
+   "freq": 10.272430685563808
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 18.309060567927183,
+   "front_db": 6.576807823827899,
+   "lr_gap": 0.7503054622920331,
+   "freq": 10.272430685563808
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s3_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.5699569389672371,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.62486738006995,
+   "front_db": 6.72068123273926,
+   "lr_gap": 0.747578262714967,
+   "freq": 10.27369942274416
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 18.62486738006995,
+   "front_db": 6.72068123273926,
+   "lr_gap": 0.747578262714967,
+   "freq": 10.27369942274416
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s42_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.6609252048247749,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.506432000523613,
+   "front_db": 6.451478389404502,
+   "lr_gap": 0.001870207226200904,
+   "freq": 11.54429516783367
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 18.506432000523613,
+   "front_db": 6.451478389404502,
+   "lr_gap": 0.001870207226200904,
+   "freq": 11.54429516783367
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s42_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.6609252048247749,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.874688896297627,
+   "front_db": 6.558216293132695,
+   "lr_gap": 0.002759643509419263,
+   "freq": 11.545692586151274
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 18.874688896297627,
+   "front_db": 6.558216293132695,
+   "lr_gap": 0.002759643509419263,
+   "freq": 11.545692586151274
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s42_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.68115234375,
+  "alpha_share": 0.5398540054993008,
+  "true_geom": {
+   "present": true,
+   "post_db": 18.959272017650775,
+   "front_db": 7.549892551161714,
+   "lr_gap": 0.04381374323061671,
+   "freq": 10.327820551250987
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 18.959272017650775,
+   "front_db": 7.549892551161714,
+   "lr_gap": 0.04381374323061671,
+   "freq": 10.327820551250987
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_awake_s42_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "awake",
+  "drawn": 10.68115234375,
+  "alpha_share": 0.5398540054993008,
+  "true_geom": {
+   "present": true,
+   "post_db": 19.204186638983465,
+   "front_db": 7.962233951281864,
+   "lr_gap": 0.0407052654521074,
+   "freq": 10.329217970682507
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 19.204186638983465,
+   "front_db": 7.962233951281864,
+   "lr_gap": 0.0407052654521074,
+   "freq": 10.329217970682507
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s1234_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.17357799212708044,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.259461649122475,
+   "front_db": 5.04774137130264,
+   "lr_gap": 0.012707273728853608,
+   "freq": 12.124490674937345
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 14.259461649122475,
+   "front_db": 5.04774137130264,
+   "lr_gap": 0.012707273728853608,
+   "freq": 12.124490674937345
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s1234_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.17357799212708044,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.746974809480818,
+   "front_db": 5.771987475331675,
+   "lr_gap": 0.013052493148041577,
+   "freq": 12.156774496534148
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 14.746974809480818,
+   "front_db": 5.771987475331674,
+   "lr_gap": 0.013052493148041577,
+   "freq": 12.156774496534148
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s1234_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.43701171875,
+  "alpha_share": 0.2727759286810206,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.26284030345454,
+   "front_db": 2.633420412100043,
+   "lr_gap": 0.018217538506451803,
+   "freq": 10.425713374763825
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.26284030345454,
+   "front_db": 2.633420412100043,
+   "lr_gap": 0.018217538506451803,
+   "freq": 10.425713374763825
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s1234_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.43701171875,
+  "alpha_share": 0.2727759286810206,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.603998612941798,
+   "front_db": 3.000094243044219,
+   "lr_gap": 0.02003591478749378,
+   "freq": 10.424205519841447
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.603998612941798,
+   "front_db": 3.000094243044219,
+   "lr_gap": 0.02003591478749378,
+   "freq": 10.424205519841447
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s3_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.3994140625,
+  "alpha_share": 0.30610384012079633,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.26408894203303,
+   "front_db": 2.2766238340092517,
+   "lr_gap": 0.037338220546734746,
+   "freq": 10.56778330232825
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.26408894203303,
+   "front_db": 2.2766238340092517,
+   "lr_gap": 0.037338220546734746,
+   "freq": 10.56778330232825
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s3_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.3994140625,
+  "alpha_share": 0.30610384012079633,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.734119440782788,
+   "front_db": 3.7640976243209936,
+   "lr_gap": 0.046581111185233226,
+   "freq": 10.54871087117726
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.734119440782788,
+   "front_db": 3.7640976243209936,
+   "lr_gap": 0.046581111185233226,
+   "freq": 10.54871087117726
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s3_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.2657663468446134,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.965974994587008,
+   "front_db": 1.188949389879351,
+   "lr_gap": 0.7727667044099764,
+   "freq": 10.300206087828048
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.965974994587008,
+   "front_db": 1.188949389879351,
+   "lr_gap": 0.7727667044099764,
+   "freq": 10.300206087828048
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s3_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.2657663468446134,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.161769928418547,
+   "front_db": 2.5178025921983207,
+   "lr_gap": 0.7769543221439612,
+   "freq": 10.293450979409354
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 14.161769928418547,
+   "front_db": 2.5178025921983207,
+   "lr_gap": 0.7769543221439612,
+   "freq": 10.293450979409354
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s42_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 8.36181640625,
+  "alpha_share": 0.34655802447319684,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.763826237292928,
+   "front_db": 5.295380229131448,
+   "lr_gap": 0.007371713305170502,
+   "freq": 11.54107391276626
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.763826237292928,
+   "front_db": 5.295380229131448,
+   "lr_gap": 0.007371713305170502,
+   "freq": 11.54107391276626
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s42_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 8.36181640625,
+  "alpha_share": 0.34655802447319684,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.096008809199716,
+   "front_db": 6.0000198983751805,
+   "lr_gap": 0.0007231995468259811,
+   "freq": 11.544830556931576
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 14.096008809199716,
+   "front_db": 6.0000198983751805,
+   "lr_gap": 0.0007231995468259811,
+   "freq": 11.544830556931576
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s42_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.521484375,
+  "alpha_share": 0.2166032814836459,
+  "true_geom": {
+   "present": true,
+   "post_db": 13.605354507759069,
+   "front_db": 1.1180631308409907,
+   "lr_gap": 0.026106288626564833,
+   "freq": 10.36082129954844
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 13.605354507759069,
+   "front_db": 1.1180631308409907,
+   "lr_gap": 0.026106288626564833,
+   "freq": 10.36082129954844
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_drowsy_s42_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "drowsy",
+  "drawn": 9.521484375,
+  "alpha_share": 0.2166032814836459,
+  "true_geom": {
+   "present": true,
+   "post_db": 14.016530857464552,
+   "front_db": 1.3801322258898696,
+   "lr_gap": 0.01490709873573337,
+   "freq": 10.353352295986223
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 14.016530857464552,
+   "front_db": 1.3801322258898696,
+   "lr_gap": 0.01490709873573337,
+   "freq": 10.353352295986223
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s1234_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.40869140625,
+  "alpha_share": 0.05852633481281616,
+  "true_geom": {
+   "present": false,
+   "post_db": 5.520378945619992,
+   "front_db": 1.0703487213974965,
+   "lr_gap": 0.8139807493483051,
+   "freq": 8.808275783708357
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 5.520378945619992,
+   "front_db": 1.0703487213974965,
+   "lr_gap": 0.8139807493483051,
+   "freq": 8.808275783708357
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s1234_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.40869140625,
+  "alpha_share": 0.05852633481281616,
+  "true_geom": {
+   "present": false,
+   "post_db": 4.15714028200895,
+   "front_db": 2.0610951207754478,
+   "lr_gap": 0.21163244404985626,
+   "freq": 9.089966642730463
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 4.15714028200895,
+   "front_db": 2.0610951207754478,
+   "lr_gap": 0.21163244404985626,
+   "freq": 9.089966642730463
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s1234_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.7138671875,
+  "alpha_share": 0.05470828109026492,
+  "true_geom": {
+   "present": false,
+   "post_db": 1.9194590575848243,
+   "front_db": 0.7203488803700129,
+   "lr_gap": 0.29295838645473893,
+   "freq": 8.839296285294122
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 1.9194590575848243,
+   "front_db": 0.7203488803700129,
+   "lr_gap": 0.29295838645473893,
+   "freq": 8.839296285294122
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s1234_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.7138671875,
+  "alpha_share": 0.05470828109026492,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.6313695704391575,
+   "front_db": 0.795819148001415,
+   "lr_gap": 0.09398867713418468,
+   "freq": 8.68728254939285
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 3.6313695704391575,
+   "front_db": 0.795819148001415,
+   "lr_gap": 0.09398867713418468,
+   "freq": 8.68728254939285
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s3_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.09248177660385164,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.3850588196656597,
+   "front_db": 2.154206731679874,
+   "lr_gap": 1.125885709084221,
+   "freq": 12.695241284173798
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 3.3850588196656597,
+   "front_db": 2.154206731679874,
+   "lr_gap": 1.125885709084221,
+   "freq": 12.695241284173798
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s3_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.09248177660385164,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.567653955029651,
+   "front_db": 2.570786903844976,
+   "lr_gap": 3.4602420297442684,
+   "freq": 10.247172189653803
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 3.567653955029651,
+   "front_db": 2.570786903844976,
+   "lr_gap": 3.4602420297442684,
+   "freq": 10.247172189653803
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s3_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 7.8125,
+  "alpha_share": 0.15405383690714924,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.062273336350614,
+   "front_db": 1.939182120277049,
+   "lr_gap": 0.4490983055242097,
+   "freq": 10.646965003146775
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 8.062273336350614,
+   "front_db": 1.939182120277049,
+   "lr_gap": 0.4490983055242097,
+   "freq": 10.646965003146775
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s3_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 7.8125,
+  "alpha_share": 0.15405383690714924,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.145289810555385,
+   "front_db": 1.6982980804764023,
+   "lr_gap": 1.9578831376771753,
+   "freq": 11.805114854728595
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 8.145289810555385,
+   "front_db": 1.6982980804764023,
+   "lr_gap": 1.9578831376771753,
+   "freq": 11.805114854728595
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s42_t0_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.16455078125,
+  "alpha_share": 0.06677004180858878,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.425270801762791,
+   "front_db": 5.057352188973786,
+   "lr_gap": 0.033083072383390366,
+   "freq": 7.686139187580737
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 3.425270801762791,
+   "front_db": 5.057352188973786,
+   "lr_gap": 0.033083072383390366,
+   "freq": 7.686139187580737
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s42_t0_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.16455078125,
+  "alpha_share": 0.06677004180858878,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.440260823419117,
+   "front_db": 5.299656201045956,
+   "lr_gap": 0.057153089159576176,
+   "freq": 7.698384871705041
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 3.440260823419117,
+   "front_db": 5.299684312849365,
+   "lr_gap": 0.057153089159576176,
+   "freq": 7.698384871705041
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s42_t45_15uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.34765625,
+  "alpha_share": 0.06188559943366339,
+  "true_geom": {
+   "present": false,
+   "post_db": 2.887077747635776,
+   "front_db": 0.0,
+   "lr_gap": 0.055366174633761034,
+   "freq": 7.5778170405829774
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 2.887077747635776,
+   "front_db": 0.0,
+   "lr_gap": 0.055366174633761034,
+   "freq": 7.5778170405829774
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_bipolar-ap_n2_s42_t45_7uV",
+  "renderer": "clinical",
+  "montage": "bipolar-ap",
+  "state": "n2",
+  "drawn": 6.34765625,
+  "alpha_share": 0.06188559943366339,
+  "true_geom": {
+   "present": false,
+   "post_db": 4.516435655498707,
+   "front_db": 0.0,
+   "lr_gap": 0.25893435745182103,
+   "freq": 7.613001536095458
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 4.516435655498707,
+   "front_db": 0.0,
+   "lr_gap": 0.25893435745182103,
+   "freq": 7.613001536095458
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s1234_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.683978097443984,
+  "true_geom": {
+   "present": true,
+   "post_db": 23.349343555842218,
+   "front_db": 17.233226140644625,
+   "lr_gap": 0.03574062187916027,
+   "freq": 12.079758830325892
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 23.349343555842218,
+   "front_db": 17.233226140644625,
+   "lr_gap": 0.03574062187916027,
+   "freq": 12.079758830325892
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s1234_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 11.962890625,
+  "alpha_share": 0.683978097443984,
+  "true_geom": {
+   "present": true,
+   "post_db": 23.490824122171418,
+   "front_db": 18.1296922931748,
+   "lr_gap": 0.036424670658689706,
+   "freq": 12.080719951930128
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 23.490824122171418,
+   "front_db": 18.1296922931748,
+   "lr_gap": 0.036424670658689706,
+   "freq": 12.080719951930128
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s1234_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7465380428725136,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.876275971274364,
+   "front_db": 13.827506301145345,
+   "lr_gap": 0.04209918581263494,
+   "freq": 10.434771506199326
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.876275971274364,
+   "front_db": 13.827506301145345,
+   "lr_gap": 0.04209918581263494,
+   "freq": 10.434771506199326
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s1234_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7465380428725136,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.29351253157554,
+   "front_db": 14.377347164427267,
+   "lr_gap": 0.04700703299983644,
+   "freq": 10.437104317755848
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.29351253157554,
+   "front_db": 14.377347164427267,
+   "lr_gap": 0.04700703299983644,
+   "freq": 10.437104317755848
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s3_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7942498479427673,
+  "true_geom": {
+   "present": true,
+   "post_db": 21.309102136548532,
+   "front_db": 12.152498925538605,
+   "lr_gap": 0.13040987981662866,
+   "freq": 10.56571837337888
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 21.309102136548532,
+   "front_db": 12.152498925538605,
+   "lr_gap": 0.13040987981662866,
+   "freq": 10.56571837337888
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s3_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.498046875,
+  "alpha_share": 0.7942498479427673,
+  "true_geom": {
+   "present": true,
+   "post_db": 21.42067332517491,
+   "front_db": 12.68341969269379,
+   "lr_gap": 0.12401125953256908,
+   "freq": 10.568218423869116
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.915915142053635,
+   "front_db": 12.68341969269379,
+   "lr_gap": 0.13069610148855126,
+   "freq": 10.564876002891125
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s3_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.7328233638360528,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.69389576309672,
+   "front_db": 12.556356014311426,
+   "lr_gap": 0.7622369500203341,
+   "freq": 10.272485330288378
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.69389576309672,
+   "front_db": 12.556356014311426,
+   "lr_gap": 0.7622369500203341,
+   "freq": 10.272485330288378
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s3_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.25390625,
+  "alpha_share": 0.7328233638360528,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.884824360669505,
+   "front_db": 13.608371183867536,
+   "lr_gap": 0.7571249807974603,
+   "freq": 10.270291060380892
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.884824360669505,
+   "front_db": 13.608371183867536,
+   "lr_gap": 0.7571249807974603,
+   "freq": 10.270291060380892
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s42_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.7342140257276891,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.098418354064712,
+   "front_db": 12.940436942435372,
+   "lr_gap": 0.00713100270206013,
+   "freq": 11.541156873750989
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.098418354064712,
+   "front_db": 12.940436942435372,
+   "lr_gap": 0.00713100270206013,
+   "freq": 11.541156873750989
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s42_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.7342140257276891,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.206844492538323,
+   "front_db": 12.589356353545806,
+   "lr_gap": 0.010536500727285514,
+   "freq": 11.542705367014989
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.206844492538323,
+   "front_db": 12.589356353545806,
+   "lr_gap": 0.010536500727285514,
+   "freq": 11.542705367014989
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s42_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.7421875,
+  "alpha_share": 0.6541866838399533,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.637956758905442,
+   "front_db": 13.40867214870802,
+   "lr_gap": 0.0857383493964523,
+   "freq": 10.3245816603947
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 20.637956758905442,
+   "front_db": 13.40867214870802,
+   "lr_gap": 0.0857383493964523,
+   "freq": 10.3245816603947
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_awake_s42_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "awake",
+  "drawn": 10.7421875,
+  "alpha_share": 0.6541866838399533,
+  "true_geom": {
+   "present": true,
+   "post_db": 20.7653507377717,
+   "front_db": 13.955410219263664,
+   "lr_gap": 0.08448085935664018,
+   "freq": 10.32608617500069
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 19.482788548746278,
+   "front_db": 13.955410219263664,
+   "lr_gap": 0.08241116638049562,
+   "freq": 10.325051328512616
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s1234_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 11.962890625,
+  "alpha_share": 0.2826776912781559,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.747772514289323,
+   "front_db": 9.832144334348847,
+   "lr_gap": 0.20203634676350823,
+   "freq": 12.218507455078658
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.747772514289323,
+   "front_db": 9.832144334348847,
+   "lr_gap": 0.20203634676350823,
+   "freq": 12.218507455078658
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s1234_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 11.962890625,
+  "alpha_share": 0.2826776912781559,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.3262782281519,
+   "front_db": 10.79752886160719,
+   "lr_gap": 0.23130606807777276,
+   "freq": 12.188139452525256
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.535762947400336,
+   "front_db": 10.797124133339665,
+   "lr_gap": 0.19406560991746247,
+   "freq": 12.206759681605412
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s1234_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.498046875,
+  "alpha_share": 0.4612362590360421,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.17470321845903,
+   "front_db": 7.242527167535252,
+   "lr_gap": 0.05252840431143291,
+   "freq": 10.4395434390755
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.17470321845903,
+   "front_db": 7.242527167535252,
+   "lr_gap": 0.05252840431143291,
+   "freq": 10.4395434390755
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s1234_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.498046875,
+  "alpha_share": 0.4612362590360421,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.43911066083688,
+   "front_db": 7.764895071998383,
+   "lr_gap": 0.051305589585282974,
+   "freq": 10.440972365406024
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.43911066083688,
+   "front_db": 7.764895071998383,
+   "lr_gap": 0.051305589585282974,
+   "freq": 10.440972365406024
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s3_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.1318359375,
+  "alpha_share": 0.5063533827480045,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.95066616479292,
+   "front_db": 3.9128004397395237,
+   "lr_gap": 0.08130205355837283,
+   "freq": 10.610234695398184
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 16.95066616479292,
+   "front_db": 3.9128004397395237,
+   "lr_gap": 0.08130205355837283,
+   "freq": 10.610234695398184
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s3_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.1318359375,
+  "alpha_share": 0.5063533827480045,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.153756636431417,
+   "front_db": 3.9185572164864304,
+   "lr_gap": 0.06104421736327126,
+   "freq": 10.620411997577719
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 15.450534410233477,
+   "front_db": 3.9185572164864304,
+   "lr_gap": 0.04905589554254064,
+   "freq": 10.614417836667354
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s3_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.4374747471990621,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.04262693162643,
+   "front_db": 5.304802259090749,
+   "lr_gap": 0.8309367776946761,
+   "freq": 10.273299277107238
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.04262693162643,
+   "front_db": 5.304802259090749,
+   "lr_gap": 0.8309367776946761,
+   "freq": 10.273299277107238
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s3_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.25390625,
+  "alpha_share": 0.4374747471990621,
+  "true_geom": {
+   "present": true,
+   "post_db": 17.399856145726844,
+   "front_db": 5.52379820294229,
+   "lr_gap": 0.834597583989952,
+   "freq": 10.272437837586637
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 17.399856145726844,
+   "front_db": 5.52379820294229,
+   "lr_gap": 0.834597583989952,
+   "freq": 10.272437837586637
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s42_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.41395333489577674,
+  "true_geom": {
+   "present": true,
+   "post_db": 15.761496270356638,
+   "front_db": 6.113863605541299,
+   "lr_gap": 0.01097176637542674,
+   "freq": 11.545771215889243
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 15.761496270356638,
+   "front_db": 6.113863605541299,
+   "lr_gap": 0.01097176637542674,
+   "freq": 11.545771215889243
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s42_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 10.6201171875,
+  "alpha_share": 0.41395333489577674,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.099913141093985,
+   "front_db": 6.325539701092707,
+   "lr_gap": 0.009578051995781323,
+   "freq": 11.545971900373173
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 16.099913141093985,
+   "front_db": 6.325539701092707,
+   "lr_gap": 0.009578051995781323,
+   "freq": 11.545971900373173
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s42_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 8.056640625,
+  "alpha_share": 0.30773755418530613,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.185955839824654,
+   "front_db": 6.8928042986047515,
+   "lr_gap": 0.09320462398848761,
+   "freq": 10.310269278608484
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 16.185955839824654,
+   "front_db": 6.8928042986047515,
+   "lr_gap": 0.09320462398848761,
+   "freq": 10.310269278608484
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_drowsy_s42_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "drowsy",
+  "drawn": 8.056640625,
+  "alpha_share": 0.30773755418530613,
+  "true_geom": {
+   "present": true,
+   "post_db": 16.50799779952982,
+   "front_db": 7.35767888870025,
+   "lr_gap": 0.09599434875294754,
+   "freq": 10.31390750309017
+  },
+  "e2e": {
+   "present": true,
+   "post_db": 16.50799779952982,
+   "front_db": 7.35767888870025,
+   "lr_gap": 0.09599434875294754,
+   "freq": 10.31390750309017
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s1234_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.591796875,
+  "alpha_share": 0.06487455335062836,
+  "true_geom": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 2.78645396277485,
+   "lr_gap": null,
+   "freq": null
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 2.78645396277485,
+   "lr_gap": null,
+   "freq": null
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s1234_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.591796875,
+  "alpha_share": 0.06487455335062836,
+  "true_geom": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 2.3833062929190816,
+   "lr_gap": null,
+   "freq": null
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 2.3833062929190816,
+   "lr_gap": null,
+   "freq": null
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s1234_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.06405348903980271,
+  "true_geom": {
+   "present": false,
+   "post_db": 5.246153816901653,
+   "front_db": 0.0,
+   "lr_gap": 0.028456480771700043,
+   "freq": 8.993751918332439
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 5.246153816901653,
+   "front_db": 0.0,
+   "lr_gap": 0.028456480771700043,
+   "freq": 8.993751918332439
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s1234_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.2255859375,
+  "alpha_share": 0.06405348903980271,
+  "true_geom": {
+   "present": false,
+   "post_db": 5.161421448830843,
+   "front_db": 1.0947170493419702,
+   "lr_gap": 0.19654035570313688,
+   "freq": 8.926149883567799
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 2.9810899183202335,
+   "front_db": 1.0947170493419702,
+   "lr_gap": null,
+   "freq": 9.024420061419367
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s3_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.1399811562456601,
+  "true_geom": {
+   "present": false,
+   "post_db": 7.079257169902111,
+   "front_db": 3.5373403234484373,
+   "lr_gap": 0.0055027232660425085,
+   "freq": 8.46920761174491
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 7.079257169902111,
+   "front_db": 3.5373403234484373,
+   "lr_gap": 0.0055027232660425085,
+   "freq": 8.46920761174491
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s3_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.1399811562456601,
+  "true_geom": {
+   "present": false,
+   "post_db": 7.4346512304459145,
+   "front_db": 3.861064133480402,
+   "lr_gap": 0.04744509494635096,
+   "freq": 8.44685342746698
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 7.4346512304459145,
+   "front_db": 3.861064133480402,
+   "lr_gap": 0.04744509494635096,
+   "freq": 8.44685342746698
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s3_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 9.521484375,
+  "alpha_share": 0.18268064529291322,
+  "true_geom": {
+   "present": false,
+   "post_db": 9.522811749028797,
+   "front_db": 0.0,
+   "lr_gap": 2.264793117067864,
+   "freq": 11.394512906176093
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 9.522811749028797,
+   "front_db": 0.0,
+   "lr_gap": 2.264793117067864,
+   "freq": 11.394512906176093
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s3_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 9.521484375,
+  "alpha_share": 0.18268064529291322,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.0090480467834,
+   "front_db": 0.0,
+   "lr_gap": 1.4706508615944571,
+   "freq": 10.279640874166155
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 7.933395226149391,
+   "front_db": 0.0,
+   "lr_gap": 1.4732299214092883,
+   "freq": 10.288416729348858
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s42_t0_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.07384623656148644,
+  "true_geom": {
+   "present": false,
+   "post_db": 8.226849427330459,
+   "front_db": 2.8484631495680715,
+   "lr_gap": 0.0030396304874260593,
+   "freq": 7.725244881709411
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 8.226849427330459,
+   "front_db": 2.8484631495680715,
+   "lr_gap": 0.0030396304874260593,
+   "freq": 7.725244881709411
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s42_t0_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.07384623656148644,
+  "true_geom": {
+   "present": false,
+   "post_db": 7.018555247925461,
+   "front_db": 3.6025808086115223,
+   "lr_gap": 0.05104846981427347,
+   "freq": 7.74823194940309
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 7.1906519717434785,
+   "front_db": 3.6028696898317163,
+   "lr_gap": 0.03970552928366722,
+   "freq": 7.7425604791377864
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s42_t45_15uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.05902996278962864,
+  "true_geom": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 0.8960726378108435,
+   "lr_gap": null,
+   "freq": null
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 0.0,
+   "front_db": 0.8960726378108435,
+   "lr_gap": null,
+   "freq": null
+  },
+  "e2e_pxps": 120.0
+ },
+ {
+  "id": "clinical_reference-ipsi_n2_s42_t45_7uV",
+  "renderer": "clinical",
+  "montage": "reference-ipsi",
+  "state": "n2",
+  "drawn": 6.103515625,
+  "alpha_share": 0.05902996278962864,
+  "true_geom": {
+   "present": false,
+   "post_db": 3.1352785842264845,
+   "front_db": 1.05020871827469,
+   "lr_gap": null,
+   "freq": 7.60919644529427
+  },
+  "e2e": {
+   "present": false,
+   "post_db": 6.027398328655721,
+   "front_db": 1.05020871827469,
+   "lr_gap": 5.343014765893984,
+   "freq": 10.323152794046567
+  },
+  "e2e_pxps": 120.0
+ }
+]
