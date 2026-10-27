@@ -31,7 +31,8 @@
 
 import { synchronousPatches } from '../forward';
 import { Gaussian, deriveSeed } from '../rng';
-import { TransientSource, markQueue } from './transient';
+import { TransientSource, markQueue, type TransientOptions } from './transient';
+import { ARTIFACT_SOURCES, LRS_LEAD_S, LRS_PEAK_UV, LRS_SPIKE_S, lrsSpike } from '../artifacts';
 import { gaussian } from './morphology';
 import { VERTEX_FIELD } from './fields';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
@@ -496,6 +497,7 @@ const rovingEyes: PatternSourceDescriptor = {
   toggles: ['roving-eyes'],
   states: ['drowsy', 'n1'],
   stateIntrinsic: true,
+  extracranial: true,
   spec: {
     id: 'roving-eyes',
     pos: [0.0, -0.68, 0.61],
@@ -548,8 +550,14 @@ const rovingEyes: PatternSourceDescriptor = {
 // followed by a slower fall, which is what "faster upslope than downslope"
 // means and what makes them look sharply contoured rather than sinusoidal.
 // They also arrive in bursts, as real REMs do, rather than at a steady rate.
+//
+// Each movement is led by the lateral rectus spike of the side the eyes turn to
+// (artifacts.ts, LRS_*: "prominent during REM sleep"), drawn by two more sources on
+// the lateral rectus positions that replay this generator's events from its own
+// seed (2026-10-27). The movement starts LRS_LEAD_S after its event begins, so the
+// spike comes first, as it does before a waking saccade.
 // ---------------------------------------------------------------------------
-type RemEvent = { amp: number; dir: number };
+type RemEvent = { amp: number; dir: number; sign: number };
 
 // Rise and fall of one movement. The ratio is the claim; the absolute values put
 // the whole deflection under ~0.35 s, which is the duration of a real REM.
@@ -557,11 +565,30 @@ const REM_RISE_SEC = 0.07;
 const REM_FALL_SEC = 0.26;
 const REM_PEAK_UV = 60;
 
+// The REM schedule and per-movement draws, shared by the movement and its two
+// lateral rectus sources so all three see the same events.
+function remSource(
+  seed: number, dt: number, mark: TransientOptions<RemEvent>['mark'], morphology: TransientOptions<RemEvent>['morphology'],
+) {
+  return new TransientSource<RemEvent>(seed, dt, {
+    // Bursts: a short mean interval with heavy jitter clusters the movements
+    // instead of spacing them evenly.
+    schedule: { kind: 'periodic', period: 1.4, jitterFrac: 0.7 },
+    duration: LRS_LEAD_S + REM_RISE_SEC + REM_FALL_SEC,
+    // Direction alternates at random: the eyes track back and forth, so
+    // successive movements are not all the same way. Positive is to the right.
+    onset: (g) => ({ amp: jit(g, 1, 0.3), dir: g.uniform() < 0.5 ? -1 : 1, sign: g.uniform() < 0.5 ? -1 : 1 }),
+    mark,
+    morphology,
+  });
+}
+
 const remEyes: PatternSourceDescriptor = {
   id: 'rem-eyes',
   toggles: ['rem-eyes'],
   states: ['rem'],
   stateIntrinsic: true,
+  extracranial: true,
   spec: {
     id: 'rem-eyes',
     pos: [0.0, -0.68, 0.61],
@@ -569,28 +596,38 @@ const remEyes: PatternSourceDescriptor = {
     extent: 0.55,
   },
   make(seed, dt) {
-    const ts = new TransientSource<RemEvent>(seed, dt, {
-      // Bursts: a short mean interval with heavy jitter clusters the movements
-      // instead of spacing them evenly.
-      schedule: { kind: 'periodic', period: 1.4, jitterFrac: 0.7 },
-      duration: REM_RISE_SEC + REM_FALL_SEC,
-      // Direction alternates at random: the eyes track back and forth, so
-      // successive movements are not all the same way.
-      onset: (g) => ({ amp: jit(g, 1, 0.3), dir: g.uniform() < 0.5 ? -1 : 1 }),
-      mark: () => ({ dur: REM_RISE_SEC + REM_FALL_SEC }),
-      morphology: (t, e) => {
-        const peak = e.dir * e.amp * REM_PEAK_UV;
-        if (t < REM_RISE_SEC) return peak * (t / REM_RISE_SEC);
-        if (t < REM_RISE_SEC + REM_FALL_SEC) {
-          return peak * (1 - (t - REM_RISE_SEC) / REM_FALL_SEC);
-        }
-        return 0;
-      },
+    const ts = remSource(seed, dt, () => ({ at: LRS_LEAD_S, dur: REM_RISE_SEC + REM_FALL_SEC }), (t, e) => {
+      const u = t - LRS_LEAD_S;
+      const peak = e.dir * e.amp * REM_PEAK_UV;
+      if (u < 0) return 0;
+      if (u < REM_RISE_SEC) return peak * (u / REM_RISE_SEC);
+      if (u < REM_RISE_SEC + REM_FALL_SEC) {
+        return peak * (1 - (u - REM_RISE_SEC) / REM_FALL_SEC);
+      }
+      return 0;
     });
     return asGenerator(ts);
   },
 };
 
+function remLrs(id: string, side: -1 | 1): PatternSourceDescriptor {
+  return {
+    id,
+    toggles: ['rem-eyes'],
+    states: ['rem'],
+    stateIntrinsic: true,
+    extracranial: true,
+    spec: { ...(side < 0 ? ARTIFACT_SOURCES.lateralRectusL : ARTIFACT_SOURCES.lateralRectusR), id },
+    make(_seed, dt, subjectSeed) {
+      const ts = remSource(deriveSeed(subjectSeed, 'rem-eyes'), dt,
+        (e) => (e.dir === side ? { label: 'LRS', dur: LRS_SPIKE_S } : null),
+        (t, e) => (e.dir === side ? e.sign * LRS_PEAK_UV * lrsSpike(t) : 0));
+      return asGenerator(ts);
+    },
+  };
+}
+
 export const SLEEP_SOURCES: PatternSourceDescriptor[] = [
   vWave, kComplex, spindleFast, spindleSlow, posts, slowWaves, rovingEyes, remEyes,
+  remLrs('rem-lrs-l', -1), remLrs('rem-lrs-r', 1),
 ];

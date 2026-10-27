@@ -31,35 +31,13 @@ export const BETA_TONES: Tone[] = [
 export const MU_TONES: Tone[] = [
   { f: 9.2, a: 0.9 }, { f: 10.1, a: 1.0 }, { f: 11.1, a: 0.8 },
 ];
-// RMTD's defining diagnostic feature is that it is *monomorphic* — a near-constant
-// frequency, unlike the polymorphic spread of ordinary background theta. Its tones
-// are therefore deliberately clustered tightly around 6 Hz rather than spanning the
-// whole theta band the way THETA_TONES does.
-export const RMTD_TONES: Tone[] = [
-  { f: 5.7, a: 1.0 }, { f: 6.0, a: 0.45 }, { f: 6.3, a: 0.3 },
-];
-// Posterior slow waves of youth are a 2.5-4.5 Hz phenomenon — above the delta band.
-// Borrowing DELTA_TONES (0.8-2.1 Hz) rendered them at roughly half their true
-// frequency, which would teach a learner to call genuine delta "normal for age".
-export const PSWY_TONES: Tone[] = [
-  { f: 2.7, a: 1.0 }, { f: 3.2, a: 0.9 }, { f: 3.8, a: 0.8 }, { f: 4.3, a: 0.6 },
-];
-// 14 & 6 positive bursts carry two independent arciform components.
-export const POS14_TONES: Tone[] = [
-  { f: 13.3, a: 0.8 }, { f: 14.1, a: 1.0 }, { f: 14.9, a: 0.7 },
-];
-export const POS6_TONES: Tone[] = [
-  { f: 5.7, a: 0.8 }, { f: 6.2, a: 1.0 }, { f: 6.7, a: 0.7 },
-];
-
 // Per-tone-set normalisers so a unit-amplitude multiToneSignal peaks near ±1.
 export const THETA_TONE_NORM = 2.2;
 export const DELTA_TONE_NORM = 2.0;
 export const BETA_TONE_NORM = 2.0;
 export const MU_TONE_NORM = 1.7;
-export const RMTD_TONE_NORM = 1.3;
+// 14 & 6 positive bursts: since 2026-10-27 one arciform tone per component (variants.ts).
 export const POS_BURST_TONE_NORM = 1.6;
-export const PSWY_TONE_NORM = 1.9;
 
 // Amplitude-weighted centre frequencies of the tone sets used by frequency sweeps.
 export const THETA_TONE_CENTER = 5.7;
@@ -107,6 +85,15 @@ export function arciformSignal(
     s += a * (Math.cos(th) + 0.35 * Math.cos(2 * th));
   }
   return sharp * s / norm;
+}
+
+/**
+ * Seconds from the start of a one-tone `arciformSignal` at `f` Hz to its first
+ * pointed peak (where the phase reaches a whole turn). A single arch — one wicket
+ * on its own — is the waveform windowed to one cycle about this point.
+ */
+export function arcPeakTime(f: number): number {
+  return (2 * Math.PI - ARCH_ZERO_PHASE) / (2 * Math.PI * f);
 }
 
 // Evolving frequency is the single most important feature of an ictal rhythm, and

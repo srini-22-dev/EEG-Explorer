@@ -390,6 +390,57 @@ export function ControlPanel({
                               </div>
                             </div>
                           )}
+                          {p.id === '6hz-sw' && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Form</Label>
+                              <div className="flex gap-1">
+                                {([['fold', 'FOLD'], ['wham', 'WHAM']] as const).map(([f, label]) => (
+                                  <button key={f} onClick={() => updatePatternOptions({ sixHzForm: f })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                      (patternOptions.sixHzForm ?? 'fold') === f
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {p.id === '14-6-pos' && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Sides</Label>
+                              <div className="flex gap-1">
+                                {([['shifting', 'Shifting · 0.5-1 s'], ['bilateral', 'Bilateral · 1-2 s']] as const).map(([f, label]) => (
+                                  <button key={f} onClick={() => updatePatternOptions({ pos146Sides: f })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                      (patternOptions.pos146Sides ?? 'shifting') === f
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {p.id === 'breach' && on && (
+                            <div className="pt-2 pb-1 pl-1 space-y-1">
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Defect over</Label>
+                              <div className="flex gap-1">
+                                {(['C4', 'C3', 'F8', 'F7'] as const).map(e => (
+                                  <button key={e} onClick={() => updatePatternOptions({ breachSite: e })}
+                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                      (patternOptions.breachSite ?? 'C4') === e
+                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                    }`}>
+                                    {e}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {p.id === 'gtc-ictal' && on && (
                             <div className="pt-2 pb-1 pl-1 space-y-1">
                               <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Muscle artifact</Label>

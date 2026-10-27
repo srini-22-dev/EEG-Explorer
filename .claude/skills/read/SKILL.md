@@ -579,11 +579,26 @@ is exactly that source.
   suppression's bursts and suppressions). `markBlocks` splits the rows into one box per chain.
   Gate Step 27 runs EVERY toggle as the app switches it on and fails any moment its contribution
   moves a row 2 mm with no arrow or box over it ("by design: <id> events on the page with no arrow
-  or box"). A page showing something no mark explains is a source nobody owns: find it, then own
+  or box"), and runs 24 common pages through all six montages — what single toggles on one
+  montage miss: two bad contacts boxed as one field cancelled on the row between them (T5-A1, ear
+  reference only), and mains on a bad contact went unboxed (both toggles on only). State a polarity
+  in a cue or description with its montage: lambda, like POSTS, points UP on P3-O1. A page showing something no mark explains is a source nobody owns: find it, then own
   it (toggle + marks) or remove it — as the background's midline theta was, now its own toggle.
   Roving eye movements are designed swings for the same reason (a glide side to side, 1.5-4 s):
   their arrow's window is the whole swing, because the display's low-frequency filter draws the
   turn up to ~0.9 s before the source reaches it.
+  Three kinds of mark came in with the 2026-10-27 variants and artifacts pass (gate Step 28 holds
+  each against its sources). Breach rhythm draws nothing of its own: the engine multiplies the
+  intracranial potential at the electrode over the defect (`BREACH_*` in engine.ts, `--breach C4|C3|F8|F7`)
+  and boxes that electrode's rows while it is on; pattern sources outside the skull say so
+  (`extracranial: true`) so a defect leaves them alone, and the artifact block is outside by
+  definition. Eye flutter is an engine artifact on the blink's sources (gate `flutter`), one box a
+  run. Every lateral eye movement and every REM is led by a lateral rectus spike on its own
+  sources (`lateralRectusL/R`), an arrow labelled "LRS" on the F7 or F8 rows of the side the eyes
+  turn to. Slow-fused transients mark three kinds: the fused pair is a box, a lone slow wave
+  ("PSWY") or sharp wave ("Sharp transient") an arrow. The 6 Hz phantom has two forms,
+  `--six-hz fold|wham`, one source each, the unnamed one silent; the 14 & 6 bursts two ways of taking
+  the sides, `--pos146 shifting|bilateral` (one schedule for both sides either way).
 - **Which toggles can be on together is decided in `utils/toggleRules.ts`**, not in the engine: a
   table of states, requirements and exclusions (a blink needs Awake and open eyes; muscle is not
   available in REM; lambda needs open eyes), applied by pure functions the app makes every change

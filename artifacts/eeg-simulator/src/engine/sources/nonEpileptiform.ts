@@ -371,7 +371,9 @@ const gpeds: PatternSourceDescriptor = {
   }, { extent: 0.3 }),
   make(seed, dt) {
     const ts = new TransientSource<GpedEvent>(seed, dt, {
-      // One discharge every ~1.5 s, each interval within 8% of that. The interval
+      // A 0.2 s discharge and a 1.5 s gap: one every ~1.7 s onset to onset (measured
+      // 1.70 s; the text said 1.5 until 2026-10-23, the gap alone), each interval
+      // within 8% of that. The interval
       // is what makes a discharge PERIODIC: learningeeg (Physiology & Terminology)
       // calls a pattern periodic when the interval varies by under 25%,
       // quasi-periodic at 25-50%, and not periodic at all beyond that. The legacy

@@ -141,6 +141,7 @@ const CHEW_EXTENT = 0.6;
 const chewLeft: PatternSourceDescriptor = {
   id: 'chewL',
   toggles: ['chewing'],
+  extracranial: true,
   spec: { ...ARTIFACT_SOURCES.temporalisL, id: 'chewL', extent: CHEW_EXTENT },
   make: (seed, dt, subjectSeed) => makeChewSide(seed, dt, subjectSeed),
 };
@@ -148,6 +149,7 @@ const chewLeft: PatternSourceDescriptor = {
 const chewRight: PatternSourceDescriptor = {
   id: 'chewR',
   toggles: ['chewing'],
+  extracranial: true,
   spec: { ...ARTIFACT_SOURCES.temporalisR, id: 'chewR', extent: CHEW_EXTENT },
   make: (seed, dt, subjectSeed) => makeChewSide(seed, dt, subjectSeed),
 };

@@ -7,7 +7,7 @@ This file is not documentation of how the code works — the engine source (`src
 that. This is a list of things that must remain **true of the output**, whatever the
 implementation happens to be.
 
-> **36 entries · highest ID `IK-036` · 35 enforced by an automated check, 1 `violated` (IK-003).**
+> **45 entries · highest ID `IK-045` · all 45 enforced by an automated check.**
 
 ---
 
@@ -371,6 +371,67 @@ required a state-specific term (`STATE_EMG_SCALE`) because muscle had been deriv
 which structurally cannot express this stage — raising vigilance to produce the wake-like
 background would have raised the muscle with it. Clinical wording not independently confirmed.
 
+### IK-037 — The vertex wave runs down both parasagittal chains, and only a little down the temporal ones
+
+**Claim.** A vertex wave is surface-negative and maximal at the vertex, and its field covers the
+central and parasagittal regions. On an antero-posterior bipolar montage it reverses at Cz on the
+midline and at C3/C4 on the parasagittal chains; the outer links of those chains (Fp-F, P-O)
+deflect the same way as their neighbours, smaller; the temporal chains carry a small deflection,
+clearly below the parasagittal chains.
+
+**Observable.** Montage `bipolar-ap`, toggle `v-waves`, read on the toggle's isolated contribution
+at the instant of the largest Cz-Pz swing. F3-C3 and C3-P3 deflect opposite ways, and so do F4-C4
+and C4-P4 (currently opposite on both sides). Each Fp-F link carries 0.3–0.95 of the F-C link
+behind it, and each P-O link 0.3–0.95 of the C-P link before it, the same way (currently Fp1-F3
+0.77, Fp2-F4 0.78, P3-O1 0.68, P4-O2 0.61). The largest temporal row is 0.1–0.6 of the largest
+parasagittal row (currently 0.28). Amplitude is not asserted here.
+
+**Mechanism.** *(non-binding)* A radial generator under the vertex with a broad cortical field.
+Not asserted.
+
+**Check.** `validateEngine.ts` — `check('v-waves Fp2-F4 / F4-C4 at the wave's peak …', …)` and its
+three companions for P4-O2, Fp1-F3 and P3-O1, `check('v-waves F4-C4 and C4-P4 deflect opposite ways
+(reversal at C4)', …)`, `check('v-waves F3-C3 and C3-P3 deflect opposite ways (reversal at C3)', …)`
+and `check('v-waves largest temporal row / largest parasagittal row …', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-22 — drafted from the IFCN glossary
+(Kane et al. 2017): "maximal at the vertex, negative relative to other areas"; learningeeg *Normal
+Asleep*, vertex-wave figure caption: "symmetric discharge maximal over the parasagittal and central
+chains"; and the owner's description of 2026-10-22. Approved by the user 2026-10-27. The bounds are
+orderings, not figures: learningeeg's figure could not be read row by row reliably.
+
+### IK-038 — A K-complex is a negative sharp wave then a slower positive one, often with a smaller positive before
+
+**Claim.** A K-complex is a well-delineated negative sharp wave followed by a slower positive
+component, frontally maximal, often but not always followed by a sleep spindle. Some K-complexes
+also have a smaller positive wave before the negative one, which may not be visible.
+
+**Observable.** Toggle `k-complex`, read at Fz on the isolated contribution, event by event over
+four minutes. The negative sharp component renders up and the after-going positive wave down,
+smaller. In 40–95% of events a positive phase 0.15–0.45 s before the negative peak exceeds 5% of
+it (currently 75%), and it never exceeds 0.4 of it (largest currently 0.30). With the Spindle
+after option on Sometimes (the default) 30–90% of events are followed by a spindle (currently
+50%); on None, none; on Always, all.
+
+**Mechanism.** *(non-binding)* The negative and positive waves are the cortical down- and up-state
+of a slow oscillation; the early positive wave (the P200) an earlier sensory or arousal response.
+Not asserted.
+
+**Check.** `validateEngine.ts` — `check('K-complex share with an early positive phase …', …)`,
+`check('K-complex largest early positive phase / negative peak …', …)`, `check('K-complex share
+followed by a spindle, option Sometimes …', …)`, `check('K-complex share followed by a spindle,
+option None', …)`, `check('K-complex share followed by a spindle, option Always', …)`, with
+`check('K-complex sharp component renders UP (surface-negative)', …)` and `check('K-complex
+after-going wave renders DOWN, smaller than the sharp peak', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-22 — drafted from the IFCN
+glossary, the AASM wording and NVKNF: "a well delineated negative sharp wave followed by a positive
+component"; learningeeg: "biphasic", "often but not always followed by a sleep spindle"; Laurino
+et al. 2014 (P200, N550, P900); Frontiers in Neuroscience 2019 (13:814): "a smaller preceding
+positivity that may not be visible by eye". Approved by the user 2026-10-27. The 40–95% and 0.4
+bounds are this entry's reading of "may not always be present" and "smaller"; no source gives a
+ratio.
+
 ## 3. Montage, polarity, and localization conventions
 
 Display polarity convention, how bipolar subtraction behaves at a focus, how referential
@@ -532,7 +593,10 @@ implies. Surface-**negative** transients — the vertex wave, the sharp componen
 K-complex, focal spikes and sharp waves, generalised spike-wave and polyspike-wave, GPEDs, the
 6 Hz phantom spike-wave, and BETS — point **up**. Surface-**positive** transients — POSTS,
 lambda waves, and the dominant middle phase of a triphasic wave — point **down**, which is why
-POSTS and lambda look like inverted checkmarks rather than ordinary sharp waves.
+POSTS and lambda look like inverted checkmarks rather than ordinary sharp waves. That is their
+direction where the electrode carrying them is input 1 (any referential montage: O1-AVG,
+O1-A1). On the double banana O1/O2 are input 2 of P3-O1, T5-O1, P4-O2 and T6-O2, so the same
+positive transient points **up** there; a polarity claim is stated with its montage.
 
 **Observable.** Any montage, 30 mm/s, 7 µV/mm. The polarity legend in the Display panel reads
 *up = negative (−) · down = positive (+)*. Isolating each pattern's own contribution — a
@@ -589,8 +653,8 @@ Amplitude and rate are not asserted.
 **Observable.** Montage `bipolar-ap`, state `awake`, toggle `roving-eyes`, 30 mm/s, 7 µV/mm.
 Isolating the source's contribution by same-seed differencing, Fp1-F7 and Fp2-F8 are anti-correlated
 (≤ −0.5; currently −1.000), and the spectral peak of that contribution lies between 0.12 and 0.6 Hz
-(currently 0.244). State gating is separately observable: switching to state `drowsy` with **no**
-toggle set, the peak-to-peak on Fp1-F7 is 1.8–20× its awake value (currently 4.69), because the
+(currently 0.183). State gating is separately observable: switching to state `drowsy` with **no**
+toggle set, the peak-to-peak on Fp1-F7 is 1.8–20× its awake value (currently 3.52), because the
 movements belong to the state rather than to the toggle.
 
 That last clause describes the engine's default mode, which the gate and the renderers run. In
@@ -677,7 +741,8 @@ measures 0.226 of the downward peak, with 0.031 of it left 1.5-3 s later.
 reversal at F7 and a phase reversal at F8 that are mirror images of each other: when the F7
 reversal deflects one way, the F8 reversal deflects the other. This left-right opposition is what
 distinguishes lateral gaze from a blink, which is symmetric and frontopolar-maximal — see
-[[IK-001]].
+[[IK-001]]. The movement is led by a lateral rectus spike on the side the eyes turn toward — see
+[[IK-040]].
 
 **Observable.** Montage `bipolar-ap`, state `awake`, toggle `eye-movement`, 30 mm/s, 7 µV/mm.
 At each eye movement, Fp1-F7 and F7-T3 deflect in opposite directions (phase reversal at F7), and
@@ -698,7 +763,8 @@ which sign.
 reversal at F8)`, and `eye-movement: Fp1-F7 vs Fp2-F8 correlation (IK-002: out of phase across
 the midline)` — the isolated `saccade` contribution on each bipolar-ap link (on−off, same seed),
 asserting both frontotemporal links anti-correlated at their shared electrode and the two
-reversals mirror-opposed across the midline. All three land at −1.000.
+reversals mirror-opposed across the midline. Currently −0.999, −0.999 and −0.987: the lateral rectus spike, on one side only, takes a little off
+the cross-midline figure (2026-10-27).
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-08-10; clinical claim confirmed against
 learningeeg.com (artifacts chapter: F8 is the point of maximal positivity on rightward gaze, a
@@ -780,6 +846,67 @@ enforcement gap: [[IK-001]] already asserted in prose that the blink decays "pos
 each chain", but no check tested it, so an electrode-geometry change collapsed F3-C3 to 0.7 mm
 on the page while all five IK-001 checks stayed green.
 
+### IK-039 — Eye flutter is a run of blink-like deflections that stays frontal
+
+**Claim.** Eye flutter — rapid repeated movements of the eyelids — shows as a run of blink-like
+positive deflections over the frontopolar electrodes, about three to four a second, that does not
+extend posteriorly beyond the frontal leads and has no spike under it. Scope: field, polarity and
+rate; amplitude and run length are not asserted.
+
+**Observable.** Montage `bipolar-ap`, state `awake`, toggle `eye-flutter`, isolated contribution
+over 60 s. Fp1-F3 renders down: its largest downward excursion is at least 1.2 times its largest
+upward one (currently 1.83; the upward swing is the display's low-frequency filter taking the
+run's mean level off). F3-C3 carries 0.15–0.5 of Fp1-F3 (currently 0.29) and P3-O1 under 0.1 of it
+(currently 0.03). Within a run the lid cycles come 3–4 a second (currently 3.44).
+
+**Mechanism.** *(non-binding)* Each lid movement sweeps the positive cornea's field across the
+frontopolar electrodes as a blink does ([[IK-001]], [[IK-032]]). Not asserted.
+
+**Check.** `validateEngine.ts` — `check('eye flutter Fp1-F3 renders DOWN (largest down / largest
+up)', …)`, `check('eye flutter F3-C3 / Fp1-F3 (learningeeg figure ~0.4; blink field)', …)`,
+`check('eye flutter P3-O1 / Fp1-F3 ("do not extend posteriorly beyond the frontal leads")', …)`,
+`check('eye flutter: lid cycles per second within a run, median over runs', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — learningeeg (Artifacts):
+"Similar to eye blinks, note that the prominent positive deflections across this page do not
+extend posteriorly beyond the frontal leads", "the lack of any underlying spike waves"; its figure
+measured row by row at 3.5 Hz with F3-C3 ~0.4 of Fp1-F3 (aggregate reading: its frontopolar rows
+exceed 0.5 occupancy); EEG Atlas online's two flutter pages, about three a second. The 3–4 Hz
+range is the two figures; no text gives a rate. Approved by the user 2026-10-27.
+
+### IK-040 — A lateral eye movement is led by a lateral rectus spike on the side the eyes turn to
+
+**Claim.** At the start of a lateral eye movement a brief muscle spike — the lateral rectus spike —
+appears at the lateral frontal electrode on the side the eyes turn toward (F7 looking left, F8
+looking right), just before the slow corneo-retinal deflection, reversing at that electrode on an
+antero-posterior bipolar montage. The rapid eye movements of REM sleep carry it too. Scope:
+side, timing and field; the spike's polarity and size are not asserted.
+
+**Observable.** Montage `bipolar-ap`, state `awake`, toggle `eye-movement`, isolated contribution
+over 90 s. At each marked spike the spike on its own side's row (F7-T3 or F8-T4) is at least 3
+times the other side's (median currently ≥90); the gaze step that follows goes toward the spike's
+side every time (currently 0 of 33 the other way); the spike starts 12–34 ms before the slow
+deflection reaches a tenth of its size (median currently 20 ms); at the largest left spike
+Fp1-F7 and F7-T3 deflect opposite ways (reversal at F7). In state `rem` with `rem-eyes`, every
+movement has its spike (currently 1.00).
+
+**Mechanism.** *(non-binding)* EMG of the lateral rectus of the abducting eye, which reaches the
+skin near the lateral orbital rim, closest to F7/F8. The medial rectus of the other eye fires too
+but lies under no electrode. Not asserted.
+
+**Check.** `validateEngine.ts` — `check('LRS: median spike on its side / the other side (F7-T3 vs
+F8-T4)', …)`, `check('LRS: movements whose gaze step goes the other way from the spike side', …)`,
+`check('LRS: median lead of the spike start over the slow deflection (Thickbroom & Mastaglia:
+15-30 ms)', …)`, `check('LRS: Fp1-F7 and F7-T3 opposite at the largest left spike (reversal at
+F7)', …)`, `check('LRS: REM eye movements each led by a lateral rectus spike (spikes /
+movements)', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — EEG Atlas online (lateral eye
+movement): "EMG artifact from the lateral rectus muscle ipsilateral to the direction of movement";
+Thickbroom & Mastaglia 1985 (Brain Res), from the abstract: a large short-duration potential 15–30 ms
+before the saccade, largest near the eye on the side the saccade goes toward, from the ipsilateral
+lateral rectus; prominence in REM from a search excerpt (NCBI chapter, not fetched: CAPTCHA). Approved by the user 2026-10-27.
+
 ## 5. Normal variants
 
 Benign patterns mistakable for pathology — mu rhythm, wicket spikes, lambda waves, RMTD, 14&6
@@ -843,7 +970,7 @@ defect was reported. Clinical wording not independently confirmed by the user.
 ### IK-015 — Wicket spikes span 6–11 Hz and carry no after-going slow wave
 
 **Claim.** Wicket spikes are a benign temporal variant seen **mostly in drowsiness, and also in
-relaxed wakefulness and light sleep**: monomorphic arciform (mu-like) transients over the temporal
+relaxed wakefulness and light sleep**: monomorphic arciform (mu-like) transients, single or in short runs, over the temporal
 region, each arch pointed on its surface-**negative** side and rounded on the other, spanning
 roughly the **6–11 Hz** band — not confined to the alpha range. The single feature that keeps
 them benign is that a wicket spike is **not** followed by an after-going slow wave and does not
@@ -854,12 +981,13 @@ states they occur in — this entry does not assert a discharge rate or amplitud
 **Observable.** Montage `bipolar-ap` / `reference-car`, toggle `wicket`, at the left-temporal
 chain (T3/T5). Turning the toggle on in state `drowsy` raises both 7–11 Hz **and** 6–7.5 Hz power
 at T3 above its toggle-off value (the band is wider than alpha alone). The same toggle in state
-`awake` produces the same bursts (currently 100 µV at their largest at T3); it is available in
+`awake` produces the same bursts (currently 103 µV at their largest at T3); it is available in
 `awake`, `drowsy`, `n1` and `n2`, and selecting it from deeper sleep or REM moves the background
 to `drowsy`. At T3 the sharpest point of a burst is negative-going. The wicket contribution at
 T3-T5 carries no after-going slow wave: its delta-band power stays a small fraction of its
-arciform-band power. Only the band width, the polarity of the sharp side, the absence of a slow
-wave, and presence in wakefulness as well as drowsiness are asserted.
+arciform-band power. Between 15% and 50% of events are a single wicket rather than a run (currently 0.39). Only the band
+width, the polarity of the sharp side, the absence of a slow wave, the presence of singles, and
+presence in wakefulness as well as drowsiness are asserted.
 
 **Mechanism.** *(non-binding)* Conventionally regarded as a benign sharply-contoured fragment of
 the temporal drowsy rhythm rather than a cortical irritative discharge, which is why it lacks the
@@ -870,7 +998,7 @@ observable distinguishes wicket from an epileptiform sharp wave by morphology al
 `check('T3 6-7.5 Hz power, wicket on / off (drowsy; widened range)', …)`, `check('T3 wicket burst
 peak while awake (EEGPEDIA: present in relaxed wakefulness too)', …)`, `check('wicket T3 (sharp
 side) renders UP (-1)', …)`, and `check('wicket T3-T5 has no after-going slow wave (delta/arciform
-power ratio)', …)`.
+power ratio)', …)`, with `check('wicket share of events that are a single wave', …)` (2026-10-27).
 
 **Corrected 2026-10-13 — state and shape.** This entry called wickets "a drowsy-state finding …
 absent in relaxed wakefulness", and its check asserted that the toggle did nothing awake. The
@@ -886,23 +1014,30 @@ helper itself later the same day, so mu (pointed on the negative side, as wicket
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-08-24 — drafted by the assistant at
 the user's request and approved in the batch this session; recording behaviour the validation
-battery guards. Clinical wording not yet independently confirmed by the user.
+battery guards. Clinical wording not yet independently confirmed by the user. Singles added
+2026-10-27 from the SCORE normal-variants study ("single discharges or runs"), eegpedia ("sometimes
+single spike") and the IFCN glossary ("single waves or trains"). Approved by the user 2026-10-27.
 
 ### IK-016 — 14 & 6 positive bursts are posterior-temporal, ~14/6 Hz, and surface-positive
 
 **Claim.** The 14-and-6-per-second positive burst is a benign variant of light sleep/drowsiness:
 brief arciform bursts over the posterior-temporal region with a **~14 Hz** (and a slower ~6 Hz)
-comb, **positive at the surface** — so, on a negative-up display, they deflect **down** where the
+comb — the sources differ on the sides: on both sides or on one, the side shifting from burst to
+burst and the right more often than the left, 0.5–1 s (eegpedia, the SCORE study), or always both
+sides together, 1–2 s (learningeeg); the simulator offers both (Sides, under the toggle) — **positive at the surface** — so, on a negative-up display, they deflect **down** where the
 posterior-temporal electrode is the reference input, and invert on a bipolar link where that
 electrode is input 2 (compare the montage-dependence of [[IK-008]]). They are a drowsy/light-sleep
-finding, absent in relaxed wakefulness. Scope: band, topography, surface polarity, and state
-gating; amplitude and burst rate are not asserted.
+finding, absent in relaxed wakefulness. Scope: band, topography, surface polarity, state
+gating, and sides and length under each choice; amplitude and burst rate are not asserted.
 
 **Observable.** Toggle `14-6-pos`, posterior-temporal electrodes T5/T6. In state `drowsy`, 13.5–
 15.5 Hz power at T5/T6 rises above its toggle-off value; in state `awake` the same toggle produces
 no change (state-gated). In `reference-contra` the burst renders **downward** at T6-A1 (surface-
 positive → down). On `bipolar-ap` link T4-T6, where T6 is input 2, the same burst **inverts** and
-deflects upward — the sign is a property of the montage, not of the source.
+deflects upward — the sign is a property of the montage, not of the source. With Sides `shifting`
+(the default) 30–70% of bursts are on both sides (currently 0.47), one-sided bursts are on the right
+more often than the left (currently 1.31 times), and every burst lasts 0.49–1.01 s; with Sides
+`bilateral` every burst is on both sides and lasts 0.99–2.01 s.
 
 **Mechanism.** *(non-binding)* Conventionally a benign posterior-temporal sleep variant of no
 pathological significance; the two combs (~14 and ~6 Hz) are the usual descriptive labels, not
@@ -912,11 +1047,179 @@ and state.
 **Check.** `validateEngine.ts` — `check('T5/T6 13.5-15.5 Hz power, 14-6-pos on / off (drowsy)',
 …)`, `check('T6 13.5-15.5 Hz power, 14-6-pos while awake (state-gated off)', …)`, `check('14-6-pos
 renders DOWN at T6-A1, reference-contra (surface-positive)', …)`, and `check('14-6-pos polarity
-inverts at T4-T6, bipolar-ap (T6 is input2)', …)`.
+inverts at T4-T6, bipolar-ap (T6 is input2)', …)`; and since 2026-10-27 `check('14-6-pos share of bursts
+on both sides', …)`, `check('14-6-pos one-sided bursts on the right / on the left (eegpedia: R>L)',
+…)`, `check('14-6-pos shortest burst (eegpedia, SCORE: 0.5-1 s)', …)`, `check('14-6-pos longest
+burst', …)`, `check('14-6-pos, Sides bilateral: share of bursts on both sides (learningeeg:
+"bilateral and synchronous")', …)`, `check('14-6-pos, Sides bilateral: shortest burst (learningeeg:
+1-2 s)', …)` and `check('14-6-pos, Sides bilateral: longest burst', …)`.
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-08-24 — drafted by the assistant at
 the user's request and approved in the batch this session; recording behaviour the validation
-battery guards. Clinical wording not yet independently confirmed by the user.
+battery guards. Clinical wording not yet independently confirmed by the user. Sides added
+2026-10-27: eegpedia, "Unilateral (R>L) or bilateral asynchronous or synchronous", "Duration:
+0.5-1 second"; the SCORE study, "0.5–1 s bursts", "shifting predominance"; learningeeg,
+"bilateral and synchronous", "1-2 second bursts" — both pictures are offered, at the user's
+request. Approved by the user 2026-10-27.
+
+### IK-041 — RMTD is one frequency, 5–7 Hz, in trains of seconds over the mid-temporal region
+
+**Claim.** Rhythmic mid-temporal theta of drowsiness comes as trains of rhythmic theta at 5–7 Hz,
+each train at one frequency that does not change over it, lasting from a couple of seconds to about
+ten, maximal over the mid-temporal region with little on the parasagittal chain, on one side or on
+both out of step; in drowsiness and light sleep, and occasionally in relaxed wakefulness. The fixed
+frequency is what separates it from a temporal seizure (contrast [[IK-020]]).
+
+**Observable.** Montage `bipolar-ap`, toggle `rmtd`, isolated contribution, state `drowsy`, 240 s.
+Every train lies in 4.9–7.1 Hz (currently 5.13–7.00 Hz); no train's cycle length varies by more than 6%
+(CV, currently 0.001); trains last 1.9–10.1 s (currently 2.1–9.9 s); the largest parasagittal
+row is at most 0.5 of the largest temporal row (currently 0.04). Trains appear in `awake`, `n1`
+and `n2` too.
+
+**Mechanism.** *(non-binding)* None asserted.
+
+**Check.** `validateEngine.ts` — `check('RMTD lowest train frequency (eegpedia, SCORE: 5-7 Hz)',
+…)`, `check('RMTD highest train frequency', …)`, `check('RMTD largest cycle-length CV within a train
+(one frequency: "does not change in frequency or form")', …)`, `check('RMTD shortest train
+(learningeeg: "a few seconds")', …)`, `check('RMTD longest train (eegpedia: 5-10 s)', …)`,
+`check('RMTD largest parasagittal row / largest temporal row (temporal maximum)', …)`, and
+`check('RMTD trains in awake (SCORE: drowsiness and light sleep, occasionally awake)', …)` with its
+`n1` and `n2` twins.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — eegpedia: "Trains of rhythmic
+theta waves 5-7Hz", "Duration 5-10sec", "Located in midtemporal region", "Often unilateral", "May
+be bisynchronous, with shifting asymmetry", "Present in relaxed wakefulness and drowsiness", "Does
+not change in frequency or form"; SCORE normal variants study (Clin Neurophysiol Pract 2022,
+PMC9294211): 5–7 Hz, "mostly seen during drowsiness and light sleep … occasionally … awake",
+"maximum is usually mid-temporal but may sometimes spread to the parasagittal", "arch-shaped and
+often notched"; IFCN glossary: "4–7 c/s waves whose morphology is frequently notched by faster
+waves"; learningeeg: "a few seconds", its runs measured at ~2 s and ~6 Hz. Approved by the user 2026-10-27.
+
+### IK-042 — Small sharp spikes are brief, small, steeply falling, and leave the background alone
+
+**Claim.** Small sharp spikes (benign epileptiform transients of sleep) are temporal spikes under
+50 ms and under 50 µV, mono- or diphasic, whose descending limb is steeper than the ascending one;
+some are followed by a small slow wave, never a prominent one; drowsiness and light sleep only.
+
+**Observable.** Montage `bipolar-ap`, toggle `bets`, state `drowsy`, isolated contribution over
+400 s, each spike on its own side's T3-T5 / T4-T6 row. At least 80% fall faster than they rise
+(currently 0.99); 10–45% are diphasic (currently 0.29); 15–60% are followed by a slow
+wave (currently 0.40), none larger than 0.2 of its spike (currently 0.14). The largest
+on T3-T5 is under 50 µV and under 50 ms at the base (currently 39 µV, 44 ms).
+
+**Mechanism.** *(non-binding)* None asserted.
+
+**Check.** `validateEngine.ts` — `check('BETS share falling faster than they rise ("a steep
+descending arm")', …)`, `check('BETS share diphasic (eegpedia: "occasionally diphasic")', …)`,
+`check('BETS share followed by a slow wave (IFCN "often", eegpedia "occasionally")', …)`,
+`check('BETS largest slow wave / its spike ("not prominent and of low amplitude")', …)`,
+`check('BETS T3-T5 base width (site/patterns.ts: <50 ms)', …)`, `check('BETS T3-T5 peak amplitude
+(patterns.ts: <50 uV)', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — SCORE study: "a mono- or
+diphasic spike with a steep descending arm. If present, the following slow wave is not prominent
+and of low amplitude", "drowsiness/light sleep (N1, N2)"; eegpedia: "<50 microV … <50 ms",
+"Usually monophasic, occasionally diphasic", "Occasionally followed by a slow wave, however do not
+disturb the background"; IFCN glossary: "often followed by a small theta wave". The shares are a
+design between "often" and "occasionally"; no source gives a figure. Approved by the user 2026-10-27.
+
+### IK-043 — The 6 Hz phantom spike-and-wave has two forms: FOLD posterior and small, WHAM anterior and large
+
+**Claim.** 6 Hz spike-and-wave comes in brief bilateral runs in two forms. FOLD (female,
+occipital, low-amplitude spike, drowsy) is posterior, its spike under 25 µV and smaller than its
+wave, in drowsiness — the benign form. WHAM (waking, high-amplitude spike, anterior, male) is
+fronto-central, its spike over 45 µV, and occurs awake as well; eegpedia associates it with
+epilepsy.
+
+**Observable.** Montage `reference-ipsi`, toggle `6hz-sw`, isolated contribution. With Form WHAM
+in `drowsy`, F3-A1 is at least 5 times O1-A1 (currently 470) and its largest deflection is
+45–150 µV (currently 72 µV); in `awake` WHAM is drawn. With Form FOLD, O1-A1 is at least
+twice F3-A1 (currently 2.56) and nothing is drawn awake.
+
+**Mechanism.** *(non-binding)* None asserted.
+
+**Check.** `validateEngine.ts` — `check('6 Hz WHAM F3-A1 / O1-A1 ("anterior")', …)`, `check('6 Hz
+FOLD O1-A1 / F3-A1 ("occipital")', …)`, `check('6 Hz WHAM largest deflection on F3-A1 (spike
+">45uV")', …)`, `check('6 Hz WHAM drawn awake ("Waking")', …)`, `check('6 Hz FOLD not drawn awake
+("Drowsy")', …)`, with the FOLD checks of Step 13 (`check('6hz-sw O1 spike / slow wave (StatPearls:
+wave of equal or greater amplitude)', …)`, `check('6hz-sw O1 / Fz (FOLD: posterior maximum)', …)`).
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — eegpedia: "WHAM: Waking, High
+amplitude spike (>45uV), Anterior, Male", "Associated with epilepsy especially when high amplitude
+spikes, rate <5-6Hz and persists during deep sleep", "FOLD: Female, Occipital, Low amplitude spike,
+Drowsy", "Not associated with epilepsy"; SCORE study: "low-voltage-spikes (<25 µV) of brief duration
+(<30 ms)", WHAM's "amplitude is mostly higher over the fronto-central regions"; eegpedia's WHAM
+figure, read as a picture (its rows could not be traced through the discharge). Approved by the user 2026-10-27.
+
+### IK-044 — Breach rhythm is larger, faster activity at the electrode over a skull defect, and stops at its edge
+
+**Claim.** Over a skull defect the EEG is larger than at the homologous electrode — by less than
+three times — with its fast activity raised most, giving a spiky appearance with alpha or mu; the
+change stops at the margin of the defect, so on a bipolar montage only the rows sharing the
+electrode over it change. It is a sign of the bone, not of the brain, and does not touch
+extracranial artifacts such as muscle.
+
+**Observable.** State `awake`, toggle `breach`, Site C4 (default), 60 s, three subjects. C4-AVG is
+1.5–3 times C3-AVG peak to peak (median currently 2.06); on `bipolar-ap` F4-C4 and C4-P4 are at
+least 1.3 times what they are without the defect (smallest currently 1.43) and no other row
+changes at all; against the ear (C4-A2) the beta gain is 2.6–3.05 (currently 2.66), and both the
+beta and the alpha gain exceed the delta gain (currently 1.45 and 1.58 times). With Site F8,
+F8-AVG is 1.5–3 times F7-AVG (currently 2.36). With Site F8 and muscle on, the muscle on
+F8-T4 is unchanged.
+
+**Mechanism.** *(non-binding)* The skull attenuates and spatially smears the cortical field, fast
+and focal activity most; a defect removes that filter locally. Not asserted.
+
+**Check.** `validateEngine.ts` — `check('breach C4-AVG / C3-AVG peak to peak, median of 3 subjects
+(AES >=1.5; IFCN <3)', …)`, `check('breach F4-C4 and C4-P4 against the same subject without it,
+smallest', …)`, `check('breach: largest change on any row not sharing C4 (abrupt margin)', …)`,
+`check('breach C4-A2 beta gain (13-30 Hz), median (IFCN: "less than 3")', …)`, `check('breach C4-A2
+beta gain / delta gain, median', …)`, `check('breach C4-A2 alpha gain / delta gain,
+median', …)`, `check('breach at F8: muscle on F8-T4 changed by the defect', …)`,
+`check('breach at F8: F8-AVG / F7-AVG peak to peak (AES >=1.5; IFCN <3)', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — IFCN glossary: "of increased
+amplitude when compared to homologous areas on the opposite side of the head (usually by a factor of
+less than 3)", "fast activity with a spiky appearance along with alpha and/or mu rhythms, due to lack
+of attenuation and distortion by the skull"; eegpedia: "Mostly in beta range", "Spiky and sharp",
+"Abruptly diminish beyond the margins of the defect", "Better identified with bipolar montage", and
+its right central figure (F4-C4 1.8x, C4-P4 2.9x their twins, measured); SCORE study: "focal,
+asymmetric high amplitude beta activity"; EEG Atlas online: "increased amplitude of high and low
+frequencies"; an AES abstract on 117 EEGs over defects scoring amplitude "≥50% greater than the
+contralateral homologous site" (89%), beta (60%), sharp morphology (72%). Approved by the user 2026-10-27.
+
+### IK-045 — Posterior slow waves of youth are isolated waves within the alpha rhythm; fused with a sharp wave they mimic spike-and-wave
+
+**Claim.** Posterior slow waves of youth are isolated slow waves intermixed with the posterior
+dominant rhythm, of high amplitude, occipital, awake with the eyes closed. A slow-fused transient is
+one of them preceded by a sharply contoured wave of the posterior rhythm, which together look like
+a spike-and-slow-wave; on the same record the sharp wave and the slow wave also occur apart, which
+is how it is told from an epileptiform discharge.
+
+**Observable.** Montage `reference-car`, state `awake`. With `pswy` (180 s), every event is a single
+wave (currently 1.00 of events) and the largest is 0.7–2 times the background's peak to peak at
+O1-AVG (currently 1.03). With `slow-fused` (300 s), 25–55% of events are fused pairs
+(currently 0.42), 15–50% a slow wave alone (currently 0.31) and 15–50% a sharp wave alone
+(currently 0.28); in at least 90% of fused pairs the sharp wave comes first and both render up
+(currently 1.00).
+
+**Mechanism.** *(non-binding)* None asserted.
+
+**Check.** `validateEngine.ts` — `check('PSWY O1-AVG largest wave / the alpha background peak to
+peak ("rather high amplitude")', …)`, `check('PSWY events that are one isolated wave (arrow, no
+box)', …)`, `check('slow-fused: share of events that are a fused pair', …)`, `check('slow-fused:
+share that are a slow wave alone (SCORE: "dissociated from each other")', …)`, `check('slow-fused:
+share that are a sharp transient alone', …)`, `check('slow-fused: fused pairs with the sharp wave
+first and both UP', …)`.
+
+**Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — IFCN glossary: posterior slow
+waves of youth, "Isolated slow waves intermixed with the posterior dominant rhythm in young people
+(typically 4–25 years of age)"; slow-fused transient, "A sharply contoured component of the normal
+posterior dominant rhythm precedes a posterior slow wave of youth, giving the false impression of a
+spike-and-slow-wave"; learningeeg (Pediatric): "rather high amplitude, spike-like waveforms that
+exist within the PDR and similarly attenuate with eye opening"; SCORE study: "Browsing the entire
+recording the two phenomena … are usually observed several times, dissociated from each other". The
+shares, the size and the waves' surface-negative polarity are a design; no source gives them. Approved by the user 2026-10-27.
 
 ## 6. Interictal epileptiform activity
 
@@ -1409,7 +1712,7 @@ nearly regular** interval — the low variability of the inter-discharge interva
 them *periodic* rather than random: learningeeg draws the line at an interval varying by under
 25%, ACNS 2021 at most cycle pairs varying by under 50%. They are **generalized**: bilaterally
 synchronous and symmetric, on every chain (contrast the lateralized LPEDs, [[IK-026]]). The
-simulator's run about every 1.5 s (0.67 Hz), slower than the 1 Hz at which GPDs begin to count
+simulator's run about every 1.7 s (0.59 Hz), slower than the 1 Hz at which GPDs begin to count
 toward the ictal-interictal continuum. Scope: periodicity and generalized distribution; amplitude
 and aetiology are not asserted.
 

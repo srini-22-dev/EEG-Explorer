@@ -27,10 +27,11 @@ import {
 } from './forward';
 import {
   ARTIFACT_SOURCES, OCULAR_DIPOLE_SHARE, OCULAR_FIRST_EVENT_LEAD_SEC, BlinkGenerator, EyeOpeningGenerator, SaccadeGenerator, EmgGenerator, EcgGenerator,
+  EyeFlutterGenerator, FLUTTER_SHARE, FLUTTER_TAIL_S, LRS_PEAK_UV, LRS_SPIKE_S,
   ElectrodePopGenerator, SweatGenerator, SWEAT_SKIN_UV, ECG_SCALP_UV, LineNoiseGenerator, MovementGenerator,
   artifactSeeds,
 } from './artifacts';
-import { RecordingChain, sampleDefects, type ChannelDefect } from './chain';
+import { RecordingChain, sampleDefects, defectLineMultiplier, type ChannelDefect } from './chain';
 import { Gaussian, deriveSeed } from './rng';
 import {
   PATTERN_SOURCES,
@@ -40,7 +41,7 @@ import {
 import { MU_FIELD } from './sources/fields';
 import type {
   PatientState, IctalHemisphere, IctalParams, IctalParamsMap,
-  ArtifactParams, EmgRegion, PatternOptions, PostsForm, FocalPlacement, KcSpindle,
+  ArtifactParams, EmgRegion, PatternOptions, PostsForm, FocalPlacement, KcSpindle, SixHzForm, BreachSite, Pos146Sides,
 } from '../utils/simTypes';
 import { defaultIctalParamsMap, POP_TARGET_ANY } from '../utils/simTypes';
 
@@ -270,8 +271,10 @@ export type ArtifactGates = {
   blink: boolean;
   /** Eye opening/closing maneuver: slow upward (open) then smaller downward (close) at Fp. */
   eyeOpening: boolean;
-  /** Lateral gaze / saccade deflection and its onset spike. */
+  /** Lateral gaze / saccade deflection and the lateral rectus spike that leads it. */
   saccade: boolean;
+  /** Eye flutter: runs of rapid lid movements on the blink's sources. Off unless asked for. */
+  flutter: boolean;
   /** Temporalis + frontalis EMG (muscle) shot noise. */
   emg: boolean;
   /** Electrode pop (single-channel step + decay, leadfield bypassed). */
@@ -419,6 +422,25 @@ export const PDR_ENVELOPE_DEPTH = 0.42;
 // roughly the first second after closure. They are approximate (the literature
 // quotes latencies, not time constants) and not asserted beyond "within ~1 s".
 export const EYES_OPEN_ALPHA_GAIN = 0.35;
+
+// Breach rhythm (2026-10-27; the sources are in variants.ts at the `breach`
+// descriptor). At the electrode over a skull defect the intracranial potential is
+// multiplied by BREACH_GAIN_LOW at the slow end, rising through a first-order
+// high-pass at BREACH_CORNER_HZ to BREACH_GAIN_HIGH: about 1.84 at 1 Hz, 2.37 at 5 Hz,
+// 2.73 at 10 Hz, 2.92 at 20 Hz. The ceiling is the IFCN glossary's "usually by a factor
+// of less than 3"; the slow end is raised too (EEG Atlas: "increased amplitude of high
+// and low frequencies"), at 1.8 so that the electrode as a whole clears the AES
+// series' "≥50% greater than the contralateral homologous site" with room; the corner
+// puts most of the gain on the alpha band (mu "high amplitude and sharp", learningeeg)
+// and all of it on beta. Measured (awake, 60 s, three subjects): C4-AVG 2.05-2.29x
+// C3-AVG peak to peak; F4-C4 and C4-P4 1.9-2.1x and 1.4-1.8x what they are without the
+// defect, Fp2-F4 and P4-O2 unchanged. eegpedia's figure has F4-C4 1.8x and C4-P4 2.9x
+// their twins; C4-P4 comes out lower here because on an awake eyes-closed page that
+// row carries P4's alpha, which the defect does not touch. 1.5 at the slow end gave
+// C4-AVG 1.95-2.22x.
+export const BREACH_GAIN_LOW = 1.8;
+export const BREACH_GAIN_HIGH = 3;
+export const BREACH_CORNER_HZ = 6;
 export const ALPHA_BLOCK_TAU_S = 0.15;
 export const ALPHA_RETURN_TAU_S = 0.4;
 
@@ -621,6 +643,7 @@ export class EegEngine {
   private blink: BlinkGenerator | null = null;
   private eyeOpening: EyeOpeningGenerator | null = null;
   private saccade: SaccadeGenerator | null = null;
+  private flutter: EyeFlutterGenerator | null = null;
   private emgL: EmgGenerator | null = null;
   private emgR: EmgGenerator | null = null;
   private emgF: EmgGenerator | null = null;
@@ -682,8 +705,8 @@ export class EegEngine {
   private prevSaccadeV = 0;
   private prevPopV = 0;
   // Each artifact's fields (see ArtifactMark), built once from the leadfield.
-  private markField: Record<'ocular' | 'gaze' | 'heart' | 'sweat' | 'defects', MarkFields> & { pop: MarkFields[] } =
-    { ocular: [], gaze: [], heart: [], sweat: [], defects: [], pop: [] };
+  private markField: Record<'ocular' | 'gaze' | 'lrsL' | 'lrsR' | 'heart' | 'sweat' | 'defects', MarkFields> & { pop: MarkFields[] } =
+    { ocular: [], gaze: [], lrsL: [], lrsR: [], heart: [], sweat: [], defects: [], pop: [] };
   private hasDefects = false;
   // null, not undefined: `undefined` is a value the region list can take (all four).
   private muscleFieldRegions: unknown = null;
@@ -691,6 +714,7 @@ export class EegEngine {
   private lineCoupling: Record<string, number> = {};
   private lineFieldAmp = NaN;
   private lineFieldCache: MarkFields = [];
+  private lineFieldDefects = false;
   // The fields a source's own marks use (`PatternMarkEvent.where`), built when first needed.
   private sourceField: (MarkFields | undefined)[] = [];
   private toggleField = new Map<string, MarkFields>();
@@ -706,10 +730,23 @@ export class EegEngine {
   private focalPlacement: FocalPlacement = 'under';
   private seizureMuscle = false;
   private kcSpindle: KcSpindle = 'sometimes';
+  private sixHzForm: SixHzForm = 'fold';
+  private pos146Sides: Pos146Sides = 'shifting';
+  private breachSite: BreachSite = 'C4';
+  // The breach rhythm's high-pass state at the electrode it is applied to (see BREACH_*).
+  private breachAt = -1;
+  private breachHp = 0;
+  private breachPrev = NaN;
+  private breachA = 0;
+  // Leadfield columns of sources outside the skull: the artifact block and the
+  // extracranial pattern sources (PatternSourceDescriptor.extracranial).
+  private extracranialIdx: number[] = [];
   private ictalDelay: number | null = null;
 
+  // Whether setArtifactGates has been called yet (see there).
+  private gatesSet = false;
   private gates: ArtifactGates = {
-    blink: true, eyeOpening: false, saccade: true, emg: true, pop: true, defects: true,
+    blink: true, eyeOpening: false, saccade: true, flutter: false, emg: true, pop: true, defects: true,
     sweat: true, line: true, ecgScalp: true, movement: true,
   };
 
@@ -873,6 +910,12 @@ export class EegEngine {
 
     const patternBase = bgPatches.length + rhythmSpecs.length + artifactSpecs.length;
     this.patternIndex = PATTERN_SOURCES.map((_, i) => patternBase + i);
+    this.extracranialIdx = [
+      ...artifactSpecs.map((_, i) => bgPatches.length + rhythmSpecs.length + i),
+      ...PATTERN_SOURCES.flatMap((d, i) => (d.extracranial ? [patternBase + i] : [])),
+    ];
+    const breachRc = 1 / (2 * Math.PI * BREACH_CORNER_HZ);
+    this.breachA = breachRc / (breachRc + this.dt);
     this.patternGens = PATTERN_SOURCES.map(d => d.make(deriveSeed(seed, d.id), this.dt, seed));
 
     // ---- neural generators ----
@@ -1001,6 +1044,7 @@ export class EegEngine {
       this.blink = new BlinkGenerator(A.blink, this.dt, 16 * b);
       this.eyeOpening = new EyeOpeningGenerator(A.eyeOpening, this.dt, 5 * b);
       this.saccade = new SaccadeGenerator(A.saccade, this.dt, 25 * b);
+      this.flutter = new EyeFlutterGenerator(A.flutter, this.dt);
       this.emgL = new EmgGenerator(A.emgL, this.dt);
       this.emgR = new EmgGenerator(A.emgR, this.dt);
       this.emgF = new EmgGenerator(A.emgF, this.dt);
@@ -1025,6 +1069,8 @@ export class EegEngine {
       // The two eyes move together, so the ocular sources make one field.
       this.markField.ocular = [this.fieldOf([[ix.eyeL, d], [ix.eyeR, d], [ix.eyeMonoL, m], [ix.eyeMonoR, m]])];
       this.markField.gaze = [this.fieldOf([[ix.gaze, 1]])];
+      this.markField.lrsL = [this.fieldOf([[ix.lateralRectusL, LRS_PEAK_UV]])];
+      this.markField.lrsR = [this.fieldOf([[ix.lateralRectusR, LRS_PEAK_UV]])];
       // In microvolts at the R wave, where the generator's own output is 1.
       this.markField.heart = [this.fieldOf([[ix.heart, ECG_SCALP_UV]])];
       this.markField.sweat = [this.fieldOf([[ix.sweatFrontal, 1]])];
@@ -1033,7 +1079,11 @@ export class EegEngine {
     this.pdrField = ['pdrL', 'pdrR'].map(id => this.fieldOf([[allSpecs.findIndex(sp => sp.id === id), 1]]));
     const defective = (c: number) => this.defects[c] != null && this.defects[c].kind !== 'ok';
     this.hasDefects = this.electrodes.some((_, c) => defective(c));
-    this.markField.defects = [perElectrode(c => (defective(c) ? 1 : 0))];
+    // Each bad contact is its own part: their noise is independent, so on a row
+    // between two of them it adds rather than cancels (subject 3: T5 and A1, whose
+    // shared row T5-A1 is the worst on the page and was the one left unboxed when
+    // the two were one field, 2026-10-23 audit).
+    this.markField.defects = this.electrodes.flatMap((_, c) => (defective(c) ? [perElectrode(k => (k === c ? 1 : 0))] : []));
     // Mains is the same waveform on every electrode, each picking up a little more
     // or less of it; what reaches a row is the difference between its two.
     this.lineCoupling = perElectrode(c => this.chain?.lineCouplingAt(c) ?? 1);
@@ -1090,7 +1140,8 @@ export class EegEngine {
     const baseCtx = {
       t: tNow, dt: this.dt, state: this.patientState, vigilance: this.vigilance.value,
       postsForm: this.postsForm, focalPlacement: this.focalPlacement, ictalDelay: this.ictalDelay,
-      seizureMuscle: this.seizureMuscle, kcSpindle: this.kcSpindle,
+      seizureMuscle: this.seizureMuscle, kcSpindle: this.kcSpindle, sixHzForm: this.sixHzForm,
+      pos146Sides: this.pos146Sides,
     };
     const marking = this.marksOn;
     if (marking) this.groundTruth.marks.length = 0;
@@ -1220,6 +1271,10 @@ export class EegEngine {
       eyes(openV);
       const saccadeV = this.saccade!.next(g.saccade, gains.ocularRate) * 45;
       V[ix.gaze] += saccadeV;
+      V[ix.lateralRectusL] += this.saccade!.lrsL * LRS_PEAK_UV;
+      V[ix.lateralRectusR] += this.saccade!.lrsR * LRS_PEAK_UV;
+      // Eye flutter rides the blink's sources, a share of a blink's sweep per lid cycle.
+      eyes(this.flutter!.next(g.flutter) * BLINK_DRIVE_UV * FLUTTER_SHARE);
       // Which muscles are tense is a separate question from how hard they are
       // contracting, so region selection and severity are separate controls.
       const emgSev = p.emgSeverity ?? 1;
@@ -1254,6 +1309,12 @@ export class EegEngine {
         // A gaze step: the level is moving. Steps too small to see (under ~6 uV) are not marked.
         this.mark('eye-movement', g.saccade && Math.abs(saccadeV - this.prevSaccadeV) > 0.9, F.gaze, 0.25, { minGapS: 0.5 });
         this.prevSaccadeV = saccadeV;
+        // The lateral rectus spike that leads each movement, on its own side's rows.
+        const lrs = this.saccade!.lrsStarted;
+        if (lrs !== 0) this.groundTruth.marks.push({ id: 'eye-movement', label: 'LRS', fields: lrs < 0 ? F.lrsL : F.lrsR, inUv: true, dur: LRS_SPIKE_S });
+        // A run of eye flutter: one box over the whole run, from its first lid cycle, and
+        // the filter's recovery after it (FLUTTER_TAIL_S).
+        if (this.flutter!.runStarted > 0) this.groundTruth.marks.push({ id: 'eye-flutter', fields: F.ocular, dur: 0, span: this.flutter!.runStarted + FLUTTER_TAIL_S });
         this.mark('movement', g.movement && mv !== 0, F.ocular, 0.9);
         // Every beat, at the upstroke of its R wave.
         this.mark('ecg-artifact', g.ecgScalp && this.ecgRaw > 0.5, F.heart, 0.08, { inUv: true });
@@ -1281,6 +1342,23 @@ export class EegEngine {
       for (let s = 0; s < nS; s++) acc += G[row + s] * V[s];
       out[e] = acc;
     }
+
+    // Breach rhythm: the intracranial part of the potential at the electrode over the
+    // skull defect, amplified more the faster it is (constants and sources at BREACH_*).
+    const bc = this.activePatterns.has('breach') ? this.electrodes.indexOf(this.breachSite) : -1;
+    if (bc !== this.breachAt) { this.breachAt = bc; this.breachHp = 0; this.breachPrev = NaN; }
+    if (bc >= 0) {
+      let extra = 0;
+      const row = bc * nS;
+      for (const s of this.extracranialIdx) extra += G[row + s] * V[s];
+      const x = out[bc] - extra;
+      // A fresh start takes the current level as its own, so switching on is not a step.
+      if (Number.isNaN(this.breachPrev)) this.breachPrev = x;
+      this.breachHp = this.breachA * (this.breachHp + x - this.breachPrev);
+      this.breachPrev = x;
+      out[bc] += (BREACH_GAIN_LOW - 1) * x + (BREACH_GAIN_HIGH - BREACH_GAIN_LOW) * this.breachHp;
+    }
+    if (marking) this.markWhile('breach', bc >= 0, bc >= 0 ? this.markField.pop[bc] : NO_FIELDS);
 
     // Electrode pop bypasses the leadfield entirely: it has no anatomical source,
     // so it must stay confined to one channel and spatially discontinuous (§8,
@@ -1351,6 +1429,9 @@ export class EegEngine {
     this.focalPlacement = o?.focalPlacement ?? 'under';
     this.seizureMuscle = o?.seizureMuscle ?? false;
     this.kcSpindle = o?.kcSpindle ?? 'sometimes';
+    this.sixHzForm = o?.sixHzForm ?? 'fold';
+    this.pos146Sides = o?.pos146Sides ?? 'shifting';
+    this.breachSite = o?.breachSite ?? 'C4';
   }
 
   /**
@@ -1414,12 +1495,19 @@ export class EegEngine {
     return this.muscleFieldCache;
   }
 
-  /** Mains at each electrode, in microvolts, at the amplitude now set. */
+  /**
+   * Mains at each electrode, in microvolts, at the amplitude now set — with each bad
+   * contact's extra pickup while Bad Electrodes is on (chain.ts), so the box is on the
+   * electrode carrying the most of it. It used to leave that one out (2026-10-23 audit).
+   */
   private lineField(): MarkFields {
     const amp = this.aparams.lineAmpUv ?? this.subject.lineAmp;
-    if (amp !== this.lineFieldAmp) {
-      this.lineFieldCache = [Object.fromEntries(Object.entries(this.lineCoupling).map(([e, k]) => [e, k * amp]))];
+    const withDefects = this.gates.defects;
+    if (amp !== this.lineFieldAmp || withDefects !== this.lineFieldDefects) {
+      this.lineFieldCache = [Object.fromEntries(this.electrodes.map((e, c) =>
+        [e, this.lineCoupling[e] * amp * (withDefects && this.defects[c] ? defectLineMultiplier(this.defects[c]) : 1)]))];
       this.lineFieldAmp = amp;
+      this.lineFieldDefects = withDefects;
     }
     return this.lineFieldCache;
   }
@@ -1514,7 +1602,12 @@ export class EegEngine {
 
   setArtifactGates(gates: Partial<ArtifactGates>) {
     const hadDefects = this.gates.defects;
-    const hadPop = this.gates.pop, hadMovement = this.gates.movement;
+    // The gates start all on, so the first call is when a toggle is really switched on:
+    // an engine made with Electrode Pop already on (renderTrace, the audits) otherwise
+    // waited up to a minute for its first pop (2026-10-23 audit).
+    const first = !this.gatesSet;
+    this.gatesSet = true;
+    const hadPop = this.gates.pop && !first, hadMovement = this.gates.movement && !first;
     Object.assign(this.gates, gates);
     // Rare-event artifacts run their renewal schedule underneath a disabled toggle, so
     // on the toggle-on edge the next event could be a minute away. Bring only that first

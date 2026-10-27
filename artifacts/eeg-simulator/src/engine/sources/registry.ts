@@ -16,7 +16,7 @@
  */
 
 import type { SourceSpec } from '../forward';
-import type { PatientState, IctalHemisphere, PostsForm, FocalPlacement, KcSpindle } from '../../utils/simTypes';
+import type { PatientState, IctalHemisphere, PostsForm, FocalPlacement, KcSpindle, SixHzForm, Pos146Sides } from '../../utils/simTypes';
 
 /**
  * The rhythm bands the engine's ongoing background is decomposed into. A pattern
@@ -68,6 +68,10 @@ export type SampleContext = {
   seizureMuscle: boolean;
   /** Whether a K-complex is followed by a spindle (`KcSpindle`). Only the K-complex generator consults this. */
   kcSpindle: KcSpindle;
+  /** Which form the 6 Hz phantom spike-and-wave takes (`SixHzForm`). Only its two generators consult this. */
+  sixHzForm: SixHzForm;
+  /** How the 14 & 6 bursts take the two sides (`Pos146Sides`). Only their two generators consult this. */
+  pos146Sides: Pos146Sides;
 };
 
 export interface PatternGenerator {
@@ -154,6 +158,11 @@ export type PatternSourceDescriptor = {
    * toggle (the others carry nothing), so the pattern gets one box per chain block.
    */
   openBox?: { label?: string; where?: MarkWhere };
+  /**
+   * The source lies outside the skull (muscle, the eyes): a skull defect does not
+   * change how it reaches the scalp, so the breach rhythm leaves it alone (engine.ts).
+   */
+  extracranial?: boolean;
   /** Geometry for the leadfield column (build with `sourceUnder`). */
   spec: SourceSpec;
   /** Factory: build the stateful generator. `seed` is already derived from `id`. */

@@ -26,17 +26,18 @@
  */
 
 import { sourceUnder, synchronousPatches } from '../forward';
-import { GENERALIZED_POSTERIOR, MU_FIELD, OCCIPITAL, POSTERIOR_TEMPORAL } from './fields';
-import { Gaussian } from '../rng';
+import {
+  GENERALIZED_POSTERIOR, MU_FIELD, OCCIPITAL, POSTERIOR_TEMPORAL, mirrored,
+} from './fields';
+import { Gaussian, deriveSeed } from '../rng';
 import { TransientSource } from './transient';
 import {
-  gaussian, arciformSignal, multiToneSignal,
+  gaussian, arciformSignal, arcPeakTime,
   MU_TONES, MU_TONE_NORM,
-  RMTD_TONES, RMTD_TONE_NORM,
-  PSWY_TONES, PSWY_TONE_NORM,
-  POS14_TONES, POS6_TONES, POS_BURST_TONE_NORM,
+  POS_BURST_TONE_NORM,
 } from './morphology';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
+import type { PatientState, SixHzForm, Pos146Sides } from '../../utils/simTypes';
 
 /** Per-event multiplicative/additive jitter, matching the legacy `jitter(base, frac)`. */
 const jit = (g: Gaussian, base: number, frac: number): number =>
@@ -152,8 +153,16 @@ const muR = muSide('mu-r', MU_FIELD.right);
 //
 // 70 uV nominal, so bursts peak at roughly 60-100 uV at T3: the foot of the
 // 60-200 uV range given for wickets (AES atlas, NBK390343, as quoted by search).
+//
+// Singles (2026-10-27). Wickets come "as single discharges or runs" (SCORE normal
+// variants study, Clin Neurophysiol Pract 2022, PMC9294211); "short runs of 6-11Hz
+// spikes, sometimes single spike" (eegpedia). Until then every event was a run. A
+// share of events is now one arch at the run's frequency: the same waveform,
+// windowed to one cycle about its pointed peak. No source gives the share; one in
+// three is a design that puts a single on most pages that carry wickets.
 // ---------------------------------------------------------------------------
-type WicketEvent = { amp: number; dur: number; freq: number };
+const WICKET_SINGLE_SHARE = 1 / 3;
+type WicketEvent = { amp: number; dur: number; freq: number; single: boolean };
 
 function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
   return {
@@ -169,10 +178,22 @@ function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
       const ts = new TransientSource<WicketEvent>(seed, dt, {
         schedule: { kind: 'periodic', period: 3.5, jitterFrac: 0.43 }, // legacy 2-5 s
         duration: 1.5,
-        onset: (g) => ({ amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3), freq: g.range(6, 11) }),
-        // The burst is the envelope's [0, dur]: 14% of its peak at either end.
-        mark: (e) => ({ span: e.dur }),
+        onset: (g) => ({
+          amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3), freq: g.range(6, 11),
+          single: g.uniform() < WICKET_SINGLE_SHARE,
+        }),
+        // A run is the envelope's [0, dur], 14% of its peak at either end: a box. A
+        // single is one transient: an arrow over its one cycle.
+        mark: (e) => (e.single
+          ? { at: arcPeakTime(e.freq) - 0.5 / e.freq, dur: 1 / e.freq }
+          : { span: e.dur }),
         morphology: (t, e) => {
+          if (e.single) {
+            const u = (t - arcPeakTime(e.freq)) * e.freq;
+            if (Math.abs(u) >= 0.5) return 0;
+            const win = 0.5 * (1 + Math.cos(2 * Math.PI * u));
+            return 70 * e.amp * win * arciformSignal(t, [{ f: e.freq, a: 1 }], 1);
+          }
           const env = gaussian(t, e.dur / 2, e.dur / 4);
           // Arches pointed on the negative side (see arciformSignal).
           return 70 * e.amp * env * arciformSignal(t, [{ f: e.freq, a: 1 }], 1);
@@ -187,33 +208,75 @@ const wicketL = wicketSide('wicket-l', 'T3');
 const wicketR = wicketSide('wicket-r', 'T4');
 
 // ---------------------------------------------------------------------------
-// Rhythmic mid-temporal theta of drowsiness (RMTD / "psychomotor variant") —
-// ~4 s runs of ~6 Hz theta over T3/T4 during drowsiness. The diagnostic
-// feature is that it is MONOMORPHIC (a near-fixed frequency), unlike the
-// polymorphic spread of ordinary background theta — that is why it draws
-// from `RMTD_TONES`, a tight cluster around 6 Hz, rather than the broad
-// `THETA_TONES`. Independent left/right sources for the same reason as
-// wicket: real bitemporal activity does not fire both sides in lock-step.
+// Rhythmic mid-temporal theta of drowsiness (RMTD; "rhythmic temporal theta of
+// drowsiness" in SCORE; formerly "psychomotor variant") — trains of theta at ONE
+// frequency over the mid-temporal region. What tells it from a seizure is that it
+// does not evolve: eegpedia, "does not change in frequency or form, in contrast to an
+// epileptic discharge"; learningeeg, "the lack of evolution".
+//
+// Sources (2026-10-27): eegpedia — "Trains of rhythmic theta waves 5-7Hz", "Duration
+// 5-10sec", "Located in midtemporal region", "Often unilateral", "May be
+// bisynchronous, with shifting asymmetry", "Present in relaxed wakefulness and
+// drowsiness". SCORE normal variants study (PMC9294211) — 5-7 Hz trains, "mostly seen
+// during drowsiness and light sleep, even though it can be occasionally seen in awake
+// patients", maximum "usually mid-temporal but may sometimes spread to the
+// parasagittal or occipito-temporal regions", "arch-shaped and often notched".
+// learningeeg — "sharply contoured", "usually a few seconds"; its figure's three
+// boxed runs are about 2 s each at ~6 Hz on the left temporal chain (measured), and
+// eegpedia's right temporal figure runs the whole 10 s page.
+//
+// So: each train draws one frequency in 5-7 Hz and a length of 2-10 s, on a flat-topped
+// envelope; half the trains are notched (a small third harmonic, which dents the broad
+// half of each wave — "frequently notched by faster waves", IFCN glossary); the field is
+// T3 with shares at T5 and F7, the temporal chain learningeeg's figure has it on (F7-T3,
+// T3-T5, and T5-O1 in its first run); the two sides are independent sources, so trains
+// come one-sided or on both sides out of step. The mid-temporal regional field of the
+// temporal seizure, tried first, carries C3 at 0.35 and put F3-C3 and C3-P3 at 0.43-0.56
+// of the temporal rows: more than SCORE's "may sometimes spread to the parasagittal". A
+// third harmonic of 0.3-0.4 split each broad half in two, which read as double the
+// frequency; 0.12-0.2 dents it.
+//
+// Until 2026-10-27 every train summed three tones at 5.7, 6.0 and 6.3 Hz — which beat,
+// so the "one frequency" drifted within a train — under a Gaussian 4 s window, with a
+// smooth sinusoidal shape, in drowsiness only, on one patch under T3/T4.
+// The amplitude (65 uV at the source) has no source; it is kept from before.
 // ---------------------------------------------------------------------------
-type RmtdEvent = { amp: number };
+const RMTD_FREQ_HZ: [number, number] = [5, 7];
+const RMTD_DUR_S: [number, number] = [2, 10];
+const RMTD_EDGE_S = 0.4;
+type RmtdEvent = { amp: number; dur: number; freq: number; notch: number };
 
-function rmtdSide(id: string, electrode: string): PatternSourceDescriptor {
+// One arch per cycle, pointed on the negative side (as arciformSignal), with an
+// optional small third harmonic that dents the broad half of the wave.
+const RMTD_ZERO_PHASE = Math.acos((-1 + Math.sqrt(1.98)) / 1.4);
+function rmtdWave(t: number, f: number, notch: number): number {
+  const th = 2 * Math.PI * f * t + RMTD_ZERO_PHASE;
+  return -(Math.cos(th) + 0.35 * Math.cos(2 * th) - notch * Math.cos(3 * th)) / 1.35;
+}
+
+function rmtdSide(id: string, field: Record<string, number>): PatternSourceDescriptor {
   return {
     id,
     toggles: ['rmtd'],
-    states: ['drowsy'],
-    spec: sourceUnder(id, [electrode], { extent: 0.35 }),
+    states: ['awake', 'drowsy', 'n1', 'n2'],
+    spec: synchronousPatches(id, field, { extent: 0.3 }),
     make(seed, dt) {
       const ts = new TransientSource<RmtdEvent>(seed, dt, {
-        schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 }, // legacy 3-6 s
-        duration: 4.0,
-        onset: (g) => ({ amp: jit(g, 1, 0.1) }),
-        // The whole event: its envelope is still 27% of the peak at either end, which
-        // at 65 uV is visible, so a box over the middle alone left its edges out.
-        mark: () => ({ span: 4 }),
+        // The gap after each train; the event itself lasts its drawn length.
+        schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 },
+        duration: RMTD_DUR_S[1],
+        onset: (g) => ({
+          amp: jit(g, 1, 0.1),
+          dur: g.range(...RMTD_DUR_S),
+          freq: g.range(...RMTD_FREQ_HZ),
+          notch: g.uniform() < 0.5 ? g.range(0.12, 0.2) : 0,
+        }),
+        mark: (e) => ({ span: e.dur }),
         morphology: (t, e) => {
-          const env = gaussian(t, 2, 1.2);
-          return 65 * e.amp * env * multiToneSignal(t, RMTD_TONES, RMTD_TONE_NORM);
+          if (t >= e.dur) return 0;
+          const edge = Math.min(1, t / RMTD_EDGE_S, (e.dur - t) / RMTD_EDGE_S);
+          const env = 0.5 - 0.5 * Math.cos(Math.PI * edge);
+          return 65 * e.amp * env * rmtdWave(t, e.freq, e.notch);
         },
       });
       return asGenerator(ts);
@@ -221,8 +284,9 @@ function rmtdSide(id: string, electrode: string): PatternSourceDescriptor {
   };
 }
 
-const rmtdL = rmtdSide('rmtd-l', 'T3');
-const rmtdR = rmtdSide('rmtd-r', 'T4');
+const RMTD_FIELD: Record<string, number> = { T3: 1, T5: 0.4, F7: 0.3 };
+const rmtdL = rmtdSide('rmtd-l', RMTD_FIELD);
+const rmtdR = rmtdSide('rmtd-r', mirrored(RMTD_FIELD));
 
 // ---------------------------------------------------------------------------
 // Lambda waves — surface-positive occipito-parietal sharp transients evoked
@@ -263,39 +327,100 @@ const lambda: PatternSourceDescriptor = {
 };
 
 // ---------------------------------------------------------------------------
-// Posterior slow waves of youth (PSWY) — high-amplitude 2.5-4.5 Hz waves
-// admixed with the posterior alpha rhythm, a benign finding most common in
-// children and young adults, present only while genuinely awake (it rides on
-// the alpha rhythm, which drowsiness/sleep abolish). `PSWY_TONES` sits above
-// the delta band deliberately (see morphology.ts) so this doesn't read as
-// pathological slowing. Legacy's `PSWY_FIELD` table peaked at O1/O2 (1.0) and
-// fell off at P3/P4 (0.67): an occipital maximum with a parietal share, built
-// here as patches under those four electrodes. The single patch at their mean
-// position that this used to be sat on the midline between them, so Pz read as
-// large as O1/O2 and the biggest row on the page was Cz-Pz.
+// Posterior slow waves of youth (PSWY), and the slow-fused transient built on them.
+//
+// PSWY. IFCN glossary (Kane et al. 2017): "Isolated slow waves intermixed with the
+// posterior dominant rhythm in young people (typically 4–25 years of age). See
+// slow-fused transients." learningeeg (Pediatric): "rather high amplitude, spike-like
+// waveforms that exist within the PDR and similarly attenuate with eye opening; they
+// are often but not always bilateral, and can predominate on one side or the other",
+// and the slow wave "is surrounded by the PDR without really interrupting it". So each
+// event is ONE slow wave, 2.5-4.5 Hz in its own length (a wave of 0.22-0.4 s), with
+// the alpha rhythm carrying on round it (nothing here gates the PDR), on the
+// occipital electrodes with a parietal share (the legacy PSWY_FIELD table: O1/O2 1,
+// P3/P4 0.67, built as patches). Two sources, one per side, on ONE shared schedule:
+// each wave is bilateral (six in ten, the second side 0.6-1 of the first) or on one
+// side only; the shares are a design for "often but not always bilateral". Surface-
+// negative, which no source states; it is the polarity the slow-fused transient
+// needs to pass for a spike-and-slow-wave, which is what the glossary says it does.
+// The size (80 uV at O1, about twice the PDR's peak there) is a design for "rather high
+// amplitude". Until 2026-10-27 each event was a 2 s burst of four summed tones
+// (2.7-4.3 Hz): a run of slow activity, not an isolated wave.
+//
+// Slow-fused transient (its own toggle, 2026-10-27). IFCN glossary: "A sharply
+// contoured component of the normal posterior dominant rhythm precedes a posterior
+// slow wave of youth, giving the false impression of a spike-and-slow-wave." SCORE
+// normal variants study (PMC9294211): "by coincidence, a non-epileptiform sharp
+// transient precedes a posterior slow-wave of youth", "Browsing the entire recording
+// the two phenomena (sharp transients and slow-wave) are usually observed several
+// times, dissociated from each other"; median age 16. So the toggle draws three
+// kinds of event on the PSWY field: the fused pair (a sharply contoured wave of alpha
+// length, ~90 ms, peaking 70 ms before the slow wave starts, at 0.6 of its size), the
+// slow wave alone, and the sharp wave alone — four, three and three in ten, a design.
+// The fused pair is boxed; a lone wave or sharp transient gets an arrow.
 // ---------------------------------------------------------------------------
-type PswyEvent = { dur: number };
+type YouthKind = 'fused' | 'wave' | 'sharp';
+type YouthEvent = { kind: YouthKind; len: number; amp: number; left: number; right: number };
+const PSWY_UV = 80;
+const SFT_SHARP_SIGMA_S = 0.018;
+const SFT_SHARP_LEAD_S = 0.07;
+const SFT_SHARP_SHARE = 0.6;
+const PSWY_LEFT = { O1: 1, P3: 0.67 };
 
-const pswy: PatternSourceDescriptor = {
-  id: 'pswy',
-  toggles: ['pswy'],
-  states: ['awake'],
-  spec: synchronousPatches('pswy', { O1: 1, O2: 1, P3: 0.5, P4: 0.5 }, { extent: 0.3 }),
-  make(seed, dt) {
-    const ts = new TransientSource<PswyEvent>(seed, dt, {
-      schedule: { kind: 'periodic', period: 3.75, jitterFrac: 0.33 }, // legacy 2.5-5.0 s
-      duration: 2.0,
-      onset: (g) => ({ dur: jit(g, 1.0, 0.3) }),
-      mark: (e) => ({ span: e.dur }),
-      morphology: (t, e) => {
-        if (t >= e.dur) return 0;
-        const env = gaussian(t, e.dur / 2, e.dur / 3);
-        return 95 * env * multiToneSignal(t, PSWY_TONES, PSWY_TONE_NORM);
-      },
-    });
-    return asGenerator(ts);
-  },
-};
+function youthSide(
+  id: string, toggle: string, side: 'left' | 'right', kinds: [YouthKind, number][],
+): PatternSourceDescriptor {
+  // The sharp wave sits SFT_SHARP_LEAD_S before the slow wave, so every event starts
+  // with room for it and the slow wave starts at the same offset whatever the kind.
+  const waveAt = SFT_SHARP_LEAD_S + 3 * SFT_SHARP_SIGMA_S;
+  const label: Record<YouthKind, string> = { fused: 'Slow-fused transient', wave: 'PSWY', sharp: 'Sharp transient' };
+  return {
+    id,
+    toggles: [toggle],
+    states: ['awake'],
+    spec: synchronousPatches(id, side === 'left' ? PSWY_LEFT : mirrored(PSWY_LEFT), { extent: 0.3 }),
+    make(_seed, dt, subjectSeed) {
+      const ts = new TransientSource<YouthEvent>(deriveSeed(subjectSeed ?? _seed, toggle), dt, {
+        schedule: { kind: 'renewal', meanInterval: 2.5 },
+        duration: 0.6,
+        onset: (g) => {
+          let u = g.uniform(), kind = kinds[kinds.length - 1][0];
+          for (const [k, share] of kinds) { if (u < share) { kind = k; break; } u -= share; }
+          const len = 1 / g.range(2.5, 4.5);
+          const amp = jit(g, 1, 0.2);
+          const w = g.uniform(), second = g.range(0.6, 1);
+          const [left, right] = w < 0.3 ? [1, second] : w < 0.6 ? [second, 1] : w < 0.8 ? [1, 0] : [0, 1];
+          return { kind, len, amp, left, right };
+        },
+        mark: (e) => {
+          if ((side === 'left' ? e.left : e.right) === 0) return null;
+          const from = e.kind === 'wave' ? waveAt : SFT_SHARP_LEAD_S;
+          const to = e.kind === 'sharp' ? waveAt : waveAt + e.len;
+          return e.kind === 'fused'
+            ? { label: label.fused, at: from, span: to - from }
+            : { label: label[e.kind], at: from, dur: to - from };
+        },
+        morphology: (t, e) => {
+          const k = side === 'left' ? e.left : e.right;
+          if (k === 0) return 0;
+          let v = 0;
+          if (e.kind !== 'sharp') {
+            const u = (t - waveAt) / e.len;
+            if (u > 0 && u < 1) v -= Math.sin(Math.PI * u) ** 2;
+          }
+          if (e.kind !== 'wave') v -= SFT_SHARP_SHARE * gaussian(t, SFT_SHARP_LEAD_S + SFT_SHARP_SIGMA_S, SFT_SHARP_SIGMA_S);
+          return PSWY_UV * e.amp * k * v;
+        },
+      });
+      return asGenerator(ts);
+    },
+  };
+}
+
+const pswyL = youthSide('pswy', 'pswy', 'left', [['wave', 1]]);
+const pswyR = youthSide('pswy-r', 'pswy', 'right', [['wave', 1]]);
+const sftL = youthSide('slow-fused', 'slow-fused', 'left', [['fused', 0.4], ['wave', 0.3], ['sharp', 0.3]]);
+const sftR = youthSide('slow-fused-r', 'slow-fused', 'right', [['fused', 0.4], ['wave', 0.3], ['sharp', 0.3]]);
 
 // ---------------------------------------------------------------------------
 // 6 Hz phantom spike-wave — brief runs of low-amplitude generalised spike-and-
@@ -314,35 +439,70 @@ const pswy: PatternSourceDescriptor = {
 // the spike LARGER than the wave, which is the opposite of phantom, on a field
 // that put 40 uV on Fz-Cz and nothing on the temporal chains. Now a 25 uV spike
 // on a 45 uV wave at the source, ~14 and ~25 uV at the occipital electrodes.
+//
+// WHAM (2026-10-27, the toggle's Form option; FOLD stays the default). eegpedia: "WHAM:
+// Waking, High amplitude spike (>45uV), Anterior, Male", "Associated with epilepsy
+// especially when high amplitude spikes, rate <5-6Hz and persists during deep sleep";
+// "FOLD: Female, Occipital, Low amplitude spike, Drowsy", "Not associated with
+// epilepsy". SCORE normal variants study (PMC9294211): "low-voltage-spikes (<25 µV) of
+// brief duration (<30 ms)", WHAM's "amplitude is mostly higher over the fronto-central
+// regions". eegpedia's WHAM figure (average reference): a brief run of two or three
+// complexes, largest at F3, Fz and F4, smaller at the frontopolar, anterior temporal and
+// central electrodes and least behind, the spike plain to see.
+// So WHAM takes a fronto-central field read off that figure (its rows could not be
+// traced reliably through the discharge, so the reading is the picture, not row
+// figures, and the weights are a design): Fz and F3/F4 largest, the frontopolar,
+// anterior temporal and central electrodes about half, a little at the parietal row,
+// nothing over the occiput or the posterior temporal electrodes. The generalized
+// frontal field the 3 Hz discharges use reaches O1/O2 at 0.35, which on the average
+// reference turned into an O1 row 0.79 the size of Fz's. A 70 uV spike on a 50 uV
+// wave, so the spike stands over 45 uV against the ear (the discharge peaks at ~72 uV on F3-A1,
+// 13 on P3-A1, 0 on O1-A1, measured); awake as well as drowsy.
+// Both forms draw a spike 6 ms in sigma (about 25 ms at the base), under SCORE's 30 ms;
+// FOLD's was 8 ms. FOLD's spike is now 20 uV at the source, so with its +/-20% per-run
+// size it stays under SCORE's 25 uV (it was 25, reaching 30). One source per form, both
+// on the toggle; the one the option does not name stays silent.
 // ---------------------------------------------------------------------------
 type SixHzEvent = { amp: number; dur: number };
 
-const sixHzSw: PatternSourceDescriptor = {
-  id: '6hz-sw',
-  toggles: ['6hz-sw'],
-  states: ['drowsy', 'n1'],
-  spec: synchronousPatches('6hz-sw', GENERALIZED_POSTERIOR, { extent: 0.3 }),
-  make(seed, dt) {
-    const ts = new TransientSource<SixHzEvent>(seed, dt, {
-      schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 }, // legacy 3-6 s
-      duration: 2.0, // upper bound on the per-burst length drawn below
-      // 1-2 s, as a whole number of 6 Hz cycles (6 to 12) so the run ends between
-      // complexes rather than being cut off part-way through a wave.
-      onset: (g) => ({ amp: jit(g, 1, 0.2), dur: Math.round(g.range(6, 12)) / 6 }),
-      mark: (e) => ({ span: e.dur }),
-      morphology: (t, e) => {
-        if (t >= e.dur) return 0;
-        const cyc = t % (1 / 6);
-        // Surface-negative spike and a wave of the same polarity — the convention
-        // of spikeSlowWave (see morphology.ts), of which this is the 6 Hz case.
-        const spike = -25 * e.amp * gaussian(cyc, 0.02, 0.008);
-        const wave = -45 * e.amp * gaussian(cyc, 0.1, 0.035);
-        return spike + wave;
-      },
-    });
-    return asGenerator(ts);
-  },
+function sixHzForm(
+  id: string, form: SixHzForm, field: Record<string, number>, spikeUv: number, waveUv: number,
+  states: PatientState[],
+): PatternSourceDescriptor {
+  return {
+    id,
+    toggles: ['6hz-sw'],
+    states,
+    spec: synchronousPatches(id, field, { extent: 0.3 }),
+    make(seed, dt) {
+      const ts = new TransientSource<SixHzEvent>(seed, dt, {
+        schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 }, // legacy 3-6 s
+        duration: 2.0, // upper bound on the per-burst length drawn below
+        // 1-2 s, as a whole number of 6 Hz cycles (6 to 12) so the run ends between
+        // complexes rather than being cut off part-way through a wave.
+        onset: (g) => ({ amp: jit(g, 1, 0.2), dur: Math.round(g.range(6, 12)) / 6 }),
+        mark: (e) => ({ span: e.dur }),
+        morphology: (t, e) => {
+          if (t >= e.dur) return 0;
+          const cyc = t % (1 / 6);
+          // Surface-negative spike and a wave of the same polarity — the convention
+          // of spikeSlowWave (see morphology.ts), of which this is the 6 Hz case.
+          const spike = -spikeUv * e.amp * gaussian(cyc, 0.02, 0.006);
+          const wave = -waveUv * e.amp * gaussian(cyc, 0.1, 0.035);
+          return spike + wave;
+        },
+      });
+      return { next: (ctx) => ts.next(ctx.enabled && ctx.sixHzForm === form), takeMarks: () => ts.takeMarks() };
+    },
+  };
+}
+
+const sixHzFold = sixHzForm('6hz-sw', 'fold', GENERALIZED_POSTERIOR, 20, 45, ['drowsy', 'n1']);
+const WHAM_FIELD: Record<string, number> = {
+  Fz: 1, F3: 0.85, F4: 0.85, Fp1: 0.55, Fp2: 0.55, F7: 0.5, F8: 0.5, Cz: 0.55, C3: 0.4, C4: 0.4,
+  T3: 0.15, T4: 0.15, Pz: 0.2, P3: 0.15, P4: 0.15,
 };
+const sixHzWham = sixHzForm('6hz-sw-wham', 'wham', WHAM_FIELD, 70, 50, ['awake', 'drowsy', 'n1']);
 
 // ---------------------------------------------------------------------------
 // 14 & 6 Hz positive bursts — arch-shaped positive bursts over the posterior
@@ -359,40 +519,80 @@ const sixHzSw: PatternSourceDescriptor = {
 // Amplitudes are the legacy 28 and 18 uV scaled by 1.6, for bursts of ~35 uV at
 // T5/T6: 20-60 uV is the usual range and they rarely exceed 75 (EEG Atlas and
 // StatPearls NBK555899, as quoted by search).
+//
+// Sides and length (2026-10-27). eegpedia: "Unilateral (R>L) or bilateral asynchronous
+// or synchronous", "Duration: 0.5-1 second". SCORE normal variants study
+// (PMC9294211): "0.5–1 s bursts", "unilaterally or bilaterally, but mainly with
+// shifting predominance in the same patient". learningeeg: "bilateral and
+// synchronous", "1-2 second bursts". The sources disagree on the sides; the two that
+// give a distribution both have one-sided bursts, so the bursts are now a mix: one
+// source per side on ONE shared schedule (both built from the same seed, so they draw
+// the same events), each burst bilateral (half), right-only (three in ten) or
+// left-only (two in ten) — R>L as eegpedia has it, the shares a design. Length 0.5-1 s,
+// eegpedia's and SCORE's range, under a flat-topped envelope. learningeeg's picture is
+// the other choice under the toggle (Sides, `Pos146Sides`, owner 2026-10-27): every
+// burst on both sides together, 1-2 s. The choice is read as each burst begins, and the
+// same draws are taken in both, so the two sides stay on one schedule either way. Each component is ONE frequency per burst (13-17 Hz and 5-7 Hz,
+// eegpedia's ranges): three summed tones beat within a burst, so no two teeth of the
+// comb were the same width. Until then: one bilateral source, a Gaussian 1 s window.
 // ---------------------------------------------------------------------------
-type Pos1406Event = { ratio: number };
+type PosSide = 'both' | 'right' | 'left';
+type Pos1406Event = { ratio: number; dur: number; f14: number; f6: number; side: PosSide };
+const POS_DUR_S: Record<Pos146Sides, [number, number]> = { shifting: [0.5, 1], bilateral: [1, 2] };
+const POS_EDGE_S = 0.12;
 
-const pos1406: PatternSourceDescriptor = {
-  id: '14-6-pos',
-  toggles: ['14-6-pos'],
-  // 14-&-6 Hz positive bursts ("ctenoids") are a benign phenomenon of drowsiness
-  // and light sleep in older children/adolescents; they do not occur in relaxed
-  // wakefulness. State-gate them like the other drowsy benign variants (wicket,
-  // rmtd) rather than letting the toggle fire while awake.
-  states: ['drowsy', 'n1', 'n2'],
-  spec: synchronousPatches('14-6-pos', POSTERIOR_TEMPORAL, { extent: 0.3 }),
-  make(seed, dt) {
-    const ts = new TransientSource<Pos1406Event>(seed, dt, {
-      schedule: { kind: 'periodic', period: 6, jitterFrac: 0.33 }, // legacy 4-8 s
-      duration: 1.0,
-      onset: (g) => ({ ratio: jit(g, 0.6, 0.4) }),
-      // The whole event (its envelope is 14% of the peak at either end).
-      mark: () => ({ span: 1 }),
-      morphology: (t, e) => {
-        const env = gaussian(t, 0.5, 0.25);
-        // 14 & 6 Hz POSITIVE bursts are named for their polarity: each arch is
-        // pointed on its surface-positive side, which the canvas draws DOWN. That
-        // is the arch itself now (arciformSignal, sharp = +1). It used to be a
-        // tilted wave with its positive half scaled up by 1.6 to force a polarity,
-        // which also left every burst standing on an offset.
-        const c14 = 45 * e.ratio * arciformSignal(t, POS14_TONES, POS_BURST_TONE_NORM, 0, 1);
-        const c6 = 29 * (1 - e.ratio) * arciformSignal(t, POS6_TONES, POS_BURST_TONE_NORM, 0, 1);
-        return env * (c14 + c6);
-      },
-    });
-    return asGenerator(ts);
-  },
-};
+function pos1406Side(id: string, side: 'left' | 'right', field: Record<string, number>): PatternSourceDescriptor {
+  const drawn = (e: Pos1406Event) => e.side === 'both' || e.side === side;
+  return {
+    id,
+    toggles: ['14-6-pos'],
+    // 14-&-6 Hz positive bursts ("ctenoids") are a benign phenomenon of drowsiness
+    // and light sleep in older children/adolescents; they do not occur in relaxed
+    // wakefulness. State-gate them like the other drowsy benign variants (wicket,
+    // rmtd) rather than letting the toggle fire while awake.
+    states: ['drowsy', 'n1', 'n2'],
+    spec: synchronousPatches(id, field, { extent: 0.3 }),
+    make(_seed, dt, subjectSeed) {
+      let sides: Pos146Sides = 'shifting';
+      const ts = new TransientSource<Pos1406Event>(deriveSeed(subjectSeed ?? _seed, '14-6-pos'), dt, {
+        // The gap after each event; an event holds the longest burst either choice draws
+        // (2 s), so a 3-7 s gap keeps onsets 5-9 s apart, as they were.
+        schedule: { kind: 'periodic', period: 5, jitterFrac: 0.4 },
+        duration: POS_DUR_S.bilateral[1],
+        onset: (g) => {
+          const u = g.uniform();
+          return {
+            ratio: jit(g, 0.6, 0.4), dur: g.range(...POS_DUR_S[sides]), f14: g.range(13, 17), f6: g.range(5, 7),
+            side: sides === 'bilateral' || u < 0.5 ? 'both' : u < 0.8 ? 'right' : 'left',
+          };
+        },
+        mark: (e) => (drawn(e) ? { span: e.dur } : null),
+        morphology: (t, e) => {
+          if (!drawn(e) || t >= e.dur) return 0;
+          const edge = Math.min(1, t / POS_EDGE_S, (e.dur - t) / POS_EDGE_S);
+          const env = 0.5 - 0.5 * Math.cos(Math.PI * edge);
+          // 14 & 6 Hz POSITIVE bursts are named for their polarity: each arch is
+          // pointed on its surface-positive side, which the canvas draws DOWN. That
+          // is the arch itself now (arciformSignal, sharp = +1). It used to be a
+          // tilted wave with its positive half scaled up by 1.6 to force a polarity,
+          // which also left every burst standing on an offset.
+          const c14 = 45 * e.ratio * arciformSignal(t, [{ f: e.f14, a: 1 }], POS_BURST_TONE_NORM, 0, 1);
+          const c6 = 29 * (1 - e.ratio) * arciformSignal(t, [{ f: e.f6, a: 1 }], POS_BURST_TONE_NORM, 0, 1);
+          return env * (c14 + c6);
+        },
+      });
+      return {
+        next: (ctx) => { sides = ctx.pos146Sides; return ts.next(ctx.enabled); },
+        takeMarks: () => ts.takeMarks(),
+      };
+    },
+  };
+}
+
+const POS_LEFT: Record<string, number> = Object.fromEntries(
+  Object.entries(POSTERIOR_TEMPORAL).filter(([e]) => Number(e.slice(1)) % 2 === 1));
+const pos1406L = pos1406Side('14-6-pos', 'left', POS_LEFT);
+const pos1406R = pos1406Side('14-6-pos-r', 'right', mirrored(POS_LEFT));
 
 // ---------------------------------------------------------------------------
 // Benign epileptiform transients of sleep (BETS / "small sharp spikes") —
@@ -403,8 +603,28 @@ const pos1406: PatternSourceDescriptor = {
 // seeds) produce the same alternating, unsynchronised bitemporal pattern
 // without needing that bookkeeping — whichever side's independent timer
 // fires next IS the alternation.
+//
+// Shape (2026-10-27). SCORE normal variants study (PMC9294211): "a mono- or diphasic
+// spike with a steep descending arm. If present, the following slow wave is not
+// prominent and of low amplitude", "drowsiness/light sleep (N1, N2)". eegpedia:
+// "Amplitude of <50 microV and duration of <50 ms", "Usually monophasic, occasionally
+// diphasic", "Occasionally followed by a slow wave, however do not disturb the
+// background". eegpedia's figure (average reference): a small pointed surface-negative
+// spike at A2/T4 that rises quickly and falls more steeply still, a shallow dip after.
+// It was an instant step and an exponential decay (-40 exp(-60 t)): the shape of an
+// electrode pop, with no rising limb at all, and its base filled 48 ms of the 50.
+// Now the spike rises over a 7 ms-sigma half-Gaussian and falls over a 4 ms one
+// (about 30 ms at the base); a quarter are diphasic (an opposite phase a third of the
+// spike's size, just after it); a third carry a slow wave of the spike's polarity at
+// 0.08 of its size, peaking 0.12 s after it, as the other spike-wave complexes
+// here do. The IFCN glossary has small sharp spikes "often followed by a small theta
+// wave", eegpedia "occasionally", SCORE "if present"; the shares are a design between
+// them, no source gives a figure.
 // ---------------------------------------------------------------------------
-type BetsEvent = { amp: number; decay: number };
+const BETS_RISE_S = 0.007;
+const BETS_FALL_S = 0.004;
+const BETS_PEAK_S = 3 * BETS_RISE_S;
+type BetsEvent = { amp: number; diphasic: boolean; slow: boolean };
 
 function betsSide(id: string, electrode: string): PatternSourceDescriptor {
   return {
@@ -419,14 +639,18 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
     make(seed, dt) {
       const ts = new TransientSource<BetsEvent>(seed, dt, {
         schedule: { kind: 'periodic', period: 6.5, jitterFrac: 0.38 }, // legacy 4-9 s
-        duration: 0.05,
-        onset: (g) => ({ amp: jit(g, 1, 0.3), decay: jit(g, 60, 0.2) }),
-        // It is largest at its onset, so the arrow's window starts just before it.
-        mark: () => ({ at: -0.02, dur: 0.08 }),
-        // Surface-negative, like the other sharp transients — small sharp spikes
-        // have a steep negative ascending limb. Was positive, which under the
-        // corrected negative-up canvas would point them the wrong way.
-        morphology: (t, e) => -40 * e.amp * Math.exp(-t * e.decay),
+        duration: 0.35,
+        onset: (g) => ({ amp: jit(g, 1, 0.3), diphasic: g.uniform() < 0.25, slow: g.uniform() < 1 / 3 }),
+        // The arrow's window is the spike and the phase after it.
+        mark: () => ({ dur: BETS_PEAK_S + 0.04 }),
+        // Surface-negative, like the other sharp transients (renders UP).
+        morphology: (t, e) => {
+          const sigma = t < BETS_PEAK_S ? BETS_RISE_S : BETS_FALL_S;
+          let v = -gaussian(t, BETS_PEAK_S, sigma);
+          if (e.diphasic) v += 0.33 * gaussian(t, BETS_PEAK_S + 0.016, 0.006);
+          if (e.slow) v -= 0.08 * gaussian(t, BETS_PEAK_S + 0.12, 0.05);
+          return 40 * e.amp * v;
+        },
       });
       return asGenerator(ts);
     },
@@ -435,6 +659,45 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
 
 const betsL = betsSide('bets-l', 'T3');
 const betsR = betsSide('bets-r', 'T4');
+
+// ---------------------------------------------------------------------------
+// Breach rhythm — not a generator but a change in how the brain's own activity
+// reaches one electrode. The skull attenuates and smears the cortical field on its
+// way to the scalp, fast and focal activity most. Over a skull defect (craniotomy,
+// burr hole, fracture) that filter is gone, so the activity there is larger, faster
+// and sharper than at the homologous electrode, and stops at the defect's margin.
+//
+// Sources (2026-10-27): eegpedia — "High voltage fast activity in the region of skull
+// defect", "The skull is a high frequency and high voltage filter", "Mostly in beta
+// range", "Spiky and sharp appearance", "Abruptly diminish beyond the margins of the
+// defect", "Better identified with bipolar montage", "a sign of bone abnormality, not
+// an EEG abnormality"; its figure is a right central defect (double banana) on which
+// F4-C4 and C4-P4 run 1.8x and 2.9x their left twins peak to peak (measured) while
+// Fp2-F4 and P4-O2 are unchanged: one electrode, C4. SCORE normal variants study
+// (PMC9294211): "focal, asymmetric high amplitude beta activity", its figure at F8.
+// EEG Atlas online: "increased amplitude of high and low frequencies". learningeeg: mu
+// "can be high amplitude and sharp, especially with breach rhythm". A 2020s series of
+// 117 EEGs over skull defects (AES abstract, "Characterization of breach rhythm on
+// scalp EEG"), rated on amplitude "≥50% greater than the contralateral homologous
+// site", "increased local faster frequencies (beta)" and "local sharp or spiky
+// morphology": 89%, 60% and 72% of those with breach.
+//
+// The engine does the work (engine.ts, BREACH_*): at the electrode over the defect,
+// the intracranial part of the potential is multiplied by 1.8 at the slow end, rising
+// through a first-order high-pass at 6 Hz to 3 for alpha and beta (the IFCN glossary:
+// "usually by a factor of less than 3"). Extracranial
+// sources keep their size. The electrode is the Site option (`BreachSite`); the box is
+// the engine's, on that electrode's rows, for as long as the toggle is on. This
+// descriptor gives the toggle its place in the registry and draws nothing.
+// ---------------------------------------------------------------------------
+const breach: PatternSourceDescriptor = {
+  id: 'breach',
+  toggles: ['breach'],
+  spec: sourceUnder('breach', ['C4'], { extent: 0.3 }),
+  make() {
+    return { next: () => 0 };
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Eyes open — the posterior dominant rhythm (alpha) is a resting, eyes-closed
@@ -519,10 +782,12 @@ export const VARIANT_SOURCES: PatternSourceDescriptor[] = [
   wicketL, wicketR,
   rmtdL, rmtdR,
   lambda,
-  pswy,
-  sixHzSw,
-  pos1406,
+  pswyL, pswyR,
+  sftL, sftR,
+  sixHzFold, sixHzWham,
+  pos1406L, pos1406R,
   betsL, betsR,
   eyesOpen,
   midlineTheta,
+  breach,
 ];

@@ -81,6 +81,7 @@ export class SimulationSource {
       blink: ap.has('blink'),
       eyeOpening: ap.has('eye-opening'),
       saccade: ap.has('eye-movement'),
+      flutter: ap.has('eye-flutter'),
       emg: ap.has('muscle'),
       pop: ap.has('electrode-pop'),
       // Pre-existing bad electrodes. Gated like every other artifact, which

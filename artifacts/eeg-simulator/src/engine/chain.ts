@@ -117,6 +117,15 @@ export type ChannelDefect =
   /** Intermittent contact: drops in and out. */
   | { kind: 'intermittent'; meanGoodSec: number; meanBadSec: number };
 
+/**
+ * How much more (or less) mains a defective contact picks up than a good one: a
+ * high-impedance electrode more, a disconnected one almost none. `process` applies
+ * it; the annotation of mains reads it too, so its box follows the bad contact.
+ */
+export function defectLineMultiplier(d: ChannelDefect): number {
+  return d.kind === 'noisy' ? d.lineMultiplier : d.kind === 'flat' ? 0.2 : 1;
+}
+
 export type ChannelChainOptions = {
   /** Instrument noise floor RMS, microvolts (§9: ~0.5-1.5). */
   sensorNoiseRms?: number;
@@ -148,7 +157,9 @@ export class RecordingChain {
    * nothing unless a bad electrode was also present (measured 0.0 uV on all
    * eighteen double-banana rows, 2026-10-12). No source gives the spread a number;
    * 0.5-1.5 leaves neighbours differing by a visible fraction of the nominal
-   * amplitude, which is the "uniform thickening of every trace" the toggle names.
+   * amplitude: fuzz that varies from row to row, worst where a contact is poor, as
+   * the toggle's description says (it said "uniform thickening of every trace"
+   * until 2026-10-23, which no bipolar page can show).
    */
   private lineCoupling: Float64Array;
   private defects: ChannelDefect[];
@@ -225,15 +236,13 @@ export class RecordingChain {
       const d = this.defects[c];
       let v = x[c];
       let noiseMul = 1;
-      let lineMul = 1;
+      const lineMul = defectLineMultiplier(d);
 
       if (d.kind === 'flat') {
         v = 0;
         noiseMul = 0.25;
-        lineMul = 0.2;
       } else if (d.kind === 'noisy') {
         noiseMul = d.noiseMultiplier;
-        lineMul = d.lineMultiplier;
       } else if (d.kind === 'intermittent') {
         if (this.intermittentLeft[c] <= 0) {
           this.intermittentOn[c] = !this.intermittentOn[c];

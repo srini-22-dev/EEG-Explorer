@@ -61,9 +61,12 @@ import { MONTAGES, ALL_ELECTRODES } from '../../artifacts/eeg-simulator/src/util
 import { commonAverage, computeChannelVoltage } from '../../artifacts/eeg-simulator/src/utils/computeChannel';
 import { markRowSizes, markRows } from '../../artifacts/eeg-simulator/src/utils/markRows';
 import { PATTERN_CATEGORIES } from '../../artifacts/eeg-simulator/src/utils/patterns';
+import { EDUCATIONAL_ANNOTATIONS } from '../../artifacts/eeg-simulator/src/utils/annotations';
+import { PATTERN_SOURCES } from '../../artifacts/eeg-simulator/src/engine/sources/registry';
+import type { ArtifactMark } from '../../artifacts/eeg-simulator/src/engine/engine';
 import {
   TOGGLE_RULES, STATE_DEFAULTS, initialToggles, effective, violations,
-  toggle, enterState, clearToggles, setPage, quizPage,
+  toggle, enterState, clearToggles, setPage, quizPage, switchOff,
 } from '../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { defaultArtifactParams, defaultIctalParamsMap, SPEED_VALUES, type SimSettings } from '../../artifacts/eeg-simulator/src/utils/simTypes';
 import type { ChannelDef } from '../../artifacts/eeg-simulator/src/utils/montages';
@@ -2385,7 +2388,7 @@ console.log('\n=== Step 18: contextual artifact controls (ArtifactParams) ===\n'
     seed: 31, subject: { artifactBurden: 0.01, lineAmp: 0, alphaRms: 12 },
   };
   const GATES_OFF: ArtifactGates = {
-    blink: false, eyeOpening: false, saccade: false, emg: false, pop: false,
+    blink: false, eyeOpening: false, saccade: false, flutter: false, emg: false, pop: false,
     sweat: false, line: false, ecgScalp: false, movement: false, defects: false,
   };
 
@@ -3179,7 +3182,12 @@ console.log('\nBETS (<50 ms, <50 uV, temporal, drowsy/N1/N2 only, no slow wave),
   for (let k = peakAt; k < end; k++) if (diff[k] > slow) slow = diff[k];
   check('BETS T3-T5 base width (site/patterns.ts: <50 ms)', widthMs, 5, 50, ' ms');
   check('BETS T3-T5 peak amplitude (patterns.ts: <50 uV)', Math.abs(peak), 3, 50, ' uV');
-  check('BETS T3-T5 has no after-going slow wave', slow / Math.abs(peak), 0, 0.15);
+  // Until 2026-10-27 this also held the largest positive excursion after the largest
+  // spike under 0.15 of it ("no after-going slow wave"). The sources allow a diphasic
+  // spike and a small slow wave (SCORE, eegpedia, IFCN), so each spike is now read on
+  // its own in Step 28, with the slow wave bounded there; this keeps the opposite
+  // phase within the diphasic spike's size.
+  check('BETS T3-T5 largest opposite phase after the largest spike', slow / Math.abs(peak), 0, 0.45);
 }
 
 console.log('\nLambda: surface-positive; polarity is montage-dependent (§4/IK-008), same family as POSTS:');
@@ -4471,15 +4479,20 @@ console.log('\nWicket: one frequency per burst, large enough to read:');
   const x = displayContribAll('bipolar-ap', 'drowsy', 'wicket', 120, 20)['T3-T5'];
   check('wicket T3-T5 largest burst (AES atlas: 60-200 uV at the electrode; measured 12 uV before the fix)',
     absPeak(x), 40, 200, ' uV');
-  // Cycle lengths inside the largest burst: upward zero crossings within 0.35 s of
-  // its peak. One carrier gives equal cycles; a sum of tones does not.
-  let at = 0;
-  for (let k = 0; k < x.length; k++) if (Math.abs(x[k]) > Math.abs(x[at])) at = k;
-  const ups: number[] = [];
-  for (let k = Math.max(1, at - Math.round(0.35 * FS)); k < Math.min(x.length, at + Math.round(0.35 * FS)); k++) {
-    if (x[k - 1] < 0 && x[k] >= 0) ups.push(k - x[k] / (x[k] - x[k - 1]));
+  // Cycle lengths inside the largest RUN: upward zero crossings within 0.35 s of its
+  // peak. One carrier gives equal cycles; a sum of tones does not. Since 2026-10-27 a
+  // third of the events are a single wicket, which has one cycle, so the largest peak
+  // with at least four cycles round it is taken.
+  const order = Array.from(x.keys()).sort((a, b) => Math.abs(x[b]) - Math.abs(x[a]));
+  let cyc: number[] = [];
+  for (const at of order) {
+    if (Math.abs(x[at]) < 0.3 * Math.abs(x[order[0]])) break;
+    const ups: number[] = [];
+    for (let k = Math.max(1, at - Math.round(0.35 * FS)); k < Math.min(x.length, at + Math.round(0.35 * FS)); k++) {
+      if (x[k - 1] < 0 && x[k] >= 0) ups.push(k - x[k] / (x[k] - x[k - 1]));
+    }
+    if (ups.length >= 5) { cyc = ups.slice(1).map((u, i) => u - ups[i]); break; }
   }
-  const cyc = ups.slice(1).map((u, i) => u - ups[i]);
   const m = cyc.reduce((a, b) => a + b, 0) / cyc.length;
   check('wicket cycle-length CV within the largest burst (LEARNINGEEG: "each wicket should be the same duration")',
     Math.sqrt(cyc.reduce((a, b) => a + (b - m) ** 2, 0) / cyc.length) / m, 0, 0.1);
@@ -4536,6 +4549,32 @@ console.log('\n=== Step 26: toggle rules — no contradictory combination is rea
   check('toggle rules: rules naming something that is not a toggle',
     ruleIds.filter(id => ![id, ...(TOGGLE_RULES[id].requires ?? []), ...(TOGGLE_RULES[id].excludes ?? [])]
       .every(x => ids.includes(x))).length, 0, 0);
+  // The registries a toggle passes through agree with one another (2026-10-23 audit:
+  // three toggles had no on-page cue though annotations.ts promises one for every
+  // pattern, and three moved the record to Awake without their description saying
+  // so, as every other state-moving description does).
+  const pats = PATTERN_CATEGORIES.flatMap(c => c.patterns);
+  check('registries: toggles with no on-page cue (annotations.ts)', pats.filter(p => !EDUCATIONAL_ANNOTATIONS[p.id]).length, 0, 0);
+  const STATE_WORD: Record<string, PatientState> = { Awake: 'awake', Drowsy: 'drowsy', N1: 'n1', N2: 'n2', N3: 'n3', REM: 'rem' };
+  check('registries: descriptions whose "switches Background State to X" disagrees with the rule, or a rule that moves the state unsaid',
+    pats.filter(p => {
+      const said = /(?:switches|moves) Background State to (\w+)/.exec(p.desc)?.[1];
+      return (said ? STATE_WORD[said] : undefined) !== TOGGLE_RULES[p.id]?.target;
+    }).length, 0, 0);
+  const ENGINE_ARTIFACT_IDS = ['blink', 'eye-opening', 'eye-movement', 'eye-flutter', 'muscle', 'electrode-pop', 'bad-electrodes', 'sweat', '50hz', 'ecg-artifact', 'movement'];
+  check('registries: toggles allowed in a state where none of their sources draws (dead there)',
+    pats.filter(p => {
+      const ds = PATTERN_SOURCES.filter(d => d.toggles.includes(p.id));
+      if (!ds.length) return !ENGINE_ARTIFACT_IDS.includes(p.id);
+      return (TOGGLE_RULES[p.id]?.states ?? stages).some(st => !ds.some(d => d.stateIntrinsic || !d.states || d.states.includes(st)))
+        && p.id !== 'slow-waves';  // sets the stage and draws nothing of its own, by design
+    }).length, 0, 0);
+  // A quiz asks "identify the active pattern": its page shows that one and what it
+  // requires (Eyes Open under Lambda), nothing else. It used to bring the stage's
+  // other defaults, so a spindle question also drew K-complexes, vertex waves and
+  // POSTS, any of which could be offered as a "wrong" answer (2026-10-23 audit).
+  check('toggle rules: quiz pages showing a pattern besides the one asked and what it requires',
+    pats.filter(p => [...effective(quizPage([p.id]))].some(x => x !== p.id && !(TOGGLE_RULES[p.id]?.requires ?? []).includes(x))).length, 0, 0);
   check('toggle rules: rules whose target state is not one of their own states',
     ruleIds.filter(id => {
       const r = TOGGLE_RULES[id];
@@ -4787,6 +4826,123 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
     console.log(`  no events in ${SECS} s (nothing to annotate): ${silent.join(', ') || 'none'}`);
   }
 
+  // Common pages, every montage (2026-10-23 validation audit). Everything above reads
+  // bipolar-ap, one toggle at a time, and the audit found what that misses: two bad
+  // contacts boxed as one field cancelled on the row between them (T5-A1, seen only on
+  // an ear reference), and the mains box ignored a bad contact's extra pickup (seen
+  // only with both toggles on). So pages as the app composes them (setPage: a state's
+  // defaults, what each toggle requires), each toggle's own contribution (that page
+  // with it switched off, and whatever cannot stay on without it) through all six
+  // montages: no moment it moves a row 2 mm without an arrow or a box over it, no mark
+  // from a toggle that is off, and no row of a bad contact left unboxed.
+  console.log('\nCommon pages, every montage: no event without an arrow or box:');
+  {
+    const PAGES: [PatientState, string[]][] = [
+      ['awake', ['blink', 'eye-movement', 'muscle', 'ecg-artifact']],
+      ['awake', ['eyes-open', 'blink', 'lambda', 'eye-movement']],
+      ['awake', ['eye-opening', 'muscle']],
+      ['awake', ['mu-rhythm', 'blink', 'muscle']],
+      ['awake', ['chewing', 'muscle', 'movement']],
+      ['awake', ['sweat', '50hz', 'bad-electrodes', 'electrode-pop']],
+      ['awake', ['photic', 'blink']],
+      ['awake', ['hyperventilation', 'absence-ictal']],
+      ['awake', ['photic', 'polyspike-wave']],
+      ['awake', ['focal-spikes-lt', 'focal-delta-temporal', 'blink', 'muscle']],
+      ['awake', ['lpeds', 'focal-delta-temporal']],
+      ['awake', ['gen-slowing', 'triphasic', 'firda']],
+      ['awake', ['gpeds', 'gen-slowing']],
+      ['awake', ['burst-suppression', 'ecg-artifact']],
+      ['awake', ['gtc-ictal']],
+      ['awake', ['focal-temporal-ictal', 'chewing']],
+      ['awake', ['focal-frontal-ictal', 'muscle']],
+      ['awake', ['hypsarrhythmia']],
+      ['drowsy', ['roving-eyes', 'rmtd', 'wicket', 'midline-theta']],
+      ['drowsy', ['6hz-sw', '14-6-pos', 'bets']],
+      ['n1', ['posts', 'v-waves', 'roving-eyes']],
+      ['n2', ['spindles', 'k-complex', 'v-waves', 'posts', 'bets']],
+      ['n3', ['slow-waves', 'spindles', 'k-complex']],
+      ['rem', ['rem-eyes', 'ecg-artifact']],
+    ];
+    type ElRun = { el: string[]; v: Float64Array[]; marks: (ArtifactMark & { t: number })[] };
+    const runEl = (state: PatientState, on: Set<string>): ElRun => {
+      const settings: SimSettings = {
+        speed: 30, sensitivity: 7, patientState: state, activePatterns: on,
+        ictalParams: defaultIctalParamsMap(), artifactParams: defaultArtifactParams(),
+      };
+      const src = new SimulationSource(SEED, FS);
+      src.useAppMode();
+      const n = SECS * FS;
+      let el: string[] = [], v: Float64Array[] = [];
+      const marks: ElRun['marks'] = [];
+      for (let i = 0; i < n; i++) {
+        const x = src.next(settings);
+        if (i === 0) { el = Object.keys(x); v = el.map(() => new Float64Array(n)); }
+        el.forEach((e, k) => { v[k][i] = x[e]; });
+        for (const m of src.groundTruth.marks) {
+          const t = i / FS - (m.ago ?? 0);
+          const open = m.key != null ? marks.find((o) => o.key === m.key && o.span === Infinity) : undefined;
+          if (open) open.span = t - open.t; else marks.push({ ...m, t });
+        }
+      }
+      return { el, v, marks };
+    };
+    const rowsOf = (run: ElRun, montage: (typeof MONTAGES)[string]) => {
+      const cs = montage.channels.map((c, i) => ({ c, i })).filter(({ c }) => c.active !== 'ECG');
+      const n = run.v[0].length, data = cs.map(() => new Float64Array(n)), rec: Record<string, number> = {};
+      for (let i = 0; i < n; i++) {
+        run.el.forEach((e, k) => { rec[e] = run.v[k][i]; });
+        const avg = commonAverage(rec);
+        cs.forEach(({ c }, k) => { data[k][i] = computeChannelVoltage(c, i / FS, rec, avg); });
+      }
+      return { cs, data };
+    };
+    let unmarked = 0, leaked = 0, badRows = 0;
+    const firsts: string[] = [];
+    for (const [state, list] of PAGES) {
+      const page = setPage(state, list), on = effective(page);
+      const onRun = runEl(page.patientState, on);
+      for (const id of on) {
+        const offPage = effective(switchOff(page, id));
+        const ids = [id, ...[...on].filter((x) => x !== id && !offPage.has(x))];
+        const mine = (m: ArtifactMark) => ids.includes(m.id) || (ids.includes('eye-opening') && m.id === 'eye-closing');
+        const offRun = runEl(page.patientState, offPage);
+        leaked += offRun.marks.filter(mine).length;
+        const marks = onRun.marks.filter(mine);
+        for (const [mid, montage] of Object.entries(MONTAGES)) {
+          const a = rowsOf(onRun, montage), b = rowsOf(offRun, montage), n = a.data[0].length;
+          const ev: [number, number][] = [];
+          let start = -1, last = -1;
+          for (let i = 0; i < n; i++) {
+            let hit = false;
+            for (let k = 0; k < a.cs.length && !hit; k++) hit = Math.abs(a.data[k][i] - b.data[k][i]) >= 14;
+            if (hit) { if (start < 0) start = i; last = i; }
+            else if (start >= 0 && i - last > 0.4 * FS) { ev.push([start / FS, last / FS]); start = -1; }
+          }
+          if (start >= 0) ev.push([start / FS, last / FS]);
+          const covered = (s: number, e: number) => marks.some((m) => (m.span != null
+            ? m.t <= e + 0.15 && m.t + m.span >= s - 0.15 : m.t + m.dur >= s - 0.15 && m.t <= e + 0.15));
+          const un = ev.filter(([s0, e0]) => !covered(s0, e0));
+          unmarked += un.length;
+          if (un.length && firsts.length < 5) firsts.push(`${id} on ${list.join('+')} (${state}), ${mid}, ${un[0][0].toFixed(2)} s`);
+          // A bad contact's rows, and mains on them: boxed wherever they are plainly on.
+          if (id === 'bad-electrodes' || id === '50hz') {
+            const moved = a.cs.map((_, k) => { let x = 0; for (let i = 0; i < n; i++) x = Math.max(x, Math.abs(a.data[k][i] - b.data[k][i])); return x; });
+            const largest = Math.max(...moved);
+            const boxed = new Set(marks.filter((m) => m.id === id).flatMap((m) => (m.page ? a.cs.map(({ i }) => i)
+              : markRows(markRowSizes(m.fields, montage), m.inUv ? 7 : undefined, m.span != null ? Infinity : undefined))));
+            const left = a.cs.filter(({ i }, k) => moved[k] >= 0.5 * largest && moved[k] >= 14 && !boxed.has(i));
+            badRows += left.length;
+            if (left.length && firsts.length < 5) firsts.push(`${id} row ${left[0].c.label} unboxed, ${mid}`);
+          }
+        }
+      }
+    }
+    if (firsts.length) console.log(`  first: ${firsts.join('; ')}`);
+    check(`pages: events with no arrow or box (${PAGES.length} common pages x 6 montages)`, unmarked, 0, 0);
+    check('pages: marks from a toggle while it is off', leaked, 0, 0);
+    check('pages: rows of a bad contact, or mains on them, plainly on and not boxed (any montage)', badRows, 0, 0);
+  }
+
   console.log('\nBoxes for events with extent (owner, 2026-10-22), arrows for single ones:');
   {
     // POSTS: singles more than 1 s apart stay arrows; with the trains form every
@@ -4923,6 +5079,309 @@ console.log('\nThe midline (app, nothing switched on): no theta burst stands out
     }
     check(`${state}: largest 1 s of 5-8 Hz on Fz-Cz / the median second, worst of 3 subjects (a midline burst made it 3.2-4.8)`,
       worst, 1, 3);
+  }
+}
+
+console.log('\n=== Step 28: normal variants and artifacts against SCORE, eegpedia, learningeeg and the IFCN glossary (2026-10-27) ===\n');
+// The owner's list (idea-vault inbox, 2026-10-27): wickets, RMTD, small sharp spikes,
+// breach, 6 Hz phantom, 14 & 6, slow-fused transients; ECG, blinks / eye flutter,
+// muscle, lateral rectus spikes, electrode pop, mains. Sources: the SCORE normal
+// variants study (Clin Neurophysiol Pract 2022, PMC9294211), eegpedia, learningeeg,
+// the IFCN glossary (Kane et al. 2017), EEG Atlas online, Thickbroom & Mastaglia 1985.
+// Every toggle is run as the app runs it (useAppMode), with its marks.
+{
+  type Po = SimSettings['patternOptions'];
+  const runApp = (montageId: string, state: PatientState, patterns: string[], secs: number, seed: number, po?: Po) => {
+    const montage = MONTAGES[montageId];
+    const settings: SimSettings = {
+      speed: 30, sensitivity: 7, patientState: state, activePatterns: new Set(patterns),
+      ictalParams: defaultIctalParamsMap(), artifactParams: { ...defaultArtifactParams() }, patternOptions: po,
+    };
+    const src = new SimulationSource(seed, FS);
+    src.useAppMode();
+    const n = Math.floor(secs * FS);
+    const data: Record<string, Float64Array> = {};
+    montage.channels.forEach((c) => { data[c.label] = new Float64Array(n); });
+    const marks: { i: number; m: ArtifactMark }[] = [];
+    for (let i = 0; i < n; i++) {
+      const v = src.next(settings);
+      const avg = commonAverage(v);
+      for (const c of montage.channels) data[c.label][i] = computeChannelVoltage(c, src.t, v, avg);
+      for (const m of src.groundTruth.marks) marks.push({ i, m: { ...m } });
+    }
+    return { data, marks };
+  };
+  const isoApp = (montageId: string, state: PatientState, patterns: string[], secs: number, seed: number, po?: Po) => {
+    const on = runApp(montageId, state, patterns, secs, seed, po);
+    const off = runApp(montageId, state, [], secs, seed, po);
+    const d: Record<string, Float64Array> = {};
+    for (const k in on.data) d[k] = on.data[k].map((v, i) => v - off.data[k][i]);
+    return { d, marks: on.marks, on: on.data, off: off.data };
+  };
+  const pctP2pOf = (x: Float64Array) => {
+    const s = Array.from(x).sort((a, b) => a - b);
+    return s[Math.floor(0.99 * (s.length - 1))] - s[Math.floor(0.01 * (s.length - 1))];
+  };
+  const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  // One entry per event: a mark per drawn side lands on the same sample.
+  const events = (marks: { i: number; m: ArtifactMark }[], id: string) => {
+    const by = new Map<number, ArtifactMark[]>();
+    for (const { i, m } of marks) if (m.id === id && m.span !== 0) by.set(i, [...(by.get(i) ?? []), m]);
+    return [...by.entries()].map(([i, ms]) => ({ i, ms }));
+  };
+  // Upward zero crossings of x in [a, b): the cycle lengths of one rhythm.
+  const cycles = (x: Float64Array, a: number, b: number) => {
+    const ups: number[] = [];
+    for (let k = Math.max(1, a); k < Math.min(x.length, b); k++) if (x[k - 1] < 0 && x[k] >= 0) ups.push(k - x[k] / (x[k] - x[k - 1]));
+    return ups.slice(1).map((u, j) => (u - ups[j]) / FS);
+  };
+  const cv = (a: number[]) => { const m = a.reduce((s, v) => s + v, 0) / a.length; return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length) / m; };
+
+  // ── Lateral rectus spike ──
+  console.log('Lateral rectus spike: on the side the eyes turn to, before the movement (EEG Atlas online; Thickbroom & Mastaglia 1985):');
+  {
+    const { d, marks } = isoApp('bipolar-ap', 'awake', ['eye-movement'], 90, 7);
+    const lrs = marks.filter(({ m }) => m.id === 'eye-movement' && m.label === 'LRS');
+    const ratios: number[] = [], lags: number[] = [];
+    let wrongSide = 0, steps = 0;
+    for (const { i, m } of lrs) {
+      // Which side: the spike is on the F7 rows for a leftward movement, F8 for rightward.
+      const peak = (row: string) => { let p = 0; for (let k = i; k <= i + 3 && k < d[row].length; k++) p = Math.max(p, Math.abs(d[row][k] - d[row][i])); return p; };
+      const aL = peak('F7-T3'), aR = peak('F8-T4');
+      const ipsiRow = aL > aR ? 'F8-T4' : 'F7-T3';  // the row on the other side carries the step only
+      ratios.push(Math.max(aL, aR) / Math.max(1e-6, Math.min(aL, aR)));
+      // The gaze step that follows: positive gaze is rightward, F8 positive, so F8-T4
+      // goes positive (down) for a rightward turn.
+      if (i + 60 < d['F8-T4'].length) {
+        const step = d['F8-T4'][i + 60] - d['F8-T4'][i];
+        if (Math.abs(step) > 5) { steps++; if (Math.sign(step) !== (aR > aL ? 1 : -1)) wrongSide++; }
+        // Lag from the spike's peak to the step's 10% point, on the row without the spike.
+        const r = d[ipsiRow], full = r[i + 60] - r[i];
+        if (Math.abs(full) > 5) {
+          let k = i + 1;
+          while (k < i + 60 && Math.abs(r[k] - r[i]) < 0.1 * Math.abs(full)) k++;
+          lags.push((k - i) * 1000 / FS);
+        }
+      }
+    }
+    check('LRS: spikes marked in 90 s of lateral eye movements', lrs.length, 15, 1e6);
+    check('LRS: median spike on its side / the other side (F7-T3 vs F8-T4)', median(ratios), 3, 1e6);
+    check('LRS: movements whose gaze step goes the other way from the spike side', wrongSide, 0, 0);
+    check('LRS: movements checked for side', steps, 10, 1e6);
+    check('LRS: median lead of the spike start over the slow deflection (Thickbroom & Mastaglia: 15-30 ms)', median(lags), 12, 34, ' ms');
+    const reversal = d['Fp1-F7'].map((v, k) => v * d['F7-T3'][k]);
+    let most = 0, at = 0;
+    for (const { i } of lrs) for (let k = i; k <= i + 3; k++) if (Math.abs(d['F7-T3'][k]) > most) { most = Math.abs(d['F7-T3'][k]); at = k; }
+    check('LRS: Fp1-F7 and F7-T3 opposite at the largest left spike (reversal at F7)', reversal[at], -Infinity, 0);
+    const rem = runApp('bipolar-ap', 'rem', ['rem-eyes'], 60, 7).marks.filter(({ m }) => m.id === 'rem-eyes');
+    const moves = rem.filter(({ m }) => !m.label).length, spikes = rem.filter(({ m }) => m.label === 'LRS').length;
+    check('LRS: REM eye movements each led by a lateral rectus spike (spikes / movements)', spikes / Math.max(1, moves), 1, 1);
+  }
+
+  // ── Breach rhythm ──
+  console.log('\nBreach rhythm: larger, faster, at one electrode only (IFCN "usually by a factor of less than 3"; AES ">=50%"):');
+  {
+    const carRatios: number[] = [], defectRows: number[] = [], neighbours: number[] = [];
+    const band = { delta: [] as number[], alpha: [] as number[], beta: [] as number[] };
+    for (const seed of [3, 11, 21]) {
+      const car = runApp('reference-car', 'awake', ['breach'], 60, seed).data, car0 = runApp('reference-car', 'awake', [], 60, seed).data;
+      carRatios.push(pctP2pOf(car['C4-AVG']) / pctP2pOf(car['C3-AVG']));
+      // Per band against the ear: the average reference carries the whole head's alpha,
+      // which the defect does not touch, and dilutes the gain at C4-AVG.
+      const ear = runApp('reference-ipsi', 'awake', ['breach'], 60, seed).data, ear0 = runApp('reference-ipsi', 'awake', [], 60, seed).data;
+      for (const [k, lo, hi] of [['delta', 1, 4], ['alpha', 8, 13], ['beta', 13, 30]] as const) {
+        band[k].push(Math.sqrt(bandPower(ear['C4-A2'], lo, hi) / bandPower(ear0['C4-A2'], lo, hi)));
+      }
+      const bip = runApp('bipolar-ap', 'awake', ['breach'], 60, seed).data, bip0 = runApp('bipolar-ap', 'awake', [], 60, seed).data;
+      for (const r of ['F4-C4', 'C4-P4']) defectRows.push(pctP2pOf(bip[r]) / pctP2pOf(bip0[r]));
+      for (const r of ['Fp2-F4', 'P4-O2', 'F8-T4', 'T4-T6', 'F3-C3', 'C3-P3']) {
+        let diff = 0; for (let k = 0; k < bip[r].length; k++) diff = Math.max(diff, Math.abs(bip[r][k] - bip0[r][k]));
+        neighbours.push(diff);
+      }
+    }
+    check('breach C4-AVG / C3-AVG peak to peak, median of 3 subjects (AES >=1.5; IFCN <3)', median(carRatios), 1.5, 3);
+    check('breach F4-C4 and C4-P4 against the same subject without it, smallest', Math.min(...defectRows), 1.3, 3);
+    check('breach: largest change on any row not sharing C4 (abrupt margin)', Math.max(...neighbours), 0, 1e-9, ' uV');
+    check('breach C4-A2 beta gain (13-30 Hz), median (IFCN: "less than 3")', median(band.beta), 2.6, 3.05);
+    // Faster raised more than slower. Beta against alpha is not asserted: at the electrode
+    // the two gains are 2.92 and 2.73, closer than a referenced row can tell apart (on
+    // C4-A2 the ear's own alpha lifts the alpha ratio and the amplifier's noise floor,
+    // which the defect does not touch, lowers beta's: 0.92 on 2026-10-27).
+    check('breach C4-A2 beta gain / delta gain, median', median(band.beta) / median(band.delta), 1.2, 2.5);
+    check('breach C4-A2 alpha gain / delta gain, median', median(band.alpha) / median(band.delta), 1.05, 2);
+    // Muscle does not cross the skull: its share of a row is the same with the defect.
+    const mb = runApp('bipolar-ap', 'awake', ['muscle', 'breach'], 20, 5, { breachSite: 'F8' }).data['F8-T4'];
+    const b = runApp('bipolar-ap', 'awake', ['breach'], 20, 5, { breachSite: 'F8' }).data['F8-T4'];
+    const m = runApp('bipolar-ap', 'awake', ['muscle'], 20, 5).data['F8-T4'];
+    const n0 = runApp('bipolar-ap', 'awake', [], 20, 5).data['F8-T4'];
+    let err = 0; for (let k = 0; k < m.length; k++) err = Math.max(err, Math.abs((mb[k] - b[k]) - (m[k] - n0[k])));
+    check('breach at F8: muscle on F8-T4 changed by the defect', err, 0, 1e-9, ' uV');
+    const f8 = runApp('bipolar-ap', 'awake', ['breach'], 60, 3, { breachSite: 'F8' }), f80 = runApp('bipolar-ap', 'awake', [], 60, 3);
+    // A bipolar row is the difference of two electrodes that share much of their
+    // activity, so raising one of them can raise the row by more than the electrode's
+    // own factor (Fp2-F8 up to 3.5x here): IFCN's "less than 3" is the electrode against
+    // its homologue, asserted referentially below; the row only has to rise.
+    check('breach at F8: F8-T4 against the same subject without it', pctP2pOf(f8.data['F8-T4']) / pctP2pOf(f80.data['F8-T4']), 1.3, 4.5);
+    const f8car = runApp('reference-car', 'awake', ['breach'], 60, 3, { breachSite: 'F8' }).data;
+    check('breach at F8: F8-AVG / F7-AVG peak to peak (AES >=1.5; IFCN <3)', pctP2pOf(f8car['F8-AVG']) / pctP2pOf(f8car['F7-AVG']), 1.5, 3);
+    check('breach at F8: Fp2-F4 unchanged', pctP2pOf(f8.data['Fp2-F4']) / pctP2pOf(f80.data['Fp2-F4']), 0.999, 1.001);
+    const boxes = f8.marks.filter(({ m }) => m.id === 'breach');
+    check('breach: one box while on', boxes.filter(({ m }) => m.span === Infinity).length, 1, 1);
+  }
+
+  // ── Eye flutter ──
+  console.log('\nEye flutter: blink-like, frontal only, about three a second (learningeeg; its figure measured 3.5 Hz):');
+  {
+    const { d, marks } = isoApp('bipolar-ap', 'awake', ['eye-flutter'], 60, 4);
+    let down = 0, up = 0;
+    for (const v of d['Fp1-F3']) { down = Math.max(down, v); up = Math.min(up, v); }
+    check('eye flutter Fp1-F3 renders DOWN (largest down / largest up)', down / -up, 1.2, 1e6);
+    check('eye flutter F3-C3 / Fp1-F3 (learningeeg figure ~0.4; blink field)', absPeak(d['F3-C3']) / absPeak(d['Fp1-F3']), 0.15, 0.5);
+    check('eye flutter P3-O1 / Fp1-F3 ("do not extend posteriorly beyond the frontal leads")', absPeak(d['P3-O1']) / absPeak(d['Fp1-F3']), 0, 0.1);
+    const runs = marks.filter(({ m }) => m.id === 'eye-flutter');
+    check('eye flutter: runs boxed in 60 s', runs.length, 2, 30);
+    const freqs = runs.filter(({ i, m }) => i + (m.span ?? 0) * FS < d['Fp1-F3'].length).map(({ i, m }) => {
+      const c = cycles(d['Fp1-F3'], i + Math.round(0.5 * FS), i + Math.round(((m.span ?? 0) - 0.3) * FS));
+      return c.length ? 1 / median(c) : 0;
+    });
+    check('eye flutter: lid cycles per second within a run, median over runs', median(freqs), 3, 4, ' Hz');
+  }
+
+  // ── RMTD ──
+  console.log('\nRMTD: 5-7 Hz trains at one frequency, 2-10 s, mid-temporal (eegpedia; SCORE; IFCN):');
+  {
+    const { d, marks } = isoApp('bipolar-ap', 'drowsy', ['rmtd'], 240, 9);
+    const trains = marks.filter(({ m }) => m.id === 'rmtd' && m.span != null && m.span > 0);
+    const freqs: number[] = [], cvs: number[] = [];
+    for (const { i, m } of trains) {
+      const n = Math.round((m.span ?? 0) * FS);
+      if (i + n >= d['T3-T5'].length) continue;
+      // The side the train is on, from the field its box is drawn on (both sides can run at
+      // once, so the larger row is not always this train's).
+      const row = (m.fields[0]?.T3 ?? 0) > (m.fields[0]?.T4 ?? 0) ? 'T3-T5' : 'T4-T6';
+      const c = cycles(d[row], i + Math.round(0.5 * FS), i + n - Math.round(0.5 * FS));
+      if (c.length < 4) continue;
+      freqs.push(1 / median(c)); cvs.push(cv(c));
+    }
+    check('RMTD trains measured', freqs.length, 8, 1e6);
+    check('RMTD lowest train frequency (eegpedia, SCORE: 5-7 Hz)', Math.min(...freqs), 4.9, 7.1, ' Hz');
+    check('RMTD highest train frequency', Math.max(...freqs), 4.9, 7.1, ' Hz');
+    check('RMTD largest cycle-length CV within a train (one frequency: "does not change in frequency or form")', Math.max(...cvs), 0, 0.06);
+    const spans = trains.map(({ m }) => m.span ?? 0);
+    check('RMTD shortest train (learningeeg: "a few seconds")', Math.min(...spans), 1.9, 10, ' s');
+    check('RMTD longest train (eegpedia: 5-10 s)', Math.max(...spans), 1.9, 10.1, ' s');
+    const temporal = Math.max(...['F7-T3', 'T3-T5', 'F8-T4', 'T4-T6'].map((r) => absPeak(d[r])));
+    const para = Math.max(...['F3-C3', 'C3-P3', 'F4-C4', 'C4-P4'].map((r) => absPeak(d[r])));
+    // A ceiling only: SCORE has the maximum "usually mid-temporal" with spread to the
+    // parasagittal "sometimes", which is not drawn (the field is T3 with T5 and F7).
+    check('RMTD largest parasagittal row / largest temporal row (temporal maximum)', para / temporal, 0, 0.5);
+    for (const st of ['awake', 'n1', 'n2'] as const) {
+      check(`RMTD trains in ${st} (SCORE: drowsiness and light sleep, occasionally awake)`,
+        runApp('bipolar-ap', st, ['rmtd'], 40, 9).marks.filter(({ m }) => m.id === 'rmtd').length, 1, 1e6);
+    }
+  }
+
+  // ── Wickets ──
+  console.log('\nWickets: single or in runs (SCORE; eegpedia; IFCN "single waves or trains"):');
+  {
+    const ev = runApp('bipolar-ap', 'drowsy', ['wicket'], 300, 13).marks.filter(({ m }) => m.id === 'wicket');
+    check('wicket share of events that are a single wave', ev.filter(({ m }) => m.span == null).length / ev.length, 0.15, 0.5);
+  }
+
+  // ── 14 & 6 ──
+  console.log('\n14 & 6 Hz positive bursts: sides shifting, R>L, 0.5-1 s (eegpedia; SCORE):');
+  {
+    const { marks } = runApp('reference-car', 'drowsy', ['14-6-pos'], 400, 6);
+    const ev = events(marks, '14-6-pos');
+    const both = ev.filter((e) => e.ms.length === 2).length;
+    check('14-6-pos share of bursts on both sides', both / ev.length, 0.3, 0.7);
+    // One-sided bursts: which side, from the field the box is on.
+    const one = ev.filter((e) => e.ms.length === 1);
+    const t6 = (m: ArtifactMark) => (m.fields[0]?.T6 ?? 0) > (m.fields[0]?.T5 ?? 0);
+    check('14-6-pos one-sided bursts on the right / on the left (eegpedia: R>L)',
+      one.filter((e) => t6(e.ms[0])).length / Math.max(1, one.filter((e) => !t6(e.ms[0])).length), 1.1, 1e6);
+    const spans = ev.flatMap((e) => e.ms.map((m) => m.span ?? 0));
+    check('14-6-pos shortest burst (eegpedia, SCORE: 0.5-1 s)', Math.min(...spans), 0.49, 1.01, ' s');
+    check('14-6-pos longest burst', Math.max(...spans), 0.49, 1.01, ' s');
+    // The other choice under the toggle (Sides: bilateral), learningeeg's picture.
+    const bi = events(runApp('reference-car', 'drowsy', ['14-6-pos'], 300, 6, { pos146Sides: 'bilateral' }).marks, '14-6-pos');
+    check('14-6-pos, Sides bilateral: share of bursts on both sides (learningeeg: "bilateral and synchronous")',
+      bi.filter((e) => e.ms.length === 2).length / bi.length, 1, 1);
+    const biSpans = bi.flatMap((e) => e.ms.map((m) => m.span ?? 0));
+    check('14-6-pos, Sides bilateral: shortest burst (learningeeg: 1-2 s)', Math.min(...biSpans), 0.99, 2.01, ' s');
+    check('14-6-pos, Sides bilateral: longest burst', Math.max(...biSpans), 0.99, 2.01, ' s');
+  }
+
+  // ── Small sharp spikes ──
+  console.log('\nSmall sharp spikes: mono- or diphasic, steep fall, sometimes a small slow wave (SCORE; eegpedia; IFCN):');
+  {
+    const { d, marks } = isoApp('bipolar-ap', 'drowsy', ['bets'], 400, 8);
+    let di = 0, sl = 0, n = 0, steep = 0, slowMax = 0;
+    for (const { i } of marks.filter(({ m }) => m.id === 'bets')) {
+      for (const row of ['T3-T5', 'T4-T6']) {
+        const x = d[row];
+        let pk = 0, pi = i;
+        for (let k = i; k < Math.min(x.length, i + 20); k++) if (Math.abs(x[k]) > Math.abs(pk)) { pk = x[k]; pi = k; }
+        if (Math.abs(pk) < 3) continue;  // the spike is on the other side
+        n++;
+        let lo = pi; while (lo > 0 && Math.abs(x[lo]) >= 0.1 * Math.abs(pk)) lo--;
+        let hi = pi; while (hi < x.length - 1 && Math.abs(x[hi]) >= 0.1 * Math.abs(pk) && Math.sign(x[hi]) === Math.sign(pk)) hi++;
+        if (hi - pi < pi - lo) steep++;
+        let opp = 0; for (let k = pi; k < pi + 10 && k < x.length; k++) opp = Math.max(opp, -Math.sign(pk) * x[k]);
+        let slow = 0; for (let k = pi + 15; k < pi + 60 && k < x.length; k++) slow = Math.max(slow, Math.sign(pk) * x[k]);
+        if (opp > 0.15 * Math.abs(pk)) di++;
+        if (slow > 0.05 * Math.abs(pk)) { sl++; slowMax = Math.max(slowMax, slow / Math.abs(pk)); }
+      }
+    }
+    check('BETS spikes measured', n, 20, 1e6);
+    check('BETS share falling faster than they rise ("a steep descending arm")', steep / n, 0.8, 1);
+    check('BETS share diphasic (eegpedia: "occasionally diphasic")', di / n, 0.1, 0.45);
+    check('BETS share followed by a slow wave (IFCN "often", eegpedia "occasionally")', sl / n, 0.15, 0.6);
+    check('BETS largest slow wave / its spike ("not prominent and of low amplitude")', slowMax, 0, 0.2);
+  }
+
+  // ── 6 Hz: FOLD and WHAM ──
+  console.log('\n6 Hz spike-and-wave, both forms (eegpedia; SCORE):');
+  {
+    const fold = isoApp('reference-ipsi', 'drowsy', ['6hz-sw'], 120, 10, { sixHzForm: 'fold' }).d;
+    const wham = isoApp('reference-ipsi', 'drowsy', ['6hz-sw'], 120, 10, { sixHzForm: 'wham' }).d;
+    check('6 Hz WHAM F3-A1 / O1-A1 ("anterior")', absPeak(wham['F3-A1']) / Math.max(0.1, absPeak(wham['O1-A1'])), 5, 1e6);
+    check('6 Hz FOLD O1-A1 / F3-A1 ("occipital")', absPeak(fold['O1-A1']) / absPeak(fold['F3-A1']), 2, 1e6);
+    check('6 Hz WHAM largest deflection on F3-A1 (spike ">45uV")', absPeak(wham['F3-A1']), 45, 150, ' uV');
+    const whamAwake = isoApp('reference-ipsi', 'awake', ['6hz-sw'], 60, 10, { sixHzForm: 'wham' }).d;
+    check('6 Hz WHAM drawn awake ("Waking")', absPeak(whamAwake['F3-A1']), 20, 1e6, ' uV');
+    const foldAwake = isoApp('reference-ipsi', 'awake', ['6hz-sw'], 60, 10, { sixHzForm: 'fold' }).d;
+    check('6 Hz FOLD not drawn awake ("Drowsy")', absPeak(foldAwake['O1-A1']), 0, 0.5, ' uV');
+  }
+
+  // ── PSWY and slow-fused transients ──
+  console.log('\nPosterior slow waves of youth and slow-fused transients (IFCN; learningeeg; SCORE):');
+  {
+    const p = isoApp('reference-car', 'awake', ['pswy'], 180, 12);
+    check('PSWY O1-AVG largest wave / the alpha background peak to peak ("rather high amplitude")', absPeak(p.d['O1-AVG']) / pctP2pOf(p.off['O1-AVG']), 0.7, 2);
+    const pe = events(p.marks, 'pswy');
+    check('PSWY events that are one isolated wave (arrow, no box)', pe.filter((e) => e.ms.every((m) => m.span == null && m.label === 'PSWY')).length / pe.length, 1, 1);
+    const s = isoApp('reference-car', 'awake', ['slow-fused'], 300, 12);
+    const se = events(s.marks, 'slow-fused');
+    const kind = (lab: string) => se.filter((e) => e.ms[0].label === lab).length / se.length;
+    check('slow-fused: share of events that are a fused pair', kind('Slow-fused transient'), 0.25, 0.55);
+    check('slow-fused: share that are a slow wave alone (SCORE: "dissociated from each other")', kind('PSWY'), 0.15, 0.5);
+    check('slow-fused: share that are a sharp transient alone', kind('Sharp transient'), 0.15, 0.5);
+    // In a fused pair the sharp wave comes first and both are surface-negative (UP on O1-AVG).
+    let ok = 0, n = 0;
+    for (const e of se.filter((e) => e.ms[0].label === 'Slow-fused transient')) {
+      const m = e.ms[0], x = (m.fields[0]?.O1 ?? 0) >= (m.fields[0]?.O2 ?? 0) ? s.d['O1-AVG'] : s.d['O2-AVG'];
+      const a = e.i + Math.round(-(m.ago ?? 0) * FS);
+      const w = Math.round((m.span ?? 0) * FS);
+      if (a + w + 10 >= x.length) continue;
+      let sk = a, wk = a + Math.round(0.11 * FS);
+      for (let k = a; k < a + Math.round(0.11 * FS); k++) if (x[k] < x[sk]) sk = k;
+      for (let k = a + Math.round(0.11 * FS); k < a + w; k++) if (x[k] < x[wk]) wk = k;
+      n++;
+      if (x[sk] < 0 && x[wk] < 0 && sk < wk) ok++;
+    }
+    check('slow-fused: fused pairs measured', n, 5, 1e6);
+    check('slow-fused: fused pairs with the sharp wave first and both UP', ok / n, 0.9, 1);
   }
 }
 

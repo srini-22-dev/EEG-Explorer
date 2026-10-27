@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { PATTERN_BY_ID } from '../utils/patterns';
+import { quizPage, effective } from '../utils/toggleRules';
+
+/**
+ * Not asked: what cannot be seen in the 4 s a question records. Hyperventilation
+ * builds over minutes and photic stimulation starts at 1 Hz, where there is no
+ * driving; ECG and mains are under a millimetre on the double banana at 7 uV/mm
+ * (2026-10-23 audit). A slow-fused transient is told from posterior slow waves of
+ * youth only by seeing its sharp wave both with a slow wave and apart, which 4 s
+ * rarely holds (2026-10-27). Each is still a distractor.
+ */
+const NOT_ASKED = new Set(['hyperventilation', 'photic', 'ecg-artifact', '50hz', 'slow-fused']);
 import type { PatientState } from '../utils/simTypes';
 
 type QuizModeProps = {
@@ -20,12 +31,17 @@ export function QuizMode({ onClose, setPatientState, setActivePatterns, setFreez
   
   const generateQuestion = () => {
     const allPatterns = Object.keys(PATTERN_BY_ID);
-    const target = allPatterns[Math.floor(Math.random() * allPatterns.length)];
+    const askable = allPatterns.filter(p => !NOT_ASKED.has(p));
+    const target = askable[Math.floor(Math.random() * askable.length)];
     setCurrentPatternId(target);
     
+    // No distractor may be on the page too (Eyes Open comes with Lambda, which
+    // needs open eyes): it would be a second right answer, marked wrong.
+    const onPage = effective(quizPage([target]));
+    const distractors = allPatterns.filter(p => !onPage.has(p));
     const opts = new Set<string>([target]);
     while(opts.size < 4) {
-      opts.add(allPatterns[Math.floor(Math.random() * allPatterns.length)]);
+      opts.add(distractors[Math.floor(Math.random() * distractors.length)]);
     }
     setOptions(Array.from(opts).sort(() => Math.random() - 0.5));
     

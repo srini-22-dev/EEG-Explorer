@@ -66,7 +66,7 @@ export type TransientOptions<E = void> = {
    * `PatternMarkEvent`; times from the onset). Omitted only where another source
    * of the same pattern reports it.
    */
-  mark?: (event: E) => PatternMarkEvent;
+  mark?: (event: E) => PatternMarkEvent | null;
 };
 
 export class TransientSource<E = void> {
@@ -76,7 +76,7 @@ export class TransientSource<E = void> {
   private morphology: (dt: number, event: E) => number;
   private drawEvent?: (g: Gaussian) => E;
   private duration: number;
-  private markOf?: (event: E) => PatternMarkEvent;
+  private markOf?: (event: E) => PatternMarkEvent | null;
   private marks = markQueue();
 
   private clock = 0;
@@ -141,7 +141,9 @@ export class TransientSource<E = void> {
       // plays out. Order matters for reproducibility: the interval that scheduled
       // this onset was already drawn, so these draws follow it deterministically.
       if (this.drawEvent) this.eventParams = this.drawEvent(this.g);
-      if (this.markOf) this.marks.push(this.markOf(this.eventParams));
+      // null: this source draws nothing for this event (one side of a one-sided burst).
+      const m = this.markOf?.(this.eventParams);
+      if (m) this.marks.push(m);
     }
 
     if (this.onset >= 0) {

@@ -61,7 +61,7 @@ export default function App() {
   const updateArtifactParams = (patch: Partial<ArtifactParams>) =>
     setArtifactParams(prev => ({ ...prev, ...patch }));
 
-  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes' });
+  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', pos146Sides: 'shifting' });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
     setPatternOptions(prev => ({ ...prev, ...patch }));
 
@@ -93,6 +93,8 @@ export default function App() {
   return (
     <TooltipProvider>
       <div className={`flex h-screen w-full overflow-hidden font-sans ${theme === 'dark-mode' ? 'bg-[#121212]' : theme === 'white-paper' ? 'bg-white' : 'bg-[#c8e6c0]'}`}>
+        {/* Hidden, not removed, during the quiz: its switches name the answer. */}
+        <div className={quizMode ? 'contents invisible' : 'contents'}>
         <ControlPanel
           montageId={montageId}         setMontageId={setMontageId}
           activePatterns={effectivePatterns} togglePattern={togglePattern}
@@ -114,6 +116,7 @@ export default function App() {
           headOpacity={headOpacity} setHeadOpacity={setHeadOpacity}
           brainOpacity={brainOpacity} setBrainOpacity={setBrainOpacity}
         />
+        </div>
         <div className="flex-1 flex flex-col h-full relative">
           {/*
             The PanelGroup is unconditional and EEGCanvas is written exactly once.
@@ -133,7 +136,7 @@ export default function App() {
               <EEGCanvas
                 montage={MONTAGES[montageId]}
                 settings={settings}
-                activeEffectsLabel={activeEffects}
+                activeEffectsLabel={quizMode ? '' : activeEffects}
                 theme={theme}
                 showAnnotations={showAnnotations && !quizMode}
                 isFrozen={isFrozen}

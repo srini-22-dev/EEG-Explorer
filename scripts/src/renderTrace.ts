@@ -306,6 +306,9 @@ function parseArgs(argv: string[]): RenderOpts {
       case '--focus': o.patternOptions = { ...o.patternOptions, focalPlacement: next() as 'under' | 'between' }; break;
       case '--muscle': o.patternOptions = { ...o.patternOptions, seizureMuscle: next() === 'on' }; break;
       case '--kc-spindle': o.patternOptions = { ...o.patternOptions, kcSpindle: next() as 'none' | 'sometimes' | 'always' }; break;
+      case '--six-hz': o.patternOptions = { ...o.patternOptions, sixHzForm: next() as 'fold' | 'wham' }; break;
+      case '--breach': o.patternOptions = { ...o.patternOptions, breachSite: next() as 'C4' | 'C3' | 'F8' | 'F7' }; break;
+      case '--pos146': o.patternOptions = { ...o.patternOptions, pos146Sides: next() as 'shifting' | 'bilateral' }; break;
       case '--skip': o.skipSeconds = Number(next()); break;
       case '--sensitivity': o.sensitivity = Number(next()) as SimSettings['sensitivity']; break;
       case '--speed': o.speed = Number(next()) as SimSettings['speed']; break;

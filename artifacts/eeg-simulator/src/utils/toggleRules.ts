@@ -64,7 +64,7 @@ export const TOGGLE_RULES: Record<string, ToggleRule> = {
   // drowsiness, light sleep"; learningeeg: "tend to be seen more in the drowsy
   // state").
   'wicket':    { target: 'drowsy', states: ['awake', 'drowsy', 'n1', 'n2'] },
-  'rmtd':      { target: 'drowsy', states: ['drowsy'] },
+  'rmtd':      { target: 'drowsy', states: ['awake', 'drowsy', 'n1', 'n2'] },
   '14-6-pos':  { target: 'drowsy', states: ['drowsy', 'n1', 'n2'] },
   '6hz-sw':    { target: 'drowsy', states: ['drowsy', 'n1'] },
   'bets':      { target: 'drowsy', states: ['drowsy', 'n1', 'n2'] },
@@ -80,6 +80,9 @@ export const TOGGLE_RULES: Record<string, ToggleRule> = {
   // PDR goes, which is nowhere once the eyes open. The engine already draws them
   // only when awake; without a rule here the toggle stayed lit over nothing.
   'pswy':      { target: 'awake', states: AWAKE, excludes: ['eyes-open'] },
+  // SCORE: "In patients with posterior slow waves of the youth ... a sharp transient can
+  // precede a slow wave": the same eyes-closed waking rhythm the slow waves sit in.
+  'slow-fused': { target: 'awake', states: AWAKE, excludes: ['eyes-open'] },
 
   // ── The eyes ──
   // Sleep is eyes-closed, and so is this simulator's Drowsy (roving movements under
@@ -90,6 +93,9 @@ export const TOGGLE_RULES: Record<string, ToggleRule> = {
   // drowsiness, not absent. Drowsy is locked out because the Drowsy drawn here is
   // the eyes-closed picture, and a blink needs open eyes.
   'blink':        { target: 'awake', states: AWAKE, requires: ['eyes-open'] },
+  // LE: eye flutter is a waking ocular artifact, "similar to eye blinks". Not tied to
+  // Eyes Open as the blink is: no source found says the lids must start open.
+  'eye-flutter':  { target: 'awake', states: AWAKE },
   // Opening and closing on command: a cooperative patient, starting with the eyes
   // closed. With Eyes Open held on there is nothing to open — and so no blinks or
   // lambda either, since both need the eyes open throughout.
@@ -267,11 +273,16 @@ export function setPage(patientState: PatientState, patterns: Iterable<string>):
 /**
  * A quiz page: a pattern bound to a stage is shown in that stage — otherwise the
  * state-gated sources render nothing — and anything else on an awake background
- * rather than whatever the last question left.
+ * rather than whatever the last question left. Only what is asked about is on: the
+ * stage's other defaults stay off, so "identify the active pattern" has one answer
+ * (a spindle question used to bring K-complexes, vertex waves and POSTS with it,
+ * and a 14 & 6 question roving eye movements; 2026-10-23 audit).
  */
 export function quizPage(patterns: Iterable<string>): ToggleState {
   const list = [...patterns];
   let state: PatientState = 'awake';
   for (const id of list) state = TOGGLE_RULES[id]?.target ?? state;
-  return setPage(state, list);
+  const d = setPage(state, list);
+  for (const def of STATE_DEFAULTS[d.patientState]) if (!list.includes(def)) d.suppressed.add(def);
+  return settle(d);
 }

@@ -102,6 +102,17 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
   // opposite directions, which is the diagnostic feature of a lateral eye movement.
   // A horizontal rotation pivots about the globe CENTRE, ~1.3 cm behind the cornea.
   gaze:        { id: 'gaze',        pos: [ 0.00,-0.68, 0.61], orientation: { kind: 'tangential', dir: [-1, 0, 0] }, extent: 0.55 },
+  // The lateral rectus of each eye runs along the lateral wall of the orbit, behind
+  // the orbital rim (4.3 cm from midline, x 0.45, see the orbit note above), so its
+  // equivalent source sits lateral to and behind the rim, at pupil height: x 0.55,
+  // y -0.55, z 0.62. There it reaches F7 (0.88 of the column's peak) and hardly Fp1
+  // (0.20), so the spike reverses at F7 — Fp1-F7 and F7-T3 opposite, the lateral frontal
+  // maximum the sources describe. At the lateral canthus itself (x 0.43, z 0.74) Fp1
+  // and F7 came out equal (0.75, 0.74) and Fp1-F7 stayed flat. Extracranial, so the
+  // extent of the ocular monopole. Fires at the start of a saccade toward its own side
+  // (the lateral rectus spike, SaccadeGenerator).
+  lateralRectusL: { id: 'lateralRectusL', pos: [ 0.55,-0.55, 0.62], orientation: { kind: 'radial' }, extent: 0.25 },
+  lateralRectusR: { id: 'lateralRectusR', pos: [-0.55,-0.55, 0.62], orientation: { kind: 'radial' }, extent: 0.25 },
   // Temporalis fills the temporal fossa: from behind the orbital rim back to above
   // the ear, its belly in front of and a little below T3 — between F7 and T3. It was
   // at y = +0.10, 3.5 cm ABOVE T3 (y = -0.274) and as close to C3 as to T3, a
@@ -241,6 +252,74 @@ export class BlinkGenerator {
   }
 }
 
+/**
+ * Eye flutter: rapid repeated lid movements, each moving the cornea as a blink does,
+ * so a run of blink-like positive deflections over the frontopolar electrodes that
+ * stays in the frontal leads. learningeeg (Artifacts): "Similar to eye blinks, note
+ * that the prominent positive deflections across this page do not extend posteriorly
+ * beyond the frontal leads", "the lack of any underlying spike waves". Its figure
+ * (eye-flutter.webp, double banana), measured: 3.5 Hz on every frontal row through
+ * most of the 10 s page, the F-C and F7-T3 rows about 0.4 of the Fp rows and nothing on
+ * the parieto-occipital rows; EEG Atlas online's two flutter pages show about three a
+ * second. So a run is a whole number of lid cycles at one rate in FLUTTER_RATE_HZ,
+ * each cycle `lidShape` (the blink's own) filling its period with +/-10% jitter, on
+ * the blink's ocular sources, so it has the blink's field (IK-001, IK-032).
+ *
+ * The run and pause lengths and the size (FLUTTER_SHARE of a blink) are a design: no
+ * source gives them. learningeeg calls the deflections "prominent".
+ */
+export const FLUTTER_RATE_HZ: [number, number] = [3, 4];
+const FLUTTER_RUN_S: [number, number] = [3, 10];
+const FLUTTER_PAUSE_S: [number, number] = [2, 6];
+export const FLUTTER_SHARE = 0.6;
+/**
+ * A run of lid cycles has a mean level (each cycle is one-signed), which the display's
+ * 0.25 Hz low-frequency filter takes off while the run lasts — the rounded upward
+ * arches between the downward points, as on learningeeg's figure — and gives back
+ * when it stops, as a swing the other way that recovers over about a second (time
+ * constant 0.64 s). The run's box covers that too.
+ */
+export const FLUTTER_TAIL_S = 1.2;
+
+export class EyeFlutterGenerator {
+  private g: Gaussian;
+  private enabled = false;
+  private wait = 0;
+  private cycles: { len: number; amp: number }[] = [];
+  private k = 0;
+  private t = 0;
+  /** Length in seconds of the run that began on this sample, else 0. */
+  runStarted = 0;
+
+  constructor(seed: number, private dt: number) {
+    this.g = new Gaussian(seed);
+  }
+  /** Lid position, 0 open .. 1 a full blink's sweep, times the cycle's size. */
+  next(enabled: boolean): number {
+    this.runStarted = 0;
+    if (!enabled) { this.enabled = false; this.cycles = []; this.k = 0; return 0; }
+    if (!this.enabled) { this.enabled = true; this.cycles = []; this.k = 0; this.wait = OCULAR_FIRST_EVENT_LEAD_SEC; }
+    if (this.k >= this.cycles.length) {
+      this.wait -= this.dt;
+      if (this.wait > 0) return 0;
+      const period = 1 / this.g.range(...FLUTTER_RATE_HZ);
+      const n = Math.max(3, Math.round(this.g.range(...FLUTTER_RUN_S) / period));
+      this.cycles = Array.from({ length: n }, () => ({
+        len: period * (1 + (this.g.uniform() - 0.5) * 0.2),
+        amp: this.g.logNormal(1, 0.15),
+      }));
+      this.k = 0; this.t = 0;
+      this.runStarted = this.cycles.reduce((a, c) => a + c.len, 0);
+      this.wait = this.g.range(...FLUTTER_PAUSE_S);
+    }
+    const c = this.cycles[this.k];
+    const v = c.amp * lidShape(Math.min(1, this.t / c.len));
+    this.t += this.dt;
+    if (this.t >= c.len) { this.t -= c.len; this.k++; }
+    return v;
+  }
+}
+
 /** Asymmetric lid-movement transient: fast onset, slower return, 0 -> 1 -> 0 over u in [0,1]. */
 function lidShape(u: number): number {
   return u < 0.35
@@ -323,19 +402,60 @@ export class EyeOpeningGenerator {
 }
 
 /**
- * Saccade: a gaze step plus the brief extraocular spike potential at onset.
- * The spike is broadband and ~20 ms, and §4 notes it is a major contaminant of
- * apparent scalp gamma — so it must be present, or gamma-detection methods get
- * benchmarked on an unrealistically clean signal.
+ * Lateral rectus spike (LRS). A saccade begins with a burst of EMG from the
+ * extraocular muscles that pull the eyes: "EMG artifact from the lateral rectus
+ * muscle ipsilateral to the direction of movement" (EEG Atlas online, lateral eye
+ * movement); a large, short-duration scalp potential 15-30 ms before the saccade,
+ * largest near the eye on the side the saccade goes toward, attributed to the
+ * ipsilateral lateral rectus (Thickbroom & Mastaglia 1985, Brain Res, from its
+ * abstract). On the page it is a spike at F7 or F8 at the start of a lateral eye
+ * movement, and it comes with the rapid eye movements of REM sleep too.
+ *
+ * Modelled as one motor-unit-like biphasic spike, LRS_SPIKE_S long, on the
+ * lateral rectus source of the side the eyes turn to, LRS_LEAD_S before the gaze
+ * step begins. The first phase's sign is drawn per spike: an EMG spike's polarity
+ * depends on where the electrode sits over the muscle, and no source gives one.
+ * LRS_PEAK_UV is a design (about 4 mm at 7 uV/mm at the peak electrode): no source
+ * found gives the size on the scalp. Until 2026-10-27 this was a 20 ms burst of
+ * noise added to the gaze dipole itself, so it stood equal and opposite at F7 and
+ * F8 on every movement, the way the corneo-retinal step does, and had no name.
+ * The medial rectus of the other eye fires with it (Thickbroom & Mastaglia); it
+ * lies next to the nose, under no electrode, and is left out.
+ *
+ * It is also broadband, and §4 notes such spikes are a major contaminant of
+ * apparent scalp gamma — another reason it must be present.
+ */
+export const LRS_SPIKE_S = 0.024;
+export const LRS_LEAD_S = 0.02;
+export const LRS_PEAK_UV = 30;
+/** One lateral rectus spike, peak about 1, `t` seconds from its start; 0 outside it. */
+export function lrsSpike(t: number): number {
+  if (t < 0 || t >= LRS_SPIKE_S) return 0;
+  const u = t / LRS_SPIKE_S;
+  return Math.sin(2 * Math.PI * u) * Math.exp(-2 * u) / 0.62;
+}
+
+/**
+ * Saccade: a gaze step, led by the lateral rectus spike of the side the eyes turn
+ * toward (see LRS_* above). Positive gaze is to the right (`ARTIFACT_SOURCES.gaze`
+ * points its positive pole at F8).
  */
 export class SaccadeGenerator {
   private g: Gaussian;
   private samplesToNext = 0;
   private level = 0;
   private target = 0;
-  private spikeLeft = 0;
-  private spikeAmp = 0;
+  private pendingTarget = 0;
+  private stepIn = -1;
+  private spikeT = -1;
+  private spikeSign = 1;
+  private spikeSide = 0;
   private enabled = false;
+  /** This sample's lateral rectus spike on each side, peak about 1. */
+  lrsL = 0;
+  lrsR = 0;
+  /** The side whose spike began on this sample: -1 left, +1 right, 0 none. */
+  lrsStarted = 0;
 
   constructor(seed: number, private dt: number, private ratePerMin = 25) {
     this.g = new Gaussian(seed);
@@ -349,12 +469,14 @@ export class SaccadeGenerator {
     this.samplesToNext = Math.max(1, Math.round(interval / this.dt));
   }
   next(enabled: boolean, rateScale = 1): number {
+    this.lrsL = 0; this.lrsR = 0; this.lrsStarted = 0;
     if (!enabled) {
       // Reset gaze so re-enabling starts from primary position, not a stale angle.
       this.enabled = false;
       this.level = 0;
       this.target = 0;
-      this.spikeLeft = 0;
+      this.stepIn = -1;
+      this.spikeT = -1;
       return 0;
     }
     if (!this.enabled) {
@@ -362,19 +484,26 @@ export class SaccadeGenerator {
       this.samplesToNext = Math.max(1, Math.round(OCULAR_FIRST_EVENT_LEAD_SEC / this.dt));
     }
     if (--this.samplesToNext <= 0) {
-      this.target = this.g.range(-1, 1);
-      this.spikeLeft = Math.max(1, Math.round(0.02 / this.dt));
-      this.spikeAmp = Math.sign(this.target - this.level) * this.g.logNormal(0.5, 0.3);
+      // The spike now, the gaze step LRS_LEAD_S later.
+      this.pendingTarget = this.g.range(-1, 1);
+      // +1: the count is taken down on this same sample, below.
+      this.stepIn = Math.max(1, Math.round(LRS_LEAD_S / this.dt)) + 1;
+      this.spikeSide = Math.sign(this.pendingTarget - this.target);
+      this.spikeSign = this.g.uniform() < 0.5 ? -1 : 1;
+      this.spikeT = 0;
+      this.lrsStarted = this.spikeSide;
       this.schedule(rateScale);
+    }
+    if (this.stepIn > 0 && --this.stepIn === 0) this.target = this.pendingTarget;
+    if (this.spikeT >= 0) {
+      const v = this.spikeSign * lrsSpike(this.spikeT);
+      if (this.spikeSide < 0) this.lrsL = v; else if (this.spikeSide > 0) this.lrsR = v;
+      this.spikeT += this.dt;
+      if (this.spikeT >= LRS_SPIKE_S) this.spikeT = -1;
     }
     // Gaze steps quickly to the new position and holds there.
     this.level += (this.target - this.level) * Math.min(1, 40 * this.dt);
-    let v = this.level;
-    if (this.spikeLeft > 0) {
-      this.spikeLeft--;
-      v += this.spikeAmp * (this.g.uniform() * 0.6 + 0.7);
-    }
-    return v;
+    return this.level;
   }
 }
 
@@ -654,6 +783,7 @@ export function artifactSeeds(seed: number) {
     blink: deriveSeed(seed, 'blink'),
     eyeOpening: deriveSeed(seed, 'eyeOpening'),
     saccade: deriveSeed(seed, 'saccade'),
+    flutter: deriveSeed(seed, 'flutter'),
     emgL: deriveSeed(seed, 'emgL'),
     emgR: deriveSeed(seed, 'emgR'),
     emgF: deriveSeed(seed, 'emgF'),

@@ -360,6 +360,7 @@ const gtcMuscles: PatternSourceDescriptor[] = (['temporalisL', 'temporalisR', 'f
   .map((m): PatternSourceDescriptor => ({
     id: `gtc-emg-${m}`,
     toggles: ['gtc-ictal'],
+    extracranial: true,
     spec: { ...ARTIFACT_SOURCES[m], id: `gtc-emg-${m}` },
     make: (seed, dt) => gtcMuscle(seed, dt),
   }));

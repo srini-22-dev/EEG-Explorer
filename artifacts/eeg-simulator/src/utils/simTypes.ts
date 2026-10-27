@@ -180,7 +180,29 @@ export type FocalPlacement = 'under' | 'between';
  */
 export type PatternOptions = {
   postsForm?: PostsForm; focalPlacement?: FocalPlacement; seizureMuscle?: boolean; kcSpindle?: KcSpindle;
+  sixHzForm?: SixHzForm; breachSite?: BreachSite; pos146Sides?: Pos146Sides;
 };
+
+/**
+ * How the 14 & 6 Hz positive bursts take the two sides, as the sources describe them.
+ * `shifting` (default): on both sides or on one, the side shifting from burst to burst,
+ * the right more often, 0.5-1 s (eegpedia; the SCORE normal-variants study).
+ * `bilateral`: always both sides together, 1-2 s (learningeeg).
+ */
+export type Pos146Sides = 'shifting' | 'bilateral';
+
+/**
+ * Which form the 6 Hz phantom spike-and-wave takes: FOLD (female, occipital, low
+ * amplitude spike, drowsy — the benign one, the default) or WHAM (waking, high
+ * amplitude spike, anterior, male — eegpedia: associated with epilepsy).
+ */
+export type SixHzForm = 'fold' | 'wham';
+
+/**
+ * The electrode over the skull defect for the breach rhythm. Default `C4`, the right
+ * central defect of eegpedia's figure; `F8` is the SCORE study's figure.
+ */
+export type BreachSite = 'C4' | 'C3' | 'F8' | 'F7';
 
 /**
  * Whether a K-complex is followed by a sleep spindle: never, sometimes (60% — the
