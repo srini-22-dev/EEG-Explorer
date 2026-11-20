@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { X, BookOpen, Clock } from 'lucide-react';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { PATTERN_INFO } from '../utils/patternInfo';
-import { PATTERN_GALLERY } from '../utils/patternGallery.generated';
+import { PATTERN_GALLERY } from '../utils/patternGallery';
 import { MONTAGES } from '../utils/montages';
 
 /**

@@ -91,7 +91,7 @@ in ids that actually exist:
 > This list is a convenience copy and can go stale. If the id you need isn't here, check
 > `artifacts/eeg-simulator/src/utils/patterns.ts` — that file is the registry.
 
-**Check** is `—` unless an assertion in `scripts/src/validateEngine.ts` already covers it. If one
+**Check** is `—` unless an assertion in the gate (`scripts/src/gate/`) already covers it. If one
 does, name it. Never invent a check that doesn't exist.
 
 **Status:**
@@ -118,7 +118,7 @@ placeholders that become misleading once real content exists. Mention this in th
 `/ik --verify IK-003` checks whether the simulator actually obeys an entry, rather than adding one.
 
 1. Read its **Observable** and reproduce those exact conditions.
-2. Prefer an assertion in `scripts/src/validateEngine.ts` using the existing
+2. Prefer an assertion in the gate (`scripts/src/gate/stepNN-*.ts`) using the existing
    `check(label, actual, lo, hi, unit)` helper and the DSP primitives in `scripts/src/dsp.ts`
    (`welch`, `fitAperiodic`, `hilbertEnvelope`, `dfa`, `spectralPeak`, `autocorr`). Don't write
    new analysis code.

@@ -70,7 +70,7 @@ When implementing any new pattern, montage, artifact, or waveform behavior:
 The simulator holds two views of its own signal, and they are not interchangeable:
 
 - **Spectral / referential space** — the engine's per-electrode voltages reduced to scalars
-  (band power, envelopes, correlations) in `scripts/src/validateEngine.ts`. Answers *quantity*:
+  (band power, envelopes, correlations) in the gate (`scripts/src/gate/`). Answers *quantity*:
   how much alpha, what peak frequency, is a rhythm reactive.
 - **Display space** — the **montage-derived** channel actually drawn on the page:
   `computeChannelVoltage` + `commonAverage` (`utils/computeChannel.ts`), painted **negative-up**
@@ -129,10 +129,10 @@ mention pre-existing dead code rather than deleting it.
 signal change that means, in order:
 
 1. Write the `IK-` entry stating the observable consequence (§2).
-2. Add a `check()` to `scripts/src/validateEngine.ts` asserting it.
+2. Add a `check()` asserting it, in the gate step it belongs to (`scripts/src/gate/stepNN-*.ts`).
 3. Make it pass.
 
-Reuse `check(label, actual, lo, hi, unit)` in `validateEngine.ts` and the DSP primitives in
+Reuse `check(label, actual, lo, hi, unit)` and the runners in `scripts/src/gate/harness.ts` and the DSP primitives in
 `scripts/src/dsp.ts` (`welch`, `fitAperiodic`, `hilbertEnvelope`, `dfa`, `spectralPeak`,
 `autocorr`) rather than writing new analysis code.
 
@@ -184,13 +184,15 @@ conflict with §6.
 | Command | Purpose |
 |---|---|
 | `pnpm --filter @workspace/scripts run validate` | **The regression gate.** Signal-model changes must leave it green. Also audits `INFORMING-KNOWLEDGE.md`'s statuses — see below. |
+| `pnpm --filter @workspace/scripts run validate -- --only <regex>` | Only the sections whose step or title matches (`--list` shows them). For iterating; **not a verification** — it skips the knowledge-base audit, so report only after a full run. |
 | `pnpm run typecheck` | Full workspace typecheck (builds `lib/*` refs, then `artifacts/*` + `scripts`). |
 | `pnpm run dev` | Runs the simulator from the repo root and opens it in the browser; sets `PORT`/`BASE_PATH` itself via `cross-env`. `run-eeg-explorer.bat` does the same on a double-click, or just opens the page if it is already running. |
 | `pnpm run build` | Typecheck, then each package's `build`. |
 
-There is no unit-test runner. `scripts/src/validateEngine.ts` is the de facto test suite — a
-battery asserting spectral, temporal, and topographic properties of the generated signal. Never
-claim a signal change works without running it and reporting the output.
+There is no unit-test runner. The gate is the de facto test suite — a battery asserting spectral,
+temporal, and topographic properties of the generated signal, one file per step in
+`scripts/src/gate/`, run in order by `scripts/src/validateEngine.ts`, which then does the audits
+below. Never claim a signal change works without running it and reporting the output.
 
 **The gate also enforces §2's knowledge base against itself.** After the checks run, it reads
 `INFORMING-KNOWLEDGE.md`, resolves the `check(...)` labels each entry cites against the results

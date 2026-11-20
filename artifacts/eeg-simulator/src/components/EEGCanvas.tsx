@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Montage, ALL_ELECTRODES } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
@@ -9,12 +9,12 @@ import { PATTERN_BY_ID } from '../utils/patterns';
 import { THEMES, EEGTheme } from '../utils/themes';
 import { EDUCATIONAL_ANNOTATIONS, PATTERN_COLOR, REGION_ORDER } from '../utils/annotations';
 import { Pause, Play } from 'lucide-react';
+import { buildLayout, GAP_UNITS } from './canvasLayout';
+import { useCanvasPointer, drawMeasureTools } from './canvasPointer';
 import {
   subscribe,
   getHighlightState,
   HighlightState,
-  setHoverChannels,
-  toggleClickChannel,
   getChannelsUsingElectrode,
 } from '../utils/highlightStore';
 import {
@@ -44,7 +44,6 @@ type EEGCanvasProps = {
   graphHover?: boolean;
 };
 
-const GAP_UNITS   = 0.40; // fractional row-height gap between chain groups
 /**
  * Seconds of signal kept behind the sweep.
  *
@@ -78,49 +77,6 @@ function lowerBound(arr: number[], value: number): number {
   return lo;
 }
 
-type RowLayout = {
-  channelIndex: number;  // -1 = spacer
-  centerFrac: number;
-  rowFrac: number;
-};
-
-function buildLayout(montage: Montage): RowLayout[] {
-  const rows: Array<{ channelIndex: number; prevGroup: string | null; group: string | null }> = [];
-  let lastGroup: string | null = null;
-
-  for (let i = 0; i < montage.channels.length; i++) {
-    const g = montage.channels[i].group;
-    if (lastGroup !== null && g !== lastGroup && g !== 'ecg') {
-      rows.push({ channelIndex: -1, prevGroup: lastGroup, group: null });
-    }
-    rows.push({ channelIndex: i, prevGroup: lastGroup, group: g });
-    lastGroup = g;
-  }
-
-  const total = rows.reduce((s, r) => s + (r.channelIndex < 0 ? GAP_UNITS : 1), 0);
-  let cum = 0;
-  return rows.map(r => {
-    const frac = r.channelIndex < 0 ? GAP_UNITS / total : 1 / total;
-    const layout: RowLayout = { channelIndex: r.channelIndex, centerFrac: cum + frac / 2, rowFrac: frac };
-    cum += frac;
-    return layout;
-  });
-}
-
-// Hit-test a pointer y-coordinate against row bands. x is intentionally ignored so
-// the label strip and the trace body behave identically for hover/click.
-function getChannelAtY(layout: RowLayout[], y: number, h: number): number | null {
-  for (const row of layout) {
-    if (row.channelIndex < 0) continue;
-    const top    = (row.centerFrac - row.rowFrac / 2) * h;
-    const bottom = (row.centerFrac + row.rowFrac / 2) * h;
-    if (y >= top && y < bottom) return row.channelIndex;
-  }
-  return null;
-}
-
-type Point = { x: number, y: number, t: number, v: number };
-
 export function EEGCanvas({
   montage, settings, activeEffectsLabel,
   theme, showAnnotations, isFrozen, setIsFrozen,
@@ -149,17 +105,10 @@ export function EEGCanvas({
     return subscribe(() => { highlightRef.current = getHighlightState(); });
   }, []);
 
-  // Measurement tool state
-  const measurePointsRef = useRef<{ a: Point | null, b: Point | null }>({ a: null, b: null });
-  const [hasMeasurePoints, setHasMeasurePoints] = useState(false);
-  // Drag-to-measure (owner, 2026-11-16): while frozen, a drag draws a box whose
-  // width is a duration and whose height is a voltage, read on the row the drag
-  // started on. A plain click still places caliper points; the click that ends a
-  // drag is swallowed so it does not place one too.
-  type MeasureBox = { x0: number; y0: number; x1: number; y1: number; scale: number; isEcg: boolean };
-  const dragRef = useRef<MeasureBox | null>(null);
-  const boxRef = useRef<MeasureBox | null>(null);
-  const swallowClickRef = useRef(false);
+  // Hover, highlight, the caliper, the measuring box and the keyboard (canvasPointer.ts).
+  const pointer = useCanvasPointer({
+    canvasRef, montage, settingsRef, frozenRef, elapsedRef, isFrozen, setIsFrozen, graphHover,
+  });
 
   // The engine and each sample's raw electrode voltages outlive a montage change.
   // A montage only chooses which differences of the same electrodes to draw, so
@@ -189,8 +138,6 @@ export function EEGCanvas({
       dataBuffer.current = montage.channels.map(ch =>
         frames.map((f, k) => computeChannelVoltage(ch, timeBuffer.current[k], f, avg[k])));
     }
-    measurePointsRef.current = { a: null, b: null };
-    setHasMeasurePoints(false);
   }, [montage]);
 
   useEffect(() => {
@@ -747,73 +694,7 @@ export function EEGCanvas({
       }
       
       // 10. Measurement Tool Render
-      // 10a. The drag box: the one being drawn, else the last one kept.
-      const mbox = frozenRef.current ? (dragRef.current ?? boxRef.current) : null;
-      if (mbox) {
-        const bx = Math.min(mbox.x0, mbox.x1), by = Math.min(mbox.y0, mbox.y1);
-        const bw = Math.abs(mbox.x1 - mbox.x0), bh = Math.abs(mbox.y1 - mbox.y0);
-        ctx.save();
-        ctx.fillStyle = 'rgba(59,130,246,0.10)';
-        ctx.fillRect(bx, by, bw, bh);
-        ctx.strokeStyle = '#3b82f6';
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([4, 3]);
-        ctx.strokeRect(bx, by, bw, bh);
-        ctx.setLineDash([]);
-        const dtS = bw / pxPerSec;
-        const dv = bh / mbox.scale;
-        const dtText = dtS >= 1 ? `${dtS.toFixed(2)} s` : `${(dtS * 1000).toFixed(0)} ms`;
-        const dvText = mbox.isEcg ? `${dv.toFixed(2)} mV` : `${dv.toFixed(1)} µV`;
-        const text = `Δt ${dtText} · ΔV ${dvText}${dtS > 0 ? ` · ${(1 / dtS).toFixed(1)} Hz` : ''}`;
-        ctx.font = '11px sans-serif';
-        const tw = ctx.measureText(text).width + 12;
-        // Above the box, unless that is under the freeze button's hint at the top.
-        const ly = by > 64 ? by - 12 : by + bh + 12;
-        const lx = Math.min(Math.max(bx + bw / 2, lblW + tw / 2 + 2), w - tw / 2 - 2);
-        ctx.fillStyle = 'rgba(15,23,42,0.85)';
-        ctx.fillRect(lx - tw / 2, ly - 10, tw, 20);
-        ctx.fillStyle = '#fff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, lx, ly);
-        ctx.restore();
-      }
-      if (frozenRef.current) {
-        const { a, b } = measurePointsRef.current;
-        
-        ctx.strokeStyle = '#ef4444';
-        ctx.fillStyle = '#ef4444';
-        ctx.lineWidth = 1;
-        
-        if (a) {
-          ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, Math.PI * 2); ctx.fill();
-          ctx.beginPath(); ctx.moveTo(a.x, 0); ctx.lineTo(a.x, h); ctx.setLineDash([5, 5]); ctx.stroke(); ctx.setLineDash([]);
-        }
-        if (b) {
-          ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill();
-          ctx.beginPath(); ctx.moveTo(b.x, 0); ctx.lineTo(b.x, h); ctx.setLineDash([5, 5]); ctx.stroke(); ctx.setLineDash([]);
-        }
-        
-        if (a && b) {
-          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); 
-          ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
-          
-          const dt = Math.abs(b.t - a.t);
-          const dv = Math.abs(b.v - a.v);
-          const freq = dt > 0 ? (1 / dt).toFixed(1) : '0';
-          const text = `${(dt * 1000).toFixed(0)} ms | ${dv.toFixed(1)} µV | ${freq} Hz`;
-          
-          const midX = (a.x + b.x) / 2;
-          const midY = (a.y + b.y) / 2 - 15;
-          const tw = ctx.measureText(text).width + 12;
-          
-          ctx.fillStyle = 'rgba(0,0,0,0.8)';
-          ctx.fillRect(midX - tw/2, midY - 10, tw, 20);
-          ctx.fillStyle = '#fff';
-          ctx.textAlign = 'center';
-          ctx.fillText(text, midX, midY);
-        }
-      }
+      drawMeasureTools(ctx, pointer.tools, frozenRef.current, { pxPerSec, lblW, w, h });
 
       rafId = requestAnimationFrame(render);
     };
@@ -822,160 +703,12 @@ export function EEGCanvas({
     return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, [montage]);
 
-  /** The row nearest `y` and the scale it is drawn with (px per µV, or per mV for ECG). */
-  const rowScaleAt = (y: number, h: number) => {
-    const layout = buildLayout(montage);
-    let closestRow = layout[0];
-    let minDist = Infinity;
-    for (const row of layout) {
-      if (row.channelIndex < 0) continue;
-      const dist = Math.abs(y - row.centerFrac * h);
-      if (dist < minDist) { minDist = dist; closestRow = row; }
-    }
-    const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
-    const totalU  = nonSp + (layout.length - nonSp) * GAP_UNITS;
-    const pxPerMm = pxPerMmFromHeight(h, totalU);
-    const isEcg = closestRow.channelIndex >= 0
-      && montage.channels[closestRow.channelIndex]?.label === 'ECG';
-    return { row: closestRow, isEcg, scale: isEcg ? ecgScale(pxPerMm) : calcPxPerUV(pxPerMm, settingsRef.current.sensitivity) };
-  };
-
-  const canvasXY = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  };
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!frozenRef.current || e.button !== 0 || !canvasRef.current) return;
-    const { x, y } = canvasXY(e);
-    const { scale, isEcg } = rowScaleAt(y, canvasRef.current.height);
-    dragRef.current = { x0: x, y0: y, x1: x, y1: y, scale, isEcg };
-  };
-  const handleMouseUp = (e?: React.MouseEvent<HTMLCanvasElement>) => {
-    const d = dragRef.current;
-    if (!d) return;
-    if (e) { const { x, y } = canvasXY(e); d.x1 = x; d.y1 = y; }
-    dragRef.current = null;
-    if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) > 4) {
-      boxRef.current = d;
-      swallowClickRef.current = true;
-    }
-  };
-
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (swallowClickRef.current) { swallowClickRef.current = false; return; }
-
-    if (!frozenRef.current) {
-      // Not frozen: clicks toggle a persistent channel highlight instead of measuring.
-      const rect = canvas.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
-      if (idx !== null) toggleClickChannel(idx);
-      return;
-    }
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const currentSettings = settingsRef.current;
-    const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
-    const currentT = elapsedRef.current;
-    const w = canvas.width;
-    const h = canvas.height;
-    
-    const clickT = currentT - (w - x) / pxPerSec;
-
-    // Invert exactly the mapping the renderer used to draw this row. `traceY` is
-    // `centerY + v * scale`, so the inverse is `(y - centerY) / scale` — and
-    // `scale` must be the SAME one that row was drawn with, or the caliper
-    // measures a curve it did not plot. The ECG row is drawn through `ecgScale`
-    // (mV, and negated, being a limb lead); `rowScaleAt` branches on it, which was
-    // once the whole fix for a caliper off by ~14x and the wrong sign there.
-    const { row: closestRow, scale: clickScale } = rowScaleAt(y, h);
-    const clickV = (y - closestRow.centerFrac * h) / clickScale;
-
-    const point = { x, y, t: clickT, v: clickV };
-    
-    const currentPoints = measurePointsRef.current;
-    if (!currentPoints.a || (currentPoints.a && currentPoints.b)) {
-      measurePointsRef.current = { a: point, b: null };
-    } else {
-      measurePointsRef.current = { a: currentPoints.a, b: point };
-    }
-    setHasMeasurePoints(!hasMeasurePoints);
-  };
-
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (dragRef.current) {
-      const { x, y } = canvasXY(e);
-      dragRef.current.x1 = x;
-      dragRef.current.y1 = y;
-    }
-    if (!graphHover) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
-    setHoverChannels(idx !== null ? new Set([idx]) : new Set());
-  };
-
-  const handleCanvasMouseLeave = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    handleMouseUp(e);
-    setHoverChannels(new Set());
-  };
-
-  // Resuming the trace moves everything a box was drawn over, so it goes.
-  useEffect(() => {
-    if (!isFrozen) { boxRef.current = null; dragRef.current = null; }
-  }, [isFrozen]);
-
-  // Turning graph hover off mid-hover would otherwise leave the last hovered
-  // channel stuck highlighted, since no further mouse-move fires to clear it.
-  useEffect(() => {
-    if (!graphHover) setHoverChannels(new Set());
-  }, [graphHover]);
-
-  // Keyboard transport. Freezing the trace and measuring on it is the single
-  // most useful thing a learner can do here, and it was reachable only through
-  // one small unlabelled button. Space is the freeze/resume key every clinical
-  // review system uses; Escape clearing the calipers saves a throwaway third
-  // click just to begin a new measurement (a third click currently restarts the
-  // pair anyway, but only after the old one is still on screen).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      // Never steal the key from a control that already means something by it:
-      // Space types into the pattern search box and activates focused buttons
-      // and switches.
-      if (el && (el.isContentEditable
-        || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName)
-        || el.getAttribute('role') === 'switch')) return;
-      if (e.code === 'Space') {
-        e.preventDefault();          // otherwise the page scrolls
-        setIsFrozen(!frozenRef.current);
-      } else if (e.key === 'Escape' && frozenRef.current) {
-        measurePointsRef.current = { a: null, b: null };
-        boxRef.current = null;
-        setHasMeasurePoints(v => !v);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [setIsFrozen]);
-
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>
       <canvas
         ref={canvasRef}
         className={`block w-full h-full ${isFrozen ? 'cursor-crosshair' : ''}`}
-        onClick={handleCanvasClick}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseMove={handleCanvasMouseMove}
-        onMouseLeave={handleCanvasMouseLeave}
+        {...pointer.handlers}
       />
       <div className="absolute top-2 left-[70px] z-10 flex gap-2">
         <button 

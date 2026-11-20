@@ -6,7 +6,9 @@
     // modules directly from artifacts/, which sits outside this package. These
     // scripts are only ever run through tsx (never emitted), so constraining the
     // source root buys nothing and blocks the import.
-    "types": ["node"]
+    "types": ["node"],
+    // The info-panel gallery data (artifacts/eeg-simulator/src/utils/patternGallery.json).
+    "resolveJsonModule": true
   },
   "include": ["src"]
 }
