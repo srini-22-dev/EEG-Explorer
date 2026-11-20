@@ -1,14 +1,16 @@
-import React, { useState, useMemo, useRef, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useRef, useCallback, Suspense, lazy } from 'react';
 import { ControlPanel } from './components/ControlPanel';
+import { TopBar } from './components/TopBar';
+import { InfoPanel } from './components/InfoPanel';
 import { EEGCanvas } from './components/EEGCanvas';
 import { MONTAGES } from './utils/montages';
 import {
   type ToggleState, initialToggles, effective, toggle, enterState, clearToggles, setPage, quizPage,
 } from './utils/toggleRules';
 import type {
-  SimSettings, PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions, Speed, Sensitivity,
+  SimSettings, PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions, Speed, Sensitivity, FilterSettings,
 } from './utils/simTypes';
-import { defaultIctalParamsMap, defaultArtifactParams } from './utils/simTypes';
+import { defaultIctalParamsMap, defaultArtifactParams, POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT, DEFAULT_FILTERS } from './utils/simTypes';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
 import { QuizMode } from './components/QuizMode';
@@ -35,6 +37,9 @@ export default function App() {
   const [montageId,    setMontageId]    = useState<string>('bipolar-ap');
   const [speed,        setSpeed]        = useState<Speed>(30);
   const [sensitivity,  setSensitivity]  = useState<Sensitivity>(7);
+  // One object, replaced whole on each change: the engine short-circuits on an
+  // unchanged reference (Engine.setFilters).
+  const [filters,      setFilters]      = useState<FilterSettings>(DEFAULT_FILTERS);
   // The background state and the toggles are one value, changed only through the
   // rule functions in utils/toggleRules.ts. That is what keeps a contradictory page
   // (a blink in REM, lambda waves with the eyes closed) from being reachable.
@@ -61,7 +66,7 @@ export default function App() {
   const updateArtifactParams = (patch: Partial<ArtifactParams>) =>
     setArtifactParams(prev => ({ ...prev, ...patch }));
 
-  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', pos146Sides: 'shifting' });
+  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', pos146Sides: 'shifting', postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
     setPatternOptions(prev => ({ ...prev, ...patch }));
 
@@ -79,12 +84,15 @@ export default function App() {
   const timeBuffer = useRef<number[]>([]);
 
   const [show3DPanel, setShow3DPanel] = useState(false);
+  // The toggle whose information panel is open, if any.
+  const [infoId, setInfoId] = useState<string | null>(null);
+  const closeInfo = useCallback(() => setInfoId(null), []);
   const [headOpacity, setHeadOpacity] = useState(0.3);
   const [brainOpacity, setBrainOpacity] = useState(0.8);
 
   const settings: SimSettings = {
     speed, sensitivity, patientState, activePatterns: effectivePatterns, ictalParams, artifactParams,
-    patternOptions,
+    patternOptions, filters,
   };
 
   // Build active-effects label list for canvas overlay
@@ -96,13 +104,11 @@ export default function App() {
         {/* Hidden, not removed, during the quiz: its switches name the answer. */}
         <div className={quizMode ? 'contents invisible' : 'contents'}>
         <ControlPanel
-          montageId={montageId}         setMontageId={setMontageId}
+          montageId={montageId}
           activePatterns={effectivePatterns} togglePattern={togglePattern}
           ictalParams={ictalParams} updateIctalParams={updateIctalParams}
           artifactParams={artifactParams} updateArtifactParams={updateArtifactParams}
           patternOptions={patternOptions} updatePatternOptions={updatePatternOptions}
-          speed={speed}                 setSpeed={setSpeed}
-          sensitivity={sensitivity}     setSensitivity={setSensitivity}
           patientState={patientState}   setPatientState={setPatientState}
           clearAll={clearAll}
           theme={theme} setTheme={setTheme}
@@ -115,9 +121,16 @@ export default function App() {
           show3DPanel={show3DPanel} setShow3DPanel={setShow3DPanel}
           headOpacity={headOpacity} setHeadOpacity={setHeadOpacity}
           brainOpacity={brainOpacity} setBrainOpacity={setBrainOpacity}
+          infoId={infoId} onShowInfo={setInfoId}
         />
         </div>
-        <div className="flex-1 flex flex-col h-full relative">
+        <div className="flex-1 flex flex-col h-full relative min-w-0">
+          <TopBar
+            montageId={montageId} setMontageId={setMontageId}
+            sensitivity={sensitivity} setSensitivity={setSensitivity}
+            speed={speed} setSpeed={setSpeed}
+            filters={filters} setFilters={setFilters}
+          />
           {/*
             The PanelGroup is unconditional and EEGCanvas is written exactly once.
             It used to appear twice — inside the group and again as a bare sibling —
@@ -174,6 +187,16 @@ export default function App() {
                       montage={MONTAGES[montageId]}
                     />
                   </Suspense>
+                </Panel>
+              </>
+            )}
+            {infoId && !quizMode && (
+              <>
+                <PanelResizeHandle className="w-2 bg-[#2e4a2e] hover:bg-[#3e5a3e] cursor-col-resize transition-colors flex items-center justify-center">
+                  <div className="w-1 h-8 bg-slate-500 rounded-full" />
+                </PanelResizeHandle>
+                <Panel id="info" order={4} defaultSize={30} minSize={20}>
+                  <InfoPanel id={infoId} onClose={closeInfo} />
                 </Panel>
               </>
             )}

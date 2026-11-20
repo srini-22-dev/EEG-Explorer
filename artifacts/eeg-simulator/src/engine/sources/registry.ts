@@ -56,6 +56,9 @@ export type SampleContext = {
   ictalHemisphere: IctalHemisphere;
   /** Which form POSTS take (see `PostsForm`). Only the POSTS generator consults this. */
   postsForm: PostsForm;
+  /** POSTS sides (`PatternOptions.postsSmallerPct` / `postsOneSidePct`). Only the POSTS generators consult these. */
+  postsSmallerPct: number;
+  postsOneSidePct: number;
   /** Where a focal source sits (see `FocalPlacement`). Only the focal-spike and focal-seizure generators consult this. */
   focalPlacement: FocalPlacement;
   /**

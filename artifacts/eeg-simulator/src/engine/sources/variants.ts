@@ -32,7 +32,7 @@ import {
 import { Gaussian, deriveSeed } from '../rng';
 import { TransientSource } from './transient';
 import {
-  gaussian, arciformSignal, arcPeakTime,
+  gaussian, arciformSignal,
   MU_TONES, MU_TONE_NORM,
   POS_BURST_TONE_NORM,
 } from './morphology';
@@ -146,25 +146,164 @@ const muR = muSide('mu-r', MU_FIELD.right);
 // alpha frequency range", Reiher & Lebel as quoted by StatPearls NBK555899;
 // learningeeg says "usually 7-11 Hz"; IK-015 holds the wider range).
 //
-// Each burst used to be SEVEN tones from 6.2 to 11 Hz summed and divided by their
-// combined amplitude. Seven tones of different frequency are almost never in
-// phase, so the sum ran at a quarter of its nominal size — 12 uV at T3 for a
-// nominal 50, measured — and no two arches in a burst were the same width.
-//
-// 70 uV nominal, so bursts peak at roughly 60-100 uV at T3: the foot of the
-// 60-200 uV range given for wickets (AES atlas, NBK390343, as quoted by search).
-//
 // Singles (2026-10-27). Wickets come "as single discharges or runs" (SCORE normal
 // variants study, Clin Neurophysiol Pract 2022, PMC9294211); "short runs of 6-11Hz
-// spikes, sometimes single spike" (eegpedia). Until then every event was a run. A
-// share of events is now one arch at the run's frequency: the same waveform,
-// windowed to one cycle about its pointed peak. No source gives the share; one in
+// spikes, sometimes single spike" (eegpedia). No source gives the share; one in
 // three is a design that puts a single on most pages that carry wickets.
+//
+// Rebuilt 2026-11-16 against the owner's references (a clinical bipolar record and
+// a teaching figure) and Gelisse, Benbadis, Crespel & Tatum, J Neurol 2024
+// 271:3869 (open access): wickets "appear most often in bursts with a typical
+// morphology of diamond or lozenge-shaped", "occasionally singly", and a single's
+// morphology "is identical to the morphology of the most sharply contoured
+// waveforms in the runs". Until then each burst was 8-10 mathematically identical
+// arches under a Gaussian (spindle) envelope, about 5x the background on T3-T5,
+// and a single was a needle taller than any run. Now:
+//  - a run was 4-7 arches (the references show short runs, a handful of waves;
+//    lengthened the same day, below);
+//  - its envelope is a diamond: a straight crescendo to a peak somewhere in the
+//    middle third and a straight decrescendo, starting and ending at about a third
+//    of the peak, not swelling out of nothing;
+//  - each arch is a whole cycle, starting and ending at a zero crossing, with its
+//    own height (+-12%) and width (+-4%) about the run's: one frequency and one
+//    shape, as every source requires, but not copies of one another (owner: "they
+//    should not all be identical"); runs differ in length, size (+-25%) and where
+//    the peak falls;
+//  - the arch is drawn, not summed from tones: a rounded half-sine over 57% of the
+//    cycle (the broad, surface-positive side) and a straight-legged spike over the
+//    other 43% (the sharp side, negative: IFCN, "spike-like monophasic surface
+//    negative"), the spike sized so the cycle has zero mean — about 1.7x the
+//    rounded lobe — so a run rides on no slow offset and leaves no slow wave. A
+//    tone sum was tried first (fundamental + 0.45 2nd + 0.15 3rd harmonic): its
+//    broad side came out a flat plateau and a run read as a square-wave comb;
+//  - a single is the run's peak arch on its own, at a run's size.
+// Amplitude: 52 uV at the apex under T3 for a mid-sized run's peak arch. The
+// references put a run at about twice the background's height on its row; that
+// ratio would put wickets near 40 uV here, under the AES atlas's 60-200 uV
+// (NBK390343) — a conflict between the two, settled at the AES floor at T3.
+//
+// Longer, less regular, less mirrored (owner, 2026-11-16, against learningeeg's
+// wicket figure and a clinical record). Measured on those pages: runs of 1-2 s on
+// a 10 s/page record and about 4 s (~25 waves at ~7 Hz) on learningeeg's, waxing
+// and waning more than once; and F7-T3, T3-T5 and T5-O1 each carrying the rhythm at
+// their own size and shape, not as inverted copies of one another. So:
+//  - a run's length is drawn log-uniformly from 0.4 to 4 s (median ~1.3 s); the
+//    arch count is that times its frequency, at least 3. Runs of 8 arches or fewer
+//    keep the diamond above (Gelisse 2024); longer ones wax and wane — one to three
+//    swells under a taper of about three arches at each end, still starting and
+//    ending at about a third of the peak;
+//  - each arch has its own split between the rounded lobe and the spike (57% +-10%
+//    of the cycle), so the spike's width varies with it, its own period (+-8%, was
+//    4%) and its own height (+-20%, was 12%): one frequency still, but no two
+//    arches the same shape;
+//  - the field is two generators per side. The main one under T3 (T4) as before,
+//    and a second under T5 (T6) carrying the same arches, each at its own 50-100%
+//    of the main and 15-40% of a cycle behind it (14-67 ms). With one generator
+//    F7-T3 and T3-T5 were exact
+//    negatives (a phase reversal at T3 and nothing else); with two they still
+//    reverse at T3, but their size and shape differ arch by arch, and T5-O1 carries
+//    the run as well, as on the references. (A second generator midway between T3
+//    and T5, tried first, raised both electrodes alike and left the mirror as it
+//    was.) No source gives this split; it is a design that reproduces the references.
+// The window is the longest run (4 s at 6 Hz, +6%) and the gap after it 1-2 s, so
+// an event starts every ~5.8 s (was ~5 s) and a 4 s run still leaves room around it.
 // ---------------------------------------------------------------------------
 const WICKET_SINGLE_SHARE = 1 / 3;
-type WicketEvent = { amp: number; dur: number; freq: number; single: boolean };
+const WICKET_APEX_UV = 52;
+// A single at the size of a run's largest wave. At full nominal it measured 1.14x
+// the median run peak (gate, 2026-11-16): a run's largest arch rarely sits at the
+// diamond's exact apex and carries its own jitter, so runs peak a little under it.
+// Re-measured when runs grew longer (2026-11-16): more arches put a run's largest a
+// little higher, and at 0.88 a single read 0.79 of it; 1.1 puts it back near 1.
+const WICKET_SINGLE_GAIN = 1.1;
+const WICKET_RUN_S = [0.4, 4] as const;
+const WICKET_DIAMOND_MAX = 8;
+const WICKET_W1 = 0.57;
+// One arch over a cycle u in [0, 1): the rounded lobe on [0, w1), the spike on
+// [w1, 1) with its apex (-1) at the middle. Both lobes start and end at zero, so
+// neighbouring arches of different height meet without a step. Zero mean: the
+// spike's area (w2 / 2) equals the lobe's (lobe * w1 * 2 / pi).
+function wicketShape(u: number, w1: number): number {
+  const w2 = 1 - w1;
+  if (u < w1) return ((w2 / 2) / (w1 * 2 / Math.PI)) * Math.sin(Math.PI * u / w1);
+  return -(1 - Math.abs(2 * (u - w1) / w2 - 1));
+}
+type WicketEvent = {
+  single: boolean; freq: number; amp: number;
+  starts: number[]; periods: number[]; amps: number[]; w1s: number[];
+  // The second generator: its gain per arch (one for a single) and its lag, as a
+  // fraction of a cycle.
+  g2: number[]; lag: number;
+};
 
-function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
+function wicketEvent(g: Gaussian): WicketEvent {
+  const freq = g.range(6, 11), amp = jit(g, 1, 0.25);
+  const single = g.uniform() < WICKET_SINGLE_SHARE;
+  const lag = g.range(0.15, 0.4);
+  if (single) {
+    return { single, freq, amp, starts: [], periods: [], amps: [], w1s: [jit(g, WICKET_W1, 0.18)], g2: [g.range(0.5, 1)], lag };
+  }
+  const len = WICKET_RUN_S[0] * Math.pow(WICKET_RUN_S[1] / WICKET_RUN_S[0], g.uniform());
+  const n = Math.max(3, Math.round(len * freq));
+  const edge = g.range(0.25, 0.35);
+  // Diamond for a short run; for a long one, 1-3 swells (more for longer runs)
+  // under an end taper of about three arches.
+  const peakAt = g.range(0.35, 0.65);
+  const swells = 1 + Math.min(2, Math.floor(g.uniform() * n / 10));
+  const phase = g.uniform() * 2 * Math.PI;
+  const starts: number[] = [], periods: number[] = [], w1s: number[] = [], g2: number[] = [];
+  for (let k = 0, t = 0; k < n; k++) {
+    const p = jit(g, 1 / freq, 0.08);
+    starts.push(t); periods.push(p); t += p;
+    w1s.push(jit(g, WICKET_W1, 0.18));
+    g2.push(g.range(0.5, 1));
+  }
+  const T = starts[n - 1] + periods[n - 1];
+  const shape: number[] = [];
+  for (let k = 0; k < n; k++) {
+    const x = (starts[k] + periods[k] / 2) / T;          // the arch's centre, 0-1 of the run
+    if (n <= WICKET_DIAMOND_MAX) {
+      shape.push(x < peakAt ? x / peakAt : (1 - x) / (1 - peakAt));
+    } else {
+      const ta = 3 / n;
+      const taper = Math.min(1, x / ta, (1 - x) / ta);
+      shape.push(taper * (0.55 + 0.45 * Math.sin(2 * Math.PI * swells * x + phase)));
+    }
+  }
+  const top = Math.max(...shape);
+  const amps = shape.map(s => jit(g, edge + (1 - edge) * s / top, 0.2));
+  return { single, freq, amp, starts, periods, amps, w1s, g2, lag };
+}
+
+/** One generator's share of a wicket event at `t`: the second lags and scales by g2. */
+function wicketValue(t: number, e: WicketEvent, second: boolean): number {
+  if (second) t -= e.lag / e.freq;
+  if (t < 0) return 0;
+  if (e.single) {
+    // The apex at the middle of one period, the broad side tapered off by a
+    // Hann window so it stands alone as a monophasic spike-like wave.
+    const w1 = e.w1s[0], apexU = w1 + (1 - w1) / 2;
+    const v = t * e.freq - 0.5;
+    if (Math.abs(v) >= 0.5) return 0;
+    const u = (apexU + v + 1) % 1;
+    return (second ? e.g2[0] : 1) * WICKET_APEX_UV * WICKET_SINGLE_GAIN * e.amp
+      * 0.5 * (1 + Math.cos(2 * Math.PI * v)) * wicketShape(u, w1);
+  }
+  for (let k = e.starts.length - 1; k >= 0; k--) {
+    if (t < e.starts[k]) continue;
+    const u = (t - e.starts[k]) / e.periods[k];
+    if (u >= 1) return 0;
+    return (second ? e.g2[k] : 1) * WICKET_APEX_UV * e.amp * e.amps[k] * wicketShape(u, e.w1s[k]);
+  }
+  return 0;
+}
+
+/**
+ * One wicket generator. `stream` names the event stream: the main generator and
+ * the second one on the same side share it (same seed), so they draw the same
+ * events; only the main one marks them.
+ */
+function wicketSide(id: string, stream: string, spec: PatternSourceDescriptor['spec'], second: boolean): PatternSourceDescriptor {
   return {
     id,
     toggles: ['wicket'],
@@ -173,39 +312,27 @@ function wicketSide(id: string, electrode: string): PatternSourceDescriptor {
     // 2026-10-13 this was drowsiness alone, and IK-015 called them "absent in
     // relaxed wakefulness".
     states: ['awake', 'drowsy', 'n1', 'n2'],
-    spec: sourceUnder(id, [electrode], { extent: 0.30 }),
-    make(seed, dt) {
-      const ts = new TransientSource<WicketEvent>(seed, dt, {
-        schedule: { kind: 'periodic', period: 3.5, jitterFrac: 0.43 }, // legacy 2-5 s
-        duration: 1.5,
-        onset: (g) => ({
-          amp: jit(g, 1, 0.2), dur: jit(g, 0.9, 0.3), freq: g.range(6, 11),
-          single: g.uniform() < WICKET_SINGLE_SHARE,
-        }),
-        // A run is the envelope's [0, dur], 14% of its peak at either end: a box. A
-        // single is one transient: an arrow over its one cycle.
-        mark: (e) => (e.single
-          ? { at: arcPeakTime(e.freq) - 0.5 / e.freq, dur: 1 / e.freq }
-          : { span: e.dur }),
-        morphology: (t, e) => {
-          if (e.single) {
-            const u = (t - arcPeakTime(e.freq)) * e.freq;
-            if (Math.abs(u) >= 0.5) return 0;
-            const win = 0.5 * (1 + Math.cos(2 * Math.PI * u));
-            return 70 * e.amp * win * arciformSignal(t, [{ f: e.freq, a: 1 }], 1);
-          }
-          const env = gaussian(t, e.dur / 2, e.dur / 4);
-          // Arches pointed on the negative side (see arciformSignal).
-          return 70 * e.amp * env * arciformSignal(t, [{ f: e.freq, a: 1 }], 1);
-        },
+    spec,
+    make(_seed, dt, subjectSeed) {
+      const ts = new TransientSource<WicketEvent>(deriveSeed(subjectSeed, stream), dt, {
+        schedule: { kind: 'periodic', period: 1.5, jitterFrac: 0.33 },
+        duration: WICKET_RUN_S[1] * 1.06 + 0.1,
+        onset: wicketEvent,
+        // A run is a box over its arches; a single is an arrow over its one arch.
+        mark: (e) => (second ? null : e.single
+          ? { at: 0, dur: 1 / e.freq }
+          : { span: e.starts[e.starts.length - 1] + e.periods[e.periods.length - 1] }),
+        morphology: (t, e) => wicketValue(t, e, second),
       });
       return asGenerator(ts);
     },
   };
 }
 
-const wicketL = wicketSide('wicket-l', 'T3');
-const wicketR = wicketSide('wicket-r', 'T4');
+const wicketL = wicketSide('wicket-l', 'wicket-l', sourceUnder('wicket-l', ['T3'], { extent: 0.30 }), false);
+const wicketR = wicketSide('wicket-r', 'wicket-r', sourceUnder('wicket-r', ['T4'], { extent: 0.30 }), false);
+const wicketL2 = wicketSide('wicket-l2', 'wicket-l', sourceUnder('wicket-l2', ['T5'], { extent: 0.30 }), true);
+const wicketR2 = wicketSide('wicket-r2', 'wicket-r', sourceUnder('wicket-r2', ['T6'], { extent: 0.30 }), true);
 
 // ---------------------------------------------------------------------------
 // Rhythmic mid-temporal theta of drowsiness (RMTD; "rhythmic temporal theta of
@@ -779,7 +906,7 @@ const midlineTheta: PatternSourceDescriptor = {
 
 export const VARIANT_SOURCES: PatternSourceDescriptor[] = [
   muL, muR,
-  wicketL, wicketR,
+  wicketL, wicketR, wicketL2, wicketR2,
   rmtdL, rmtdR,
   lambda,
   pswyL, pswyR,

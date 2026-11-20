@@ -152,6 +152,14 @@ export function EEGCanvas({
   // Measurement tool state
   const measurePointsRef = useRef<{ a: Point | null, b: Point | null }>({ a: null, b: null });
   const [hasMeasurePoints, setHasMeasurePoints] = useState(false);
+  // Drag-to-measure (owner, 2026-11-16): while frozen, a drag draws a box whose
+  // width is a duration and whose height is a voltage, read on the row the drag
+  // started on. A plain click still places caliper points; the click that ends a
+  // drag is swallowed so it does not place one too.
+  type MeasureBox = { x0: number; y0: number; x1: number; y1: number; scale: number; isEcg: boolean };
+  const dragRef = useRef<MeasureBox | null>(null);
+  const boxRef = useRef<MeasureBox | null>(null);
+  const swallowClickRef = useRef(false);
 
   // The engine and each sample's raw electrode voltages outlive a montage change.
   // A montage only chooses which differences of the same electrodes to draw, so
@@ -294,6 +302,10 @@ export function EEGCanvas({
       // than at its first draw (section 6) because the annotation overlay in
       // section 5b also anchors to it.
       const lblW = 66;
+      // Patterns acting on the whole page (ArtifactMark.page: eyes open) are named in
+      // the top-right corner while they last, not boxed (owner, 2026-11-16: a box
+      // over every chain hid the very background change it was there to show).
+      const pageLabels: { text: string; color: string }[] = [];
 
       // 1. Base paper
       ctx.fillStyle = currentTheme.bgEven;
@@ -491,6 +503,15 @@ export function EEGCanvas({
         for (const m of marksRef.current) {
           if (m.span == null && m.t + m.dur > tEnd) continue; // still developing: its peak is not drawn yet
           if (m.t + (m.span ?? 0) < currentT - winSec) continue; // scrolled off
+          if (m.page) {
+            // Named while it lasts at the page's right edge, the moment being drawn.
+            const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
+            const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
+            if (m.span != null && m.t + m.span >= tEnd && !pageLabels.some(l => l.text === text)) {
+              pageLabels.push({ text, color: PATTERN_COLOR[pid] ?? currentTheme.overlayText });
+            }
+            continue;
+          }
           // The rows this artifact is on, in this montage: every row within reach of
           // the largest gets an arrow — a blink is on all four frontopolar rows.
           let byMontage = markRowsRef.current.get(m.fields);
@@ -500,9 +521,7 @@ export function EEGCanvas({
             rowInfo = { sizes: markRowSizes(m.fields, montage), signs: markRowSigns(m.fields, montage) };
             byMontage.set(montage, rowInfo);
           }
-          // A pattern acting on the whole background is on every EEG row (ArtifactMark.page),
-          // not the ECG, which is the heart.
-          const channels = m.page ? [...rowOfChannel.keys()].filter(c => montage.channels[c].active !== 'ECG') : markRows(rowInfo.sizes, m.inUv ? currentSettings.sensitivity : undefined, m.span != null ? Infinity : undefined);
+          const channels = markRows(rowInfo.sizes, m.inUv ? currentSettings.sensitivity : undefined, m.span != null ? Infinity : undefined);
           const j0 = lowerBound(tb, m.t);
           const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
           const color = PATTERN_COLOR[pid] ?? currentTheme.overlayText;
@@ -682,6 +701,19 @@ export function EEGCanvas({
         ctx.textAlign    = 'right';
         ctx.textBaseline = 'top';
         ctx.fillText(`${stateLabel}   ${currentSettings.sensitivity} µV/mm · ${currentSettings.speed} mm/s`, w - 12, 6);
+        // Whole-page patterns in force now, one line each under the state.
+        let py = 24;
+        for (const { text, color } of pageLabels) {
+          ctx.font = 'bold 11px sans-serif';
+          const textW = ctx.measureText(text).width;
+          ctx.fillStyle = currentTheme.overlayBg;
+          ctx.fillRect(w - 12 - textW - 10, py - 2, textW + 10, 16);
+          ctx.fillStyle = color;
+          ctx.fillRect(w - 12 - textW - 10, py - 2, 3, 16);
+          ctx.fillStyle = currentTheme.overlayText;
+          ctx.fillText(text, w - 12, py);
+          py += 19;
+        }
       }
 
       // 8. Calibration bar
@@ -715,6 +747,37 @@ export function EEGCanvas({
       }
       
       // 10. Measurement Tool Render
+      // 10a. The drag box: the one being drawn, else the last one kept.
+      const mbox = frozenRef.current ? (dragRef.current ?? boxRef.current) : null;
+      if (mbox) {
+        const bx = Math.min(mbox.x0, mbox.x1), by = Math.min(mbox.y0, mbox.y1);
+        const bw = Math.abs(mbox.x1 - mbox.x0), bh = Math.abs(mbox.y1 - mbox.y0);
+        ctx.save();
+        ctx.fillStyle = 'rgba(59,130,246,0.10)';
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.setLineDash([]);
+        const dtS = bw / pxPerSec;
+        const dv = bh / mbox.scale;
+        const dtText = dtS >= 1 ? `${dtS.toFixed(2)} s` : `${(dtS * 1000).toFixed(0)} ms`;
+        const dvText = mbox.isEcg ? `${dv.toFixed(2)} mV` : `${dv.toFixed(1)} µV`;
+        const text = `Δt ${dtText} · ΔV ${dvText}${dtS > 0 ? ` · ${(1 / dtS).toFixed(1)} Hz` : ''}`;
+        ctx.font = '11px sans-serif';
+        const tw = ctx.measureText(text).width + 12;
+        // Above the box, unless that is under the freeze button's hint at the top.
+        const ly = by > 64 ? by - 12 : by + bh + 12;
+        const lx = Math.min(Math.max(bx + bw / 2, lblW + tw / 2 + 2), w - tw / 2 - 2);
+        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+        ctx.fillRect(lx - tw / 2, ly - 10, tw, 20);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, lx, ly);
+        ctx.restore();
+      }
       if (frozenRef.current) {
         const { a, b } = measurePointsRef.current;
         
@@ -759,9 +822,49 @@ export function EEGCanvas({
     return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, [montage]);
 
+  /** The row nearest `y` and the scale it is drawn with (px per µV, or per mV for ECG). */
+  const rowScaleAt = (y: number, h: number) => {
+    const layout = buildLayout(montage);
+    let closestRow = layout[0];
+    let minDist = Infinity;
+    for (const row of layout) {
+      if (row.channelIndex < 0) continue;
+      const dist = Math.abs(y - row.centerFrac * h);
+      if (dist < minDist) { minDist = dist; closestRow = row; }
+    }
+    const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
+    const totalU  = nonSp + (layout.length - nonSp) * GAP_UNITS;
+    const pxPerMm = pxPerMmFromHeight(h, totalU);
+    const isEcg = closestRow.channelIndex >= 0
+      && montage.channels[closestRow.channelIndex]?.label === 'ECG';
+    return { row: closestRow, isEcg, scale: isEcg ? ecgScale(pxPerMm) : calcPxPerUV(pxPerMm, settingsRef.current.sensitivity) };
+  };
+
+  const canvasXY = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!frozenRef.current || e.button !== 0 || !canvasRef.current) return;
+    const { x, y } = canvasXY(e);
+    const { scale, isEcg } = rowScaleAt(y, canvasRef.current.height);
+    dragRef.current = { x0: x, y0: y, x1: x, y1: y, scale, isEcg };
+  };
+  const handleMouseUp = (e?: React.MouseEvent<HTMLCanvasElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (e) { const { x, y } = canvasXY(e); d.x1 = x; d.y1 = y; }
+    dragRef.current = null;
+    if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) > 4) {
+      boxRef.current = d;
+      swallowClickRef.current = true;
+    }
+  };
+
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (swallowClickRef.current) { swallowClickRef.current = false; return; }
 
     if (!frozenRef.current) {
       // Not frozen: clicks toggle a persistent channel highlight instead of measuring.
@@ -783,46 +886,16 @@ export function EEGCanvas({
     const h = canvas.height;
     
     const clickT = currentT - (w - x) / pxPerSec;
-    
-    const layout = buildLayout(montage);
-    let closestRow = layout[0];
-    let minDist = Infinity;
-    
-    for (const row of layout) {
-      if (row.channelIndex < 0) continue;
-      const centerY = row.centerFrac * h;
-      const dist = Math.abs(y - centerY);
-      if (dist < minDist) {
-        minDist = dist;
-        closestRow = row;
-      }
-    }
-    
-    const nonSp   = layout.filter(r => r.channelIndex >= 0).length;
-    const nSp     = layout.length - nonSp;
-    const totalU  = nonSp + nSp * GAP_UNITS;
-    const pxPerMm = pxPerMmFromHeight(h, totalU);
-    const pxPerUV = calcPxPerUV(pxPerMm, currentSettings.sensitivity);
 
-    const centerY = closestRow.centerFrac * h;
     // Invert exactly the mapping the renderer used to draw this row. `traceY` is
     // `centerY + v * scale`, so the inverse is `(y - centerY) / scale` — and
     // `scale` must be the SAME one that row was drawn with, or the caliper
-    // measures a curve it did not plot.
-    //
-    // Two bugs lived here. It read `(centerY - y)`, i.e. positive-up, reporting
-    // the opposite sign to the trace it sat on; the readout displays |Δv| so no
-    // number on screen was wrong, but the stored value was. And it applied the
-    // EEG `pxPerUV` to every row including ECG, which is drawn through
-    // `ecgScale` — a different unit conversion (mV, not µV) and, since the ECG
-    // row is a limb lead rather than a scalp derivation, a negated one. Measuring
-    // the ECG row therefore gave both the wrong sign and a magnitude off by
-    // roughly 14x at 7 µV/mm. Branching on the row is the whole fix.
-    const rowIsECG = closestRow.channelIndex >= 0
-      && montage.channels[closestRow.channelIndex]?.label === 'ECG';
-    const clickScale = rowIsECG ? ecgScale(pxPerMm) : pxPerUV;
-    const clickV = (y - centerY) / clickScale;
-    
+    // measures a curve it did not plot. The ECG row is drawn through `ecgScale`
+    // (mV, and negated, being a limb lead); `rowScaleAt` branches on it, which was
+    // once the whole fix for a caliper off by ~14x and the wrong sign there.
+    const { row: closestRow, scale: clickScale } = rowScaleAt(y, h);
+    const clickV = (y - closestRow.centerFrac * h) / clickScale;
+
     const point = { x, y, t: clickT, v: clickV };
     
     const currentPoints = measurePointsRef.current;
@@ -835,6 +908,11 @@ export function EEGCanvas({
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (dragRef.current) {
+      const { x, y } = canvasXY(e);
+      dragRef.current.x1 = x;
+      dragRef.current.y1 = y;
+    }
     if (!graphHover) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -844,9 +922,15 @@ export function EEGCanvas({
     setHoverChannels(idx !== null ? new Set([idx]) : new Set());
   };
 
-  const handleCanvasMouseLeave = () => {
+  const handleCanvasMouseLeave = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    handleMouseUp(e);
     setHoverChannels(new Set());
   };
+
+  // Resuming the trace moves everything a box was drawn over, so it goes.
+  useEffect(() => {
+    if (!isFrozen) { boxRef.current = null; dragRef.current = null; }
+  }, [isFrozen]);
 
   // Turning graph hover off mid-hover would otherwise leave the last hovered
   // channel stuck highlighted, since no further mouse-move fires to clear it.
@@ -874,6 +958,7 @@ export function EEGCanvas({
         setIsFrozen(!frozenRef.current);
       } else if (e.key === 'Escape' && frozenRef.current) {
         measurePointsRef.current = { a: null, b: null };
+        boxRef.current = null;
         setHasMeasurePoints(v => !v);
       }
     };
@@ -887,6 +972,8 @@ export function EEGCanvas({
         ref={canvasRef}
         className={`block w-full h-full ${isFrozen ? 'cursor-crosshair' : ''}`}
         onClick={handleCanvasClick}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
         onMouseMove={handleCanvasMouseMove}
         onMouseLeave={handleCanvasMouseLeave}
       />
@@ -906,7 +993,7 @@ export function EEGCanvas({
             spelled out while frozen — that is the only time it applies. */}
         {isFrozen && (
           <div className="flex items-center h-8 px-2 rounded bg-black/70 text-[11px] text-amber-200 whitespace-nowrap pointer-events-none">
-            Click two points to measure · Esc clears · Space resumes
+            Click two points or drag a box to measure · Esc clears · Space resumes
           </div>
         )}
       </div>

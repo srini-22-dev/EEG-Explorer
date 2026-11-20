@@ -7,7 +7,7 @@ This file is not documentation of how the code works — the engine source (`src
 that. This is a list of things that must remain **true of the output**, whatever the
 implementation happens to be.
 
-> **45 entries · highest ID `IK-045` · all 45 enforced by an automated check.**
+> **47 entries · highest ID `IK-047` · 45 enforced by an automated check, 2 unverified in code.**
 
 ---
 
@@ -432,6 +432,56 @@ positivity that may not be visible by eye". Approved by the user 2026-10-27. The
 bounds are this entry's reading of "may not always be present" and "smaller"; no source gives a
 ratio.
 
+### IK-046 — POSTS are bilateral but need not be symmetric
+
+**Claim.** POSTS occur over both occiputs together, but their amplitude need not be equal on the
+two sides; an amplitude asymmetry is a normal finding. In a given person it is consistent — the
+same side smaller throughout the record — and was found in 38% of recordings with POSTS, unrelated
+to other EEG abnormalities. Scope: amplitude between the sides. Strictly one-sided POSTS are not
+covered by this entry and are not asserted to be normal.
+
+**Observable.** Montage `reference-ipsi`, toggle `posts` (state `n1`/`n2`; the gate drives it from
+`awake`, which the toggle rules move to N1). **The simulator departs from the Claim on purpose**
+(owner, 2026-11-16, a teaching idealisation): the smaller side is drawn at random for EACH POSTS,
+so both pictures appear on one page, and two sliders under the toggle set it — "Smaller side"
+(default 40%) and "One side only" (default 5%). At the defaults, the smaller occiput of a bilateral
+POSTS is 40% below the larger on the page (median 0.34–0.46, none under 0.25, currently 0.38),
+either side at random (O1 the smaller in 20–80%, currently 0.56). With one side only at 50%, 30–70%
+of POSTS are one-sided (currently 0.37), the absent occiput showing only volume-conducted spread
+(median ≤ 0.25 of the present one, currently 0.20). Annotation, `bipolar-ap`: a one-sided POSTS
+carries one mark and no arrows on the absent side; a bilateral one carries exactly one mark labelled
+"POSTS (smaller)", on the side whose occipital link is lower.
+
+*Size (owner, 2026-11-16).* POSTS are drawn 25% smaller than before and trains 10% smaller, by
+owner decision: the page looked wrong beside vertex waves. On `bipolar-ap`, the median of each POSTS's
+largest occipital row (P3-O1, T5-O1, P4-O2, T6-O2) is 0.5–0.72 of the median of each vertex wave's
+largest parasagittal row (currently 0.60; 0.80 before the cut). This keeps POSTS inside NPK's
+20–75 µV at the larger occiput, at its low end (singles currently 21.3 µV, trains 21.8 µV). The
+trains were cut less because a 25% cut put them at 18.2 µV, under NPK's floor.
+
+**Mechanism.** *(non-binding)* Not established. Candidates: asymmetric skull thickness or
+electrode position over the two occiputs, or a genuine difference in the generators.
+
+**Check.** `validateEngine.ts` — `check('POSTS sides: median page drop of the smaller side,
+bilateral ones (owner 2026-11-16: 40%)', …)`, `check('POSTS sides: smallest page drop of a
+bilateral one (a side labelled smaller looks it)', …)`, `check('POSTS sides: share with O1 the
+smaller side (either side, at random)', …)`, `check('POSTS sides: share on one side only, slider
+at 50%', …)`, `check('POSTS sides: absent occiput / present occiput, one-sided ones, median
+(volume conduction only)', …)`, `check('POSTS sides: one-sided events with other than one mark',
+…)`, `check('POSTS sides: one-sided marks with arrows on both sides', …)`, `check('POSTS sides:
+bilateral events without exactly one "POSTS (smaller)" mark', …)`, `check('POSTS sides: "smaller"
+label on the side whose occipital link is lower', …)`, and for the size `check('POSTS / vertex
+wave, median of each event largest bipolar-ap row (owner 2026-11-16: POSTS cut 25%, from 0.80)',
+…)` (2026-11-16).
+
+**Status.** unverified in code · **Source.** learningeeg atlas ("bilateral, but not necessarily
+symmetric"); Rey, Aybek, Maeder-Ingvar & Rossetti, Clin Neurophysiol 2009;120:472 ("a consistent
+amplitude asymmetry" in 39 of 102 recordings with POSTS; "POSTS asymmetry ... should be considered
+as normal"). The per-POSTS randomisation, the slider defaults and the one-sided option are the
+owner's design for teaching (2026-11-16). An AI summary the owner consulted put strictly unilateral
+POSTS under 0.5% of EEGs and linked them to lesions on that side; neither figure was found in a source.
+The size cut is the owner's (2026-11-16); NPK's 20–75 µV bounds it. Approved by the user 2026-11-20.
+
 ## 3. Montage, polarity, and localization conventions
 
 Display polarity convention, how bipolar subtraction behaves at a focus, how referential
@@ -702,12 +752,20 @@ Observable is therefore **scoped to a 0.25 Hz LFF and is not a clinical constant
 exposed as a user control, that bound would break immediately — which is the tell that it was never
 a clinical bound.
 
+**Scoped 2026-11-16 — the LFF is now a user control.** The top bar exposes the low cut, and the
+app opens at 1 Hz (owner, 2026-11-16). At that default the swing on screen is about 64% of the blink
+and comes sooner, exactly as the paragraph above predicted. The Observable's 10–50% therefore
+holds **only at the engine's own 0.25 Hz LFF**, which is what the gate runs; it is not asserted at
+the app's default. What the top bar changes is asserted separately: at a 1 Hz low cut the swing
+1–2.5 s after the blink is under 0.6 of its 0.25 Hz value (currently 0.24).
+
 **Observable.** Montage `bipolar-ap`, state `awake`, toggle `blink`, 30 mm/s, 7 µV/mm.
 All four frontopolar rows — Fp1-F3, Fp2-F4, Fp1-F7, Fp2-F8 — deflect downward simultaneously,
 decaying posteriorly down each chain. Switching to `bipolar-transverse` with the same toggle, the
 Fp1-Fp2 row shows a markedly smaller excursion than any bipolar-ap frontopolar row. On Fp1-F3 each
 blink shows the downward peak followed, within ~1 s, by an upward excursion of roughly 10-50% of
-the downward peak, after which the row returns to its pre-blink baseline. Absolute amplitude and
+the downward peak (at a 0.25 Hz LFF, currently 0.22; at the app's 1 Hz default it is larger, see
+above), after which the row returns to its pre-blink baseline. Absolute amplitude and
 duration are not asserted by this entry — only that relative morphology.
 
 **Mechanism.** *(non-binding)* Conventionally attributed to Bell's phenomenon: the globe rolls
@@ -722,7 +780,8 @@ going negative; the claim stands either way.
 `check('blink Fp1-F3 recovery swing / downward peak (IK-001: a smaller opposite swing)', …)` and
 `check('blink Fp1-F3 back at baseline 1.5-3 s after the peak (IK-001), as a fraction of peak', …)`.
 The three swing checks are the only ones in §7c built with `recordingChain: true`, because the
-chain is what makes the swing. All five assert on the rendered bipolar row, the same
+chain is what makes the swing. The low-cut control is guarded by `check('low cut 1 Hz: blink
+recovery swing 1-2.5 s after the blink / at 0.25 Hz (shorter)', …)` (2026-11-16). All five assert on the rendered bipolar row, the same
 space as the claim: the blink's contribution is isolated by subtracting a same-seed run with the
 gate off, and its sign is asserted positive — which the canvas draws downward, since clinical EEG
 is negative-up. The earlier topography check at `validateEngine.ts:320` remains, but it is a power
@@ -907,6 +966,39 @@ Thickbroom & Mastaglia 1985 (Brain Res), from the abstract: a large short-durati
 before the saccade, largest near the eye on the side the saccade goes toward, from the ipsilateral
 lateral rectus; prominence in REM from a search excerpt (NCBI chapter, not fetched: CAPTCHA). Approved by the user 2026-10-27.
 
+### IK-047 — Blinks vary in width and carry a little eyelid-muscle activity at the frontopolar electrodes
+
+**Claim.** Blinks in one record are not all the same width: narrow ones (about 0.2 s) and broad
+ones (about 0.5 s) appear on the same page. Each blink carries a brief, low-amplitude burst of fast
+activity over the frontopolar electrodes. The burst is smaller than a muscle artifact and does not
+reach the posterior rows. Polarity and field of the slow deflection are [[IK-001]] and [[IK-032]];
+this entry adds only width variation and the fast component. Scope: the size and duration of the
+burst are not asserted beyond the ratios below.
+
+**Observable.** Montage `bipolar-ap`, state `awake`, toggle `blink`, isolated contribution. The
+90th-percentile blink width at half height is 1.8–4 times the 10th (currently 2.0). On Fp1-F3, power
+above 40 Hz during blinks is at least twice the power between blinks. That blink fast power is
+0.1–0.4 of the `muscle` toggle's power above 40 Hz on the same row (currently 0.15). On P3-O1 the
+blink's fast power is at most 0.2 of Fp1-F3's (currently 0.00).
+
+**Mechanism.** *(non-binding)* Lid closure is a contraction of the orbicularis oculi, whose
+motor-unit potentials reach the skin near Fp1/Fp2. Modelled as EMG driven into the orbital
+sources, rising with lid closure and fading after it. Not asserted; the observable shows only fast
+activity time-locked to the blink at the frontopolar rows.
+
+**Check.** `validateEngine.ts` — `check('blink half-height width, 90th / 10th percentile (owner:
+narrow and broad blinks; was ~1.6)', …)`, `check('blink Fp1-F3 fast activity above 40 Hz, during
+blinks / between (orbicularis EMG present)', …)`, `check('blink EMG / muscle EMG, Fp1-F3 power
+above 40 Hz (owner: more subtle than the muscle artifact)', …)`, `check('blink EMG P3-O1 / Fp1-F3
+fast power during blinks (frontal only)', …)`.
+
+**Status.** unverified in code · **Source.** user, 2026-11-16 — the owner's reference record
+(measured against its grid: narrow blinks about 0.2 s, broad ones 0.4–0.5 s, and low-amplitude
+fast activity on Fp2-F4 and Fp2-F8 around each blink for about half a second), with the instruction
+that the blink's muscle component be "more subtle than the actual muscle eeg artifact". The
+0.1–0.4 ratio and the 1.8–4 width spread are Claude's numbers for those words, not measured from a
+source. Approved by the user 2026-11-20.
+
 ## 5. Normal variants
 
 Benign patterns mistakable for pathology — mu rhythm, wicket spikes, lambda waves, RMTD, 14&6
@@ -970,8 +1062,12 @@ defect was reported. Clinical wording not independently confirmed by the user.
 ### IK-015 — Wicket spikes span 6–11 Hz and carry no after-going slow wave
 
 **Claim.** Wicket spikes are a benign temporal variant seen **mostly in drowsiness, and also in
-relaxed wakefulness and light sleep**: monomorphic arciform (mu-like) transients, single or in short runs, over the temporal
-region, each arch pointed on its surface-**negative** side and rounded on the other, spanning
+relaxed wakefulness and light sleep**: monomorphic arciform (mu-like) transients, single or in runs, over the temporal
+region. Runs go from a few waves to several seconds: short runs have a diamond (crescendo-decrescendo)
+envelope, a single being the sharpest wave of a run (Gélisse et al., J Neurol 2024), and longer
+runs wax and wane. The waves of a run are alike but not identical copies of one another, and the
+adjacent temporal links that share the reversing electrode carry them at different sizes and shapes
+rather than as inverted copies of each other. Each arch is pointed on its surface-**negative** side and rounded on the other, spanning
 roughly the **6–11 Hz** band — not confined to the alpha range. The single feature that keeps
 them benign is that a wicket spike is **not** followed by an after-going slow wave and does not
 distort the background; a temporal sharp transient *with* a following slow wave is read as
@@ -981,13 +1077,22 @@ states they occur in — this entry does not assert a discharge rate or amplitud
 **Observable.** Montage `bipolar-ap` / `reference-car`, toggle `wicket`, at the left-temporal
 chain (T3/T5). Turning the toggle on in state `drowsy` raises both 7–11 Hz **and** 6–7.5 Hz power
 at T3 above its toggle-off value (the band is wider than alpha alone). The same toggle in state
-`awake` produces the same bursts (currently 103 µV at their largest at T3); it is available in
+`awake` produces the same bursts (currently 62 µV at their largest at T3); it is available in
 `awake`, `drowsy`, `n1` and `n2`, and selecting it from deeper sleep or REM moves the background
 to `drowsy`. At T3 the sharpest point of a burst is negative-going. The wicket contribution at
 T3-T5 carries no after-going slow wave: its delta-band power stays a small fraction of its
-arciform-band power. Between 15% and 50% of events are a single wicket rather than a run (currently 0.39). Only the band
-width, the polarity of the sharp side, the absence of a slow wave, the presence of singles, and
-presence in wakefulness as well as drowsiness are asserted.
+arciform-band power. Between 15% and 50% of events are a single wicket rather than a run (currently 0.27).
+Over 300 s of `drowsy`, the median run lasts 0.8–2 s (currently 1.30), the longest 2.5–4.5 s
+(currently 3.87) and the shortest no more than 0.7 s (currently 0.44). In a short run (8 waves or
+fewer) the largest wave falls in the middle (median position 0.3–0.7, currently 0.57). Wave to wave
+within a run, the share of each cycle spent below zero varies (median CV 0.05–0.4, currently 0.055).
+A single is the size of a run's largest wave (median single ÷ median run peak 0.8–1.2, currently
+0.99). In `bipolar-ap` the wicket contributions on F7-T3 and T3-T5 (and F8-T4 and T4-T6) are
+anti-correlated, reversing at T3/T4, but not mirror images (correlation −0.85 to −0.4, both sides
+averaged, currently −0.71). Only the band width, the polarity of the sharp side, the absence of a
+slow wave, the presence of singles, the run lengths, the mid-run peak of a short run, the
+wave-to-wave variation, the imperfect mirror, and presence in wakefulness as well as drowsiness are
+asserted.
 
 **Mechanism.** *(non-binding)* Conventionally regarded as a benign sharply-contoured fragment of
 the temporal drowsy rhythm rather than a cortical irritative discharge, which is why it lacks the
@@ -998,7 +1103,27 @@ observable distinguishes wicket from an epileptiform sharp wave by morphology al
 `check('T3 6-7.5 Hz power, wicket on / off (drowsy; widened range)', …)`, `check('T3 wicket burst
 peak while awake (EEGPEDIA: present in relaxed wakefulness too)', …)`, `check('wicket T3 (sharp
 side) renders UP (-1)', …)`, and `check('wicket T3-T5 has no after-going slow wave (delta/arciform
-power ratio)', …)`, with `check('wicket share of events that are a single wave', …)` (2026-10-27).
+power ratio)', …)`, with `check('wicket share of events that are a single wave', …)` (2026-10-27),
+`check('wicket median single / median run peak (Gelisse 2024: a single is the sharpest wave of a
+run)', …)` (2026-11-16), and from the second 2026-11-16 revision `check('wicket run length, median
+(owner 2026-11-16: single waves to runs of seconds)', …)`, `check('wicket longest run in 300 s
+(learningeeg figure: about 4 s)', …)`, `check('wicket shortest run in 300 s (short runs remain)',
+…)`, `check('wicket position of the largest wave in a short run (8 waves or fewer), median
+(diamond: mid-run)', …)`, `check('wicket wave-to-wave shape variation in a run, median CV of the
+share below zero (owner: not identical)', …)` and `check('wicket F7-T3 against T3-T5 correlation,
+both sides (owner 2026-11-16: reversing at T3, not mirror images)', …)`. The earlier `wicket waves
+per run` and `wicket position of the largest wave in a run` checks are retired.
+
+**Corrected 2026-11-16 — run length, regularity and mirroring.** Earlier the same day this entry
+asserted runs of "a handful of waves" (median 4–7) with a diamond envelope throughout. The owner's
+reference records show longer runs: a learningeeg figure carries one of about 4 s (some 25 waves,
+waxing and waning several times rather than as one diamond), and a second record carries runs of
+1–2 s. They also show adjacent temporal links that are not inverted copies of each other. The
+simulator drew every run as a short diamond of near-identical arches and every T3-T5 as an exact
+inverse of F7-T3. Both are corrected. One conflict is recorded, not resolved: learningeeg's text
+describes "very brief non-evolving runs", while its own figure shows the ~4 s run. The figure and
+the owner's records are followed here, and "non-evolving" still holds — the frequency within a run
+stays fixed (cycle-length CV, currently 0.04).
 
 **Corrected 2026-10-13 — state and shape.** This entry called wickets "a drowsy-state finding …
 absent in relaxed wakefulness", and its check asserted that the toggle did nothing awake. The
@@ -1017,6 +1142,12 @@ the user's request and approved in the batch this session; recording behaviour t
 battery guards. Clinical wording not yet independently confirmed by the user. Singles added
 2026-10-27 from the SCORE normal-variants study ("single discharges or runs"), eegpedia ("sometimes
 single spike") and the IFCN glossary ("single waves or trains"). Approved by the user 2026-10-27.
+Diamond runs and single-as-sharpest-wave added 2026-11-16 from Gélisse, Benbadis, Crespel & Tatum,
+J Neurol 2024 271:3869 ("diamond or lozenge-shaped"; a single's morphology "is identical to the
+morphology of the most sharply contoured waveforms in the runs") and the owner's reference records.
+Approved by the user 2026-11-16. Longer runs, wave-to-wave variation and the imperfect mirror added
+later on 2026-11-16 from the owner's reference records and the learningeeg figure; approved by the
+user 2026-11-20.
 
 ### IK-016 — 14 & 6 positive bursts are posterior-temporal, ~14/6 Hz, and surface-positive
 

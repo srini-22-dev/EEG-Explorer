@@ -1,55 +1,22 @@
-import React, { useState, useRef, useEffect, RefObject } from 'react';
+import React, { useState } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info, ChevronDown, Download, MonitorPlay, Brain } from 'lucide-react';
-import { MONTAGES, Montage } from '../utils/montages';
-import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions, Speed, Sensitivity } from '../utils/simTypes';
-import { ICTAL_TOGGLE_IDS, SPEED_VALUES, SENSITIVITY_VALUES } from '../utils/simTypes';
+import { MONTAGES } from '../utils/montages';
+import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions } from '../utils/simTypes';
+import { POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } from '../utils/simTypes';
+import { ICTAL_TOGGLE_IDS } from '../utils/simTypes';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { ArtifactControls } from './ArtifactControls';
+import { INFO_TRIGGER_ATTR } from './InfoPanel';
 import { EEGTheme } from '../utils/themes';
 import { exportCSV, exportScreenshot } from '../utils/exportUtils';
 
-/** Sensitivity picker: a native dropdown that also steps through the allowed
- *  values on mouse-wheel while hovered. The wheel listener is attached natively
- *  with { passive: false } so it can preventDefault the page scroll — React's
- *  synthetic onWheel is passive and cannot. Scrolling down moves to the next
- *  (higher) value, matching the top-to-bottom order of the ascending list. */
-function SensitivitySelect({
-  value, onChange,
-}: { value: Sensitivity; onChange: (v: Sensitivity) => void }) {
-  const ref = useRef<HTMLSelectElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const i = SENSITIVITY_VALUES.indexOf(value);
-      const next = i + (e.deltaY > 0 ? 1 : -1);
-      if (next >= 0 && next < SENSITIVITY_VALUES.length) onChange(SENSITIVITY_VALUES[next]);
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [value, onChange]);
-  return (
-    <select
-      ref={ref}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value) as Sensitivity)}
-      className="w-full py-1 px-2 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-emerald-300 hover:bg-slate-800 focus:outline-none focus:border-emerald-600 cursor-pointer">
-      {SENSITIVITY_VALUES.map(v => (
-        <option key={v} value={v}>{v} µV/mm</option>
-      ))}
-    </select>
-  );
-}
-
 type Props = {
+  /** For the CSV export; the montage itself is chosen in the top bar. */
   montageId: string;
-  setMontageId: (id: string) => void;
   activePatterns: Set<string>;
   togglePattern: (id: string) => void;
   ictalParams: IctalParamsMap;
@@ -58,10 +25,6 @@ type Props = {
   updateArtifactParams: (patch: Partial<ArtifactParams>) => void;
   patternOptions: PatternOptions;
   updatePatternOptions: (patch: Partial<PatternOptions>) => void;
-  speed: number;
-  setSpeed: (v: Speed) => void;
-  sensitivity: number;
-  setSensitivity: (v: Sensitivity) => void;
   patientState: PatientState;
   setPatientState: (s: PatientState) => void;
   clearAll: () => void;
@@ -85,15 +48,13 @@ type Props = {
   setTutorialMode: (b: boolean) => void;
   dataBuffer: React.MutableRefObject<number[][]>;
   timeBuffer: React.MutableRefObject<number[]>;
+  /** The toggle whose information panel is open, and how to open (or close) one. */
+  infoId: string | null;
+  onShowInfo: (id: string | null) => void;
 };
 
 const FOCAL_ICTAL_IDS = new Set<string>(['focal-temporal-ictal', 'focal-frontal-ictal']);
 const ICTAL_ID_SET = new Set<string>(ICTAL_TOGGLE_IDS);
-
-// The two montages a learner reaches for first — the double-banana bipolar chain
-// and the common-average reference. The transverse and ear-referenced montages
-// are kept one click away behind "More" rather than crowding the default view.
-const PRIMARY_MONTAGE_IDS = new Set<string>(['bipolar-ap', 'reference-car']);
 
 // Three vigilance levels for the learner, not the five polysomnographic stages.
 // The engine still models N1/N2/N3 separately — the sleep graphoelement toggles
@@ -109,13 +70,11 @@ const PATIENT_STATES: { value: PatientState; label: string; desc: string; matche
 ];
 
 export function ControlPanel({
-  montageId, setMontageId,
+  montageId,
   activePatterns, togglePattern,
   ictalParams, updateIctalParams,
   artifactParams, updateArtifactParams,
   patternOptions, updatePatternOptions,
-  speed, setSpeed,
-  sensitivity, setSensitivity,
   patientState, setPatientState,
   clearAll,
   show3DPanel = false, setShow3DPanel,
@@ -127,10 +86,9 @@ export function ControlPanel({
   showSpectrum, setShowSpectrum,
   showRightSpectrum, setShowRightSpectrum,
   setQuizMode, setTutorialMode,
-  dataBuffer, timeBuffer
+  dataBuffer, timeBuffer,
+  infoId, onShowInfo,
 }: Props) {
-  const [showAllMontages, setShowAllMontages] = useState(false);
-
   // Track which pattern categories are expanded
   const [openCats, setOpenCats] = useState<Set<string>>(new Set(['artifacts']));
   const toggleCat = (id: string) =>
@@ -204,42 +162,6 @@ export function ControlPanel({
               );
             })}
           </div>
-        </div>
-
-        {/* ── Montage ── */}
-        <div className="px-4 py-3 border-b border-[#2e4a2e]">
-          <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2">Montage</h2>
-          {(() => {
-            const all = Object.values(MONTAGES);
-            const primary = all.filter(m => PRIMARY_MONTAGE_IDS.has(m.id));
-            const more = all.filter(m => !PRIMARY_MONTAGE_IDS.has(m.id));
-            // Keep the extra montages open whenever one of them is the active
-            // choice, so the selection is never hidden behind a collapsed "More".
-            const moreOpen = showAllMontages || more.some(m => m.id === montageId);
-            const shown = moreOpen ? [...primary, ...more] : primary;
-            const row = (m: Montage) => (
-              <div className="flex items-center space-x-1.5" key={m.id}>
-                <RadioGroupItem value={m.id} id={`m-${m.id}`} className="border-slate-600 text-emerald-500 w-3 h-3" />
-                <Label htmlFor={`m-${m.id}`} className="text-xs cursor-pointer text-slate-300 leading-snug">
-                  {m.name}
-                </Label>
-              </div>
-            );
-            return (
-              <>
-                <RadioGroup value={montageId} onValueChange={setMontageId} className="flex flex-col gap-1">
-                  {shown.map(row)}
-                </RadioGroup>
-                <button
-                  onClick={() => setShowAllMontages(v => !v)}
-                  className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  <ChevronDown className={`w-3 h-3 transition-transform duration-150 ${moreOpen ? 'rotate-180' : ''}`} />
-                  {moreOpen ? 'Fewer montages' : `More montages (${more.length})`}
-                </button>
-              </>
-            );
-          })()}
         </div>
 
         {/* ── Pattern Library ── */}
@@ -344,17 +266,17 @@ export function ControlPanel({
                                 {p.name}
                               </Label>
                             </div>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Info className="w-3 h-3 text-slate-700 hover:text-slate-400 cursor-help flex-shrink-0 ml-1" />
-                              </TooltipTrigger>
-                              <TooltipContent
-                                side="right"
-                                className="bg-slate-800 text-slate-200 border-slate-700 max-w-[240px]"
-                              >
-                                <p className="text-xs leading-snug">{p.desc}</p>
-                              </TooltipContent>
-                            </Tooltip>
+                            <button
+                              {...{ [INFO_TRIGGER_ATTR]: '' }}
+                              onClick={() => onShowInfo(infoId === p.id ? null : p.id)}
+                              aria-label={`About ${p.name}`}
+                              title={`About ${p.name}`}
+                              className={`flex-shrink-0 ml-1 rounded p-0.5 transition-colors ${
+                                infoId === p.id ? 'text-emerald-300 bg-emerald-800/50' : 'text-slate-600 hover:text-slate-300'
+                              }`}
+                            >
+                              <Info className="w-3 h-3" />
+                            </button>
                           </div>
                           {(p.id.startsWith('focal-spikes-') || FOCAL_ICTAL_IDS.has(p.id)) && on && (
                             <div className="pt-2 pb-1 pl-1 space-y-1">
@@ -473,6 +395,32 @@ export function ControlPanel({
                                   </button>
                                 ))}
                               </div>
+                              {/* Sides (owner, 2026-11-16): random per POSTS, a teaching
+                                  idealisation (sleep.ts). Smaller: how far a bilateral one's
+                                  smaller side is down on the page; One side only: the share
+                                  drawn on one side alone. */}
+                              {([
+                                ['postsSmallerPct', 'Smaller side', 80, 5, POSTS_SMALLER_DEFAULT],
+                                ['postsOneSidePct', 'One side only', 50, 1, POSTS_ONE_SIDE_DEFAULT],
+                              ] as const).map(([key, label, max, step, def]) => (
+                                <div key={key} className="space-y-1 pt-1">
+                                  <div className="flex justify-between items-center">
+                                    <Label className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</Label>
+                                    <span className="text-[10px] font-mono text-emerald-400">{patternOptions[key] ?? def}%</span>
+                                  </div>
+                                  <input
+                                    type="range" min="0" max={max} step={step}
+                                    value={patternOptions[key] ?? def}
+                                    onChange={e => updatePatternOptions({ [key]: parseFloat(e.target.value) })}
+                                    className="w-full accent-emerald-500"
+                                  />
+                                </div>
+                              ))}
+                              <button
+                                onClick={() => updatePatternOptions({ postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT })}
+                                className="w-full py-1 rounded text-[11px] font-mono border border-slate-700 text-slate-500 hover:bg-slate-800 transition-colors">
+                                Reset to default
+                              </button>
                             </div>
                           )}
                           {isIctal && on && params && (
@@ -649,36 +597,6 @@ export function ControlPanel({
         {/* ── Display Settings ── */}
         <div className="px-4 py-3 space-y-3">
           <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Display</h2>
-
-          {/* Paper speed */}
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Paper Speed</Label>
-              <span className="text-[10px] font-mono text-emerald-400">{speed} mm/s</span>
-            </div>
-            <div className="flex gap-1">
-              {SPEED_VALUES.map(s => (
-                <button key={s} onClick={() => setSpeed(s)}
-                  className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                    speed === s
-                      ? 'bg-emerald-700/40 border-emerald-600 text-emerald-300'
-                      : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                  }`}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Sensitivity */}
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Sensitivity</Label>
-              <span className="text-[10px] font-mono text-emerald-400">{sensitivity} µV/mm</span>
-            </div>
-            <SensitivitySelect value={sensitivity as Sensitivity} onChange={setSensitivity} />
-            <p className="text-[10px] text-slate-700">Standard 7 · Low gain 10 µV/mm · scroll to adjust</p>
-          </div>
 
           {/*
             The display convention, stated on screen.

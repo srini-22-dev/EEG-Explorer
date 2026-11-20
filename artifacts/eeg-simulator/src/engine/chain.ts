@@ -13,6 +13,7 @@
  */
 
 import { Gaussian, deriveSeed } from './rng';
+import type { FilterSettings } from '../utils/simTypes';
 
 /**
  * Amplifier low-frequency-filter corner, in Hz — equivalently a time constant of
@@ -57,9 +58,14 @@ export class AmplifierHighPass {
   private a: number;
   private prevIn = 0;
   private prevOut = 0;
-  constructor(dt: number, cornerHz = CLINICAL_LFF_HZ) {
+  constructor(private dt: number, cornerHz = CLINICAL_LFF_HZ) {
+    this.a = 0;
+    this.setCorner(cornerHz);
+  }
+  /** Move the corner mid-recording (the reader's low-cut setting); state is kept. */
+  setCorner(cornerHz: number) {
     const rc = 1 / (2 * Math.PI * cornerHz);
-    this.a = rc / (rc + dt);
+    this.a = rc / (rc + this.dt);
   }
   next(x: number): number {
     const y = this.a * (this.prevOut + x - this.prevIn);
@@ -91,12 +97,17 @@ export class AmplifierLowPass {
   private b: number;
   private prevIn = 0;
   private prevOut = 0;
-  constructor(dt: number, cornerHz = 100) {
+  constructor(private dt: number, cornerHz = 100) {
+    this.a = 0; this.b = 1;
+    this.setCorner(cornerHz);
+  }
+  /** Move the corner mid-recording (the reader's high-cut setting); state is kept. */
+  setCorner(cornerHz: number) {
     // tan diverges as fc approaches Nyquist, so clamp just below it. A corner at
     // or above Nyquist is meaningless anyway — there is nothing up there to remove.
-    const nyquist = 0.5 / dt;
+    const nyquist = 0.5 / this.dt;
     const fc = Math.min(cornerHz, nyquist * 0.98);
-    const k = Math.tan(Math.PI * fc * dt);
+    const k = Math.tan(Math.PI * fc * this.dt);
     this.a = (1 - k) / (1 + k);
     this.b = k / (1 + k);
   }
@@ -104,6 +115,28 @@ export class AmplifierLowPass {
     const y = this.b * (x + this.prevIn) + this.a * this.prevOut;
     this.prevIn = x;
     this.prevOut = y;
+    return y;
+  }
+}
+
+/**
+ * Mains notch: a second-order IIR band-stop (the RBJ cookbook notch), Q 30, so
+ * about 1.7 Hz wide at -3 dB around the mains frequency. An EEG machine's notch
+ * removes the interference and anything else at that frequency — EMG included, so
+ * a notched record can make muscle look cleaner than it is. Causal, like the rest
+ * of the chain.
+ */
+export class NotchFilter {
+  private b0: number; private b1: number; private b2: number; private a1: number; private a2: number;
+  private x1 = 0; private x2 = 0; private y1 = 0; private y2 = 0;
+  constructor(dt: number, hz: number, q = 30) {
+    const w0 = 2 * Math.PI * hz * dt, alpha = Math.sin(w0) / (2 * q), a0 = 1 + alpha;
+    this.b0 = 1 / a0; this.b1 = -2 * Math.cos(w0) / a0; this.b2 = 1 / a0;
+    this.a1 = -2 * Math.cos(w0) / a0; this.a2 = (1 - alpha) / a0;
+  }
+  next(x: number): number {
+    const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2;
+    this.x2 = this.x1; this.x1 = x; this.y2 = this.y1; this.y1 = y;
     return y;
   }
 }
@@ -144,6 +177,8 @@ export type ChannelChainOptions = {
 export class RecordingChain {
   private hp: AmplifierHighPass[];
   private lp: AmplifierLowPass[];
+  private notch: NotchFilter[] | null = null;
+  private notchHz: number | null = null;
   private noise: Gaussian[];
   private refNoise: Gaussian;
   private gains: Float64Array;
@@ -211,6 +246,25 @@ export class RecordingChain {
   }
 
   /**
+   * The reader's filter settings (the top bar). The chain's own defaults (0.25 Hz,
+   * 100 Hz, no notch) are what the validation gate measures against; the app starts
+   * at the routine clinical 1 Hz / 70 Hz (`DEFAULT_FILTERS`).
+   * Change the filters mid-recording, as a reader turns the knobs: each filter keeps
+   * its state, so the trace bends rather than jumps. A notch switched on starts empty.
+   */
+  setFilters(f: FilterSettings) {
+    for (let c = 0; c < this.nChannels; c++) {
+      this.hp[c].setCorner(f.lowCutHz);
+      this.lp[c].setCorner(f.highCutHz);
+    }
+    if (f.notchHz == null) this.notch = null;
+    else if (this.notchHz !== f.notchHz) {
+      this.notch = Array.from({ length: this.nChannels }, () => new NotchFilter(this.dt, f.notchHz!));
+    }
+    this.notchHz = f.notchHz;
+  }
+
+  /**
    * Change one channel's defect mid-recording. Electrode contact is not a
    * property fixed when the montage was applied: a lead comes off, or a
    * technologist re-gels it, and the channel's character changes from that
@@ -256,7 +310,8 @@ export class RecordingChain {
       v = v * this.gains[c] + ref + line * lineAmp * lineMul * this.lineCoupling[c]
         + this.noise[c].next() * this.sensorNoiseRms * noiseMul;
       v = this.hp[c].next(v);
-      x[c] = this.lp[c].next(v);
+      v = this.lp[c].next(v);
+      x[c] = this.notch ? this.notch[c].next(v) : v;
     }
   }
 }

@@ -32,6 +32,7 @@ import {
   artifactSeeds,
 } from './artifacts';
 import { RecordingChain, sampleDefects, defectLineMultiplier, type ChannelDefect } from './chain';
+import type { FilterSettings } from '../utils/simTypes';
 import { Gaussian, deriveSeed } from './rng';
 import {
   PATTERN_SOURCES,
@@ -43,7 +44,7 @@ import type {
   PatientState, IctalHemisphere, IctalParams, IctalParamsMap,
   ArtifactParams, EmgRegion, PatternOptions, PostsForm, FocalPlacement, KcSpindle, SixHzForm, BreachSite, Pos146Sides,
 } from '../utils/simTypes';
-import { defaultIctalParamsMap, POP_TARGET_ANY } from '../utils/simTypes';
+import { defaultIctalParamsMap, POP_TARGET_ANY, POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } from '../utils/simTypes';
 
 /**
  * Per-subject parameters (briefing §9/§12). Real datasets vary enormously in
@@ -558,6 +559,12 @@ const SLOW_WAVE_LOCAL_TILT = 0.3;
 // Slow waves carry nothing above a few Hz; see HopfOscillator `outputLowPassHz`.
 const SLOW_WAVE_LOWPASS_HZ = 4;
 
+// Orbicularis oculi EMG during a blink, microvolts of shot noise (RMS) at each orbit
+// at full envelope (owner, 2026-11-16: "a very slight muscle artifact" with each
+// blink, "more subtle than the actual muscle EEG artifact"). Set so a blink's EMG at
+// Fp1-F3, 25-70 Hz, is a small fraction of the muscle toggle's there (gate: 'blink
+// EMG / muscle EMG'); no source gives a microvolt figure.
+const BLINK_EMG_UV = 9;
 // Ocular drive for a blink, microvolts at the ocular sources before the leadfield. Eye
 // opening uses half of it (next()).
 //
@@ -648,6 +655,8 @@ export class EegEngine {
   private emgR: EmgGenerator | null = null;
   private emgF: EmgGenerator | null = null;
   private emgN: EmgGenerator | null = null;
+  /** Orbicularis oculi EMG, enveloped by each blink (BlinkGenerator.emgEnvelope). */
+  private emgBlink: EmgGenerator | null = null;
   private pop: ElectrodePopGenerator | null = null;
   private sweat: SweatGenerator | null = null;
   private line: LineNoiseGenerator | null = null;
@@ -727,6 +736,8 @@ export class EegEngine {
   // See setBackgroundMu.
   private backgroundMu = true;
   private postsForm: PostsForm = 'singles';
+  private postsSmallerPct = POSTS_SMALLER_DEFAULT;
+  private postsOneSidePct = POSTS_ONE_SIDE_DEFAULT;
   private focalPlacement: FocalPlacement = 'under';
   private seizureMuscle = false;
   private kcSpindle: KcSpindle = 'sometimes';
@@ -1049,6 +1060,7 @@ export class EegEngine {
       this.emgR = new EmgGenerator(A.emgR, this.dt);
       this.emgF = new EmgGenerator(A.emgF, this.dt);
       this.emgN = new EmgGenerator(A.emgN, this.dt);
+      this.emgBlink = new EmgGenerator(deriveSeed(seed, 'emgBlink'), this.dt);
       this.pop = new ElectrodePopGenerator(A.pop, this.dt, this.electrodes.length, 60 / b);
       this.sweat = new SweatGenerator(A.sweat, this.dt);
       this.line = new LineNoiseGenerator(A.line, this.dt, S.lineFreq);
@@ -1142,6 +1154,7 @@ export class EegEngine {
       postsForm: this.postsForm, focalPlacement: this.focalPlacement, ictalDelay: this.ictalDelay,
       seizureMuscle: this.seizureMuscle, kcSpindle: this.kcSpindle, sixHzForm: this.sixHzForm,
       pos146Sides: this.pos146Sides,
+      postsSmallerPct: this.postsSmallerPct, postsOneSidePct: this.postsOneSidePct,
     };
     const marking = this.marksOn;
     if (marking) this.groundTruth.marks.length = 0;
@@ -1264,6 +1277,11 @@ export class EegEngine {
       };
       const blinkV = this.blink.next(g.blink, gains.ocularRate) * BLINK_DRIVE_UV;
       eyes(blinkV);
+      // The orbicularis contraction behind the blink, at the orbits (the ocular
+      // monopoles' radial patches) and gated with it. Its shot noise runs every
+      // sample so its statistics never restart; the envelope is 0 between blinks.
+      const blinkEmgV = this.emgBlink!.next() * BLINK_EMG_UV * this.blink.emgEnvelope;
+      V[ix.eyeMonoL] += blinkEmgV; V[ix.eyeMonoR] += blinkEmgV;
       // Eye opening rides the same ocular sources as the blink but at half the
       // amplitude and opposite sign on opening (see EyeOpeningGenerator): opening
       // drives Fp negative -> upward, closing a smaller downward transient.
@@ -1423,9 +1441,23 @@ export class EegEngine {
    * so a UI checkbox can be toggled mid-recording without resetting any
    * oscillator phase or vigilance state elsewhere in the engine.
    */
+  private filters: FilterSettings | undefined;
+  /**
+   * The reader's filter settings (low cut, high cut, notch), applied in the recording
+   * chain. Short-circuits on an unchanged object, so the app can pass it every
+   * sample; omitted leaves the chain's own defaults (0.25 Hz, 100 Hz, no notch).
+   */
+  setFilters(f?: FilterSettings) {
+    if (f === this.filters) return;
+    this.filters = f;
+    if (f && this.chain) this.chain.setFilters(f);
+  }
+
   /** Choices between forms of one pattern (see `PatternOptions`); omitted means the defaults. */
   setPatternOptions(o?: PatternOptions) {
     this.postsForm = o?.postsForm ?? 'singles';
+    this.postsSmallerPct = o?.postsSmallerPct ?? POSTS_SMALLER_DEFAULT;
+    this.postsOneSidePct = o?.postsOneSidePct ?? POSTS_ONE_SIDE_DEFAULT;
     this.focalPlacement = o?.focalPlacement ?? 'under';
     this.seizureMuscle = o?.seizureMuscle ?? false;
     this.kcSpindle = o?.kcSpindle ?? 'sometimes';

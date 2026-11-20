@@ -134,8 +134,10 @@ export function defaultArtifactParams(): ArtifactParams {
  *  - 10 mm/s — not from Guideline 1; kept for polysomnography-style review of
  *    the sleep material, where a slower sweep is conventional.
  *  20 mm/s was dropped: no guideline names it, and it displaced 15 mm/s, the
- *  speed the standard actually calls for. */
-export const SPEED_VALUES = [10, 15, 30] as const;
+ *  speed the standard actually calls for.
+ *  - 40 and 60 mm/s (owner, 2026-11-16): faster sweeps spread a transient out, for
+ *    reading the morphology of a spike or a wicket's arch. */
+export const SPEED_VALUES = [10, 15, 30, 40, 60] as const;
 export const SENSITIVITY_VALUES = [1, 3, 5, 7, 10, 15, 30] as const;
 export type Speed = (typeof SPEED_VALUES)[number];
 export type Sensitivity = (typeof SENSITIVITY_VALUES)[number];
@@ -151,7 +153,22 @@ export type SimSettings = {
   artifactParams: ArtifactParams;
   /** Choices between forms of one pattern. Optional: omitted means every default. */
   patternOptions?: PatternOptions;
+  /** The reader's filters (top bar). Optional: omitted leaves the engine's own. */
+  filters?: FilterSettings;
 };
+
+/** The reader's filter settings; see `RecordingChain.setFilters`. */
+export type FilterSettings = { lowCutHz: number; highCutHz: number; notchHz: number | null };
+/**
+ * Filter choices offered in the top bar. Low cut: the usual clinical set, plus the
+ * engine's own 0.25 Hz. High cut: the usual set; 100 Hz is the engine's own.
+ * The app starts at the routine 1 Hz / 70 Hz, notch off (owner, 2026-11-16); the
+ * notch is at 50 Hz, the mains of India and Britain (owner).
+ */
+export const LOW_CUT_VALUES = [0.1, 0.25, 0.3, 0.5, 1, 1.6, 5] as const;
+export const HIGH_CUT_VALUES = [15, 30, 35, 40, 70, 100] as const;
+export const NOTCH_HZ = 50;
+export const DEFAULT_FILTERS: FilterSettings = { lowCutHz: 1, highCutHz: 70, notchHz: null };
 
 /**
  * How POSTS are grouped in time. Both are normal (Neupsy Key: singly, more than
@@ -159,6 +176,16 @@ export type SimSettings = {
  * picks which to look at.
  */
 export type PostsForm = 'singles' | 'trains';
+
+/**
+ * POSTS sides, as two sliders under the POSTS toggle (owner, 2026-11-16).
+ * `postsSmallerPct`: how much smaller, on the page, the smaller side of a bilateral
+ * POSTS is, on a side drawn at random. `postsOneSidePct`: the share of POSTS that are on one side only. Random
+ * per event — a teaching idealisation the owner chose, not a model of any one
+ * person (Rey et al. 2009 found a CONSISTENT asymmetry in 38% of recordings).
+ */
+export const POSTS_SMALLER_DEFAULT = 40;
+export const POSTS_ONE_SIDE_DEFAULT = 5;
 
 /**
  * Where a focal discharge's source sits — the focal spikes and the focal seizures
@@ -181,6 +208,7 @@ export type FocalPlacement = 'under' | 'between';
 export type PatternOptions = {
   postsForm?: PostsForm; focalPlacement?: FocalPlacement; seizureMuscle?: boolean; kcSpindle?: KcSpindle;
   sixHzForm?: SixHzForm; breachSite?: BreachSite; pos146Sides?: Pos146Sides;
+  postsSmallerPct?: number; postsOneSidePct?: number;
 };
 
 /**

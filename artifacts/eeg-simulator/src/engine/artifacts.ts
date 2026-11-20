@@ -160,11 +160,14 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
 export const OCULAR_DIPOLE_SHARE = 0.4;
 
 /**
- * Minimum interval between consecutive blink onsets, seconds. Set to the longest
- * lid-deflection (0.40 s, see `next`) so two blinks can never overlap, and within
- * the physiological ~0.3-0.5 s spontaneous blink refractory period.
+ * Minimum interval between consecutive blink onsets, seconds, within the
+ * physiological ~0.3-0.5 s spontaneous blink refractory period. Since blinks run
+ * to 0.55 s (2026-11-16) the schedule also waits out the current blink plus 0.1 s,
+ * so two can never overlap.
  */
 const BLINK_REFRACTORY_SEC = 0.4;
+/** Time constant of the orbicularis EMG's decay after a blink (BlinkGenerator). */
+const BLINK_EMG_DECAY_SEC = 0.12;
 
 /**
  * Lead time (s) to the FIRST event after an ocular toggle is switched on. Without
@@ -186,15 +189,38 @@ export const OCULAR_FIRST_EVENT_LEAD_SEC = 0.3;
  */
 const OCULAR_JITTER_FRAC = 0.2;
 
-/** Blink: a smooth monophasic lid-movement deflection, 200-400 ms (§8). */
+/**
+ * Blink: a smooth monophasic lid-movement deflection (§8), and the orbicularis
+ * oculi contraction that closes the lid.
+ *
+ * Width (owner, 2026-11-16, against a clinical record: narrow blinks of ~0.2 s
+ * beside broad ones of ~0.4-0.5 s on one page). Each blink's length is drawn
+ * log-normally about 0.30 s and held to 0.18-0.55 s; it was uniform over
+ * 0.22-0.40 s, which put every blink within a factor of two of every other. The
+ * closing share of the movement varies too (30-42%, was a fixed 35%).
+ *
+ * EMG. A blink is a muscle contraction: orbicularis oculi, around the orbit, so its
+ * motor-unit potentials reach the frontopolar electrodes as a brief, low burst of
+ * fast activity riding on the deflection (seen on the owner's record on Fp2-F4 and
+ * Fp2-F8 around each blink). `emgEnvelope` is that burst's size, sample by sample:
+ * rising as the lid closes, held while it reopens, dying away over ~0.3 s after
+ * (time constant 0.12 s). The engine multiplies it into its own EMG shot noise at
+ * the orbits. Each blink draws its own strength (0.3-0.6 of full), so some carry
+ * more than others; at full it is a fraction of the `muscle` toggle's frontal EMG
+ * (engine.ts, BLINK_EMG_UV).
+ */
 export class BlinkGenerator {
   private g: Gaussian;
   private samplesToNext = 0;
   private elapsed = -1;
   private length = 0;
+  private closeFrac = 0.35;
   private amp = 1;
+  private emgAmp = 0;
   private enabled = false;
   active = false;
+  /** Orbicularis EMG envelope, 0 to ~0.6; see the class comment. */
+  emgEnvelope = 0;
 
   constructor(seed: number, private dt: number, private ratePerMin = 16) {
     this.g = new Gaussian(seed);
@@ -205,11 +231,11 @@ export class BlinkGenerator {
     const mean = 60 / Math.max(this.ratePerMin * rateScale, 0.5);
     // Low-variance schedule: symmetric jitter around the nominal interval keeps the
     // long-run rate at ratePerMin, floored at the refractory period so two blinks
-    // can never start within one lid deflection (0.22-0.40 s) of each other and
+    // can never start within one lid deflection (0.18-0.55 s) of each other and
     // render as a single jagged "double" — non-physiological, since the
     // orbicularis/levator cannot re-fire instantly (~0.3-0.5 s minimum gap).
     const interval = Math.max(
-      BLINK_REFRACTORY_SEC,
+      BLINK_REFRACTORY_SEC, this.length * this.dt + 0.1,
       mean * (1 + (this.g.uniform() - 0.5) * 2 * OCULAR_JITTER_FRAC),
     );
     this.samplesToNext = Math.max(1, Math.round(interval / this.dt));
@@ -226,6 +252,7 @@ export class BlinkGenerator {
       this.enabled = false;
       this.elapsed = -1;
       this.active = false;
+      this.emgEnvelope = 0;
       return 0;
     }
     if (!this.enabled) {
@@ -235,19 +262,26 @@ export class BlinkGenerator {
     }
     if (--this.samplesToNext <= 0) {
       this.elapsed = 0;
-      this.length = Math.round(this.g.range(0.22, 0.40) / this.dt);
+      this.length = Math.round(Math.min(0.55, Math.max(0.18, this.g.logNormal(0.30, 0.3))) / this.dt);
       this.amp = this.g.logNormal(1, 0.28);
+      this.closeFrac = this.g.range(0.30, 0.42);
+      this.emgAmp = this.g.range(0.3, 0.6);
       this.schedule(rateScale);
     }
+    // The EMG dies away after the lid has reopened.
+    this.emgEnvelope *= Math.exp(-this.dt / BLINK_EMG_DECAY_SEC);
     if (this.elapsed < 0) { this.active = false; return 0; }
     const u = this.elapsed / this.length;
     this.elapsed++;
     if (u >= 1) { this.elapsed = -1; this.active = false; return 0; }
     this.active = true;
+    const c = this.closeFrac;
+    // The muscle fires as the lid closes and holds while it reopens.
+    this.emgEnvelope = Math.max(this.emgEnvelope, this.emgAmp * Math.min(1, u / c));
     // Asymmetric lid movement: fast close, slower reopen.
-    const shape = u < 0.35
-      ? 0.5 - 0.5 * Math.cos((Math.PI * u) / 0.35)
-      : 0.5 + 0.5 * Math.cos((Math.PI * (u - 0.35)) / 0.65);
+    const shape = u < c
+      ? 0.5 - 0.5 * Math.cos((Math.PI * u) / c)
+      : 0.5 + 0.5 * Math.cos((Math.PI * (u - c)) / (1 - c));
     return this.amp * shape;
   }
 }

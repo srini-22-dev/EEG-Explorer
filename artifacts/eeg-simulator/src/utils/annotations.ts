@@ -53,7 +53,7 @@ export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   'eyes-open':  { patternId: 'eyes-open',  targetRegion: 'all',            text: 'Eyes open: posterior alpha attenuates (Berger effect)' },
 
   // ── Artifacts ───────────────────────────────────────────────────────────
-  'blink':        { patternId: 'blink',        targetRegion: 'all',          text: 'Blink: large downward deflection at Fp1/Fp2 (200–400 ms)' },
+  'blink':        { patternId: 'blink',        targetRegion: 'all',          text: 'Blink: large downward deflection at Fp1/Fp2 (0.2–0.5 s)' },
   'eye-flutter':  { patternId: 'eye-flutter',  targetRegion: 'all',          text: 'Eye flutter: blink-like downward Fp deflections, 3–4/s, frontal only' },
   'eye-movement': { patternId: 'eye-movement', targetRegion: 'all',          text: 'Lateral gaze: F7 vs F8 opposite, led by a lateral rectus spike (LRS)' },
   'eye-opening':  { patternId: 'eye-opening',  targetRegion: 'all',          text: 'Eye opening: upward frontopolar sweep (mirror of a blink)' },

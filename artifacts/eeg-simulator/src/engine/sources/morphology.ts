@@ -57,7 +57,8 @@ export function multiToneSignal(
 
 // Mu, wicket spikes, and 14 & 6 positive bursts are all "arciform" (arch- or
 // comb-shaped): one side of each cycle is sharp and pointed, the other rounded.
-// The obvious way to draw that — Math.abs() of a sine — is wrong twice over.
+// (Wickets, spikier than the other two, have drawn their own arch since
+// 2026-11-16: `wicketShape` in variants.ts.) The obvious way to draw that — Math.abs() of a sine — is wrong twice over.
 // Rectifying a sine turns every half-cycle into its own hump, so a 10 Hz mu
 // carrier renders as a 20 Hz train; and because the result never goes negative,
 // the rhythm sits off-baseline on a DC offset instead of oscillating about it.
@@ -85,15 +86,6 @@ export function arciformSignal(
     s += a * (Math.cos(th) + 0.35 * Math.cos(2 * th));
   }
   return sharp * s / norm;
-}
-
-/**
- * Seconds from the start of a one-tone `arciformSignal` at `f` Hz to its first
- * pointed peak (where the phase reaches a whole turn). A single arch — one wicket
- * on its own — is the waveform windowed to one cycle about this point.
- */
-export function arcPeakTime(f: number): number {
-  return (2 * Math.PI - ARCH_ZERO_PHASE) / (2 * Math.PI * f);
 }
 
 // Evolving frequency is the single most important feature of an ictal rhythm, and

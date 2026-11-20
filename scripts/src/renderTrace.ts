@@ -123,6 +123,16 @@ export interface RenderOpts {
   pxPerMm?: number;                    // vertical px per mm, default 4
   artifactParams?: Partial<ArtifactParams>;
   ictalParams?: IctalParamsMap;
+  // The reader's filters (the app's top bar). Omitted: the engine's own 0.25 Hz /
+  // 100 Hz / no notch, which is what the validation gate measures; the app starts
+  // at 1 Hz / 70 Hz (DEFAULT_FILTERS).
+  filters?: SimSettings['filters'];
+  // Draw only these rows (labels in the montage), in montage order. The engine and
+  // the common average still run over every electrode; only the page is cropped.
+  rows?: string[];
+  // Run as the app does (SimulationSource.useAppMode): the toggles alone decide what
+  // is on the page, rather than the state also switching its own patterns on.
+  appMode?: boolean;
   out?: string;                        // PNG path
 }
 
@@ -154,8 +164,11 @@ export interface RenderResult {
 
 export function renderTrace(opts: RenderOpts = {}): RenderResult {
   const montageId = opts.montage ?? 'bipolar-ap';
-  const montage = MONTAGES[montageId];
-  if (!montage) throw new Error(`unknown montage '${montageId}' (have: ${Object.keys(MONTAGES).join(', ')})`);
+  const fullMontage = MONTAGES[montageId];
+  if (!fullMontage) throw new Error(`unknown montage '${montageId}' (have: ${Object.keys(MONTAGES).join(', ')})`);
+  const montage: Montage = opts.rows
+    ? { ...fullMontage, channels: fullMontage.channels.filter(c => opts.rows!.includes(c.label)) }
+    : fullMontage;
 
   const state: PatientState = opts.state ?? 'awake';
   const seconds = opts.seconds ?? 6;
@@ -171,10 +184,12 @@ export function renderTrace(opts: RenderOpts = {}): RenderResult {
     ictalParams: opts.ictalParams ?? defaultIctalParamsMap(),
     artifactParams: { ...defaultArtifactParams(), ...(opts.artifactParams ?? {}) },
     patternOptions: opts.patternOptions,
+    filters: opts.filters,
   };
 
   // ── Drive the real engine through the real display transform ──
   const src = new SimulationSource(seed, FS);
+  if (opts.appMode) src.useAppMode();
   const skip = Math.max(0, Math.floor((opts.skipSeconds ?? 0) * FS));
   let t0 = 0;
   for (let i = 0; i < skip; i++) src.next(settings);
@@ -303,6 +318,8 @@ function parseArgs(argv: string[]): RenderOpts {
       case '--seconds': o.seconds = Number(next()); break;
       case '--seed': o.seed = Number(next()); break;
       case '--posts': o.patternOptions = { ...o.patternOptions, postsForm: next() as 'singles' | 'trains' }; break;
+      case '--posts-smaller': o.patternOptions = { ...o.patternOptions, postsSmallerPct: Number(next()) }; break;
+      case '--posts-one-side': o.patternOptions = { ...o.patternOptions, postsOneSidePct: Number(next()) }; break;
       case '--focus': o.patternOptions = { ...o.patternOptions, focalPlacement: next() as 'under' | 'between' }; break;
       case '--muscle': o.patternOptions = { ...o.patternOptions, seizureMuscle: next() === 'on' }; break;
       case '--kc-spindle': o.patternOptions = { ...o.patternOptions, kcSpindle: next() as 'none' | 'sometimes' | 'always' }; break;
@@ -312,6 +329,10 @@ function parseArgs(argv: string[]): RenderOpts {
       case '--skip': o.skipSeconds = Number(next()); break;
       case '--sensitivity': o.sensitivity = Number(next()) as SimSettings['sensitivity']; break;
       case '--speed': o.speed = Number(next()) as SimSettings['speed']; break;
+      case '--low-cut': o.filters = { ...(o.filters ?? { lowCutHz: 0.25, highCutHz: 100, notchHz: null }), lowCutHz: Number(next()) }; break;
+      case '--high-cut': o.filters = { ...(o.filters ?? { lowCutHz: 0.25, highCutHz: 100, notchHz: null }), highCutHz: Number(next()) }; break;
+      case '--notch': o.filters = { ...(o.filters ?? { lowCutHz: 0.25, highCutHz: 100, notchHz: null }), notchHz: Number(next()) }; break;
+      case '--rows': o.rows = next().split(',').map(s => s.trim()).filter(Boolean); break;
       case '--out': o.out = next(); break;
     }
   }

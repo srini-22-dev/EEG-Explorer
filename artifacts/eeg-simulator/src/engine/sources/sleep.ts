@@ -346,7 +346,7 @@ const spindleSlow = spindleSource('spindle-slow',
 // conspicuous thing on an N1 record. learningeeg's POSTS figure shows them one
 // after another at irregular intervals, modest against their background. So:
 // singles only, more than 1 s apart and at no fixed interval, 24-46 uV at the
-// source (~20-38 uV at O1-A1, the lower half of NPK's 20-75; it was 25-55 with a
+// source (scaled by POSTS_SIZE since 2026-11-16; before that ~20-38 uV at O1-A1, the lower half of NPK's 20-75; it was 25-55 with a
 // further +-25% on each). Trains are the other form, chosen with the POSTS option
 // (`PostsForm`, 2026-10-13): the same elements, 2-6 of them at 4-6 per second, in
 // place of the singles — one form or the other, so each can be looked at alone.
@@ -354,8 +354,41 @@ const spindleSlow = spindleSource('spindle-slow',
 // Polarity is montage-dependent (CLAUDE.md §4): positive at O1/O2, so DOWN in a
 // referential montage, but UP on the double banana, where O1/O2 is input 2.
 // ---------------------------------------------------------------------------
-type PostsEvent = { amp: number; dur: number; neg: number };
-type PostsTrain = { onsets: number[]; amps: number[]; durs: number[]; negs: number[] };
+// Rate and symmetry (owner, 2026-11-16). At one every ~2.7 s the singles put 3-4
+// on every 10 s page at 30 mm/s; the owner asked for 1-2 a page. The schedule
+// below leaves a 3.4-9.6 s gap after each (mean ~6.5 s): still "more than 1 s
+// apart" and "without periodicity" (NPK), and now as sparse as asked. Trains take
+// the same schedule.
+//
+// Sides (2026-11-16). POSTS are "bilateral, but not necessarily symmetric"
+// (learningeeg atlas); Rey, Aybek, Maeder-Ingvar & Rossetti (Clin Neurophysiol 2009,
+// 120:472) found "a consistent amplitude asymmetry" in 38% of recordings with POSTS,
+// unrelated to any abnormality: "POSTS asymmetry ... should be considered as normal".
+// In a person that asymmetry is consistent, one side all record long. Here it is
+// random per POSTS instead, by the owner's choice: a teaching idealisation that puts
+// both pictures on one page, set with two sliders under the toggle
+// (`PatternOptions.postsSmallerPct` / `postsOneSidePct`, defaults 40% and 5%):
+//  - a bilateral POSTS has one side, left or right at random, smaller ON THE PAGE by
+//    the slider's figure (40% by default). It was a range, half the slider to all of
+//    it, until the owner saw the low end on the page: a 20% drop on a 30 uV wave
+//    hardly shows over the background, and a side labelled smaller has to look it;
+//  - a share of POSTS is on one side only. No source gives a rate; an AI summary the
+//    owner consulted put strictly unilateral POSTS under 0.5% of EEGs and tied them to
+//    lesions on that side, which no source found here confirms. The 5% is a design.
+// The field is two generators, one under each occiput, on ONE shared schedule (built
+// from the same seed, so both draw the same events and fire together); each scales
+// its own copy. Each occiput also sees 18.6% of the other side's field (leadfield:
+// 0.1793 against 0.9646 at O-A), so a page drop is converted to a source drop below,
+// and a one-sided POSTS still shows about a fifth of itself across the midline —
+// volume conduction, which no arrow points at.
+//
+// Annotation: the side a POSTS is absent from places no mark (no arrows there); the
+// smaller side of a bilateral one is labelled "POSTS (smaller)" (owner: denote the
+// smaller one, without its percentage).
+type PostsSide = 'left' | 'right';
+type PostsSides = { low: PostsSide; asym: number; oneSide: boolean };
+type PostsEvent = { amp: number; dur: number; neg: number } & PostsSides;
+type PostsTrain = { onsets: number[]; amps: number[]; durs: number[]; negs: number[] } & PostsSides;
 
 // The longest element: 0.16 s, and its negative afterwave when it has one (x1.6).
 const POSTS_EVENT_S = 0.27;
@@ -363,6 +396,25 @@ const POSTS_EVENT_S = 0.27;
 // window holds the longest: six at 4 per second and the last one's afterwave.
 const POSTS_MAX_TRAIN = 6;
 const POSTS_TRAIN_S = 1.7;
+const POSTS_SCHEDULE = { kind: 'periodic', period: 6.2, jitterFrac: 0.5 } as const;
+// Each side is its own leadfield column, normalised to 1 under its own electrode;
+// the old single column was normalised over BOTH patches, so each occiput also
+// carried the other's spill. Measured from the leadfield (2026-11-16): the old
+// column is 0.8359 of the two new ones summed, the same at every electrode against
+// any reference, so this gain makes a symmetric event exactly the old one.
+const POSTS_SIDE_GAIN = 0.8359;
+// Size (owner, 2026-11-16: "reduce the amplitude of POSTS by 20 to 30%"). A quarter
+// off every draw, after it is drawn, so the random stream is unchanged. Measured
+// before the cut (bipolar-ap, seed 20, 240 s, each event's largest row): POSTS 23.1 uV
+// against vertex waves 29.1 uV. The owner's "about vertex-wave size" came from one
+// page where a vertex wave sat next to a POSTS; asked, they chose the 25% cut over a
+// match. At the source this is 18-34.5 uV, ~23 uV median at the larger occiput (O-A),
+// at the low end of NPK's 20-75.
+const POSTS_SIZE = 0.75;
+// Trains a tenth smaller instead (owner, 2026-11-16): at the singles' 25% a train's
+// elements measured 18.2 uV at the larger occiput, under NPK's floor of 20; a train
+// is several elements at once, so the owner chose to keep it inside the range.
+const POSTS_TRAIN_SIZE = 0.9;
 
 function postsElement(t: number, amp: number, dur: number, neg: number): number {
   if (t < 0) return 0;
@@ -374,64 +426,105 @@ function postsElement(t: number, amp: number, dur: number, neg: number): number 
   return 0;
 }
 
-const posts: PatternSourceDescriptor = {
-  id: 'posts',
-  toggles: ['posts'],
-  states: ['n1', 'n2'],
-  stateIntrinsic: true,
-  spec: synchronousPatches('posts', { O1: 1, O2: 1 }, { extent: 0.3 }),
-  make(seed, dt) {
-    const singles = new TransientSource<PostsEvent>(seed, dt, {
-      // The next one is scheduled 1.1-3.7 s after this one's window closes: always
-      // more than 1 s apart, and at no fixed interval ("without periodicity").
-      schedule: { kind: 'periodic', period: 2.4, jitterFrac: 0.55 },
-      duration: POSTS_EVENT_S,
-      onset: (g) => ({
-        amp: between(g, 24, 46),
-        dur: between(g, 0.09, 0.16),
-        neg: g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0,
-      }),
-      mark: () => ({ dur: 0.2 }),
-      morphology: (t, e) => postsElement(t, e.amp, e.dur, e.neg),
-    });
-    // The other form. Its own stream, so choosing it leaves the singles' untouched.
-    const trains = new TransientSource<PostsTrain>(deriveSeed(seed, 'trains'), dt, {
-      schedule: { kind: 'periodic', period: 2.4, jitterFrac: 0.55 },
-      duration: POSTS_TRAIN_S,
-      onset: (g) => {
-        const n = 2 + Math.floor(g.uniform() * (POSTS_MAX_TRAIN - 1));
-        const rate = between(g, 4, 6);
-        // One size for the train, each element a little off it.
-        const base = between(g, 24, 46);
-        const onsets: number[] = [], amps: number[] = [], durs: number[] = [], negs: number[] = [];
-        for (let k = 0; k < n; k++) {
-          onsets.push(k === 0 ? 0 : onsets[k - 1] + jit(g, 1 / rate, 0.1));
-          amps.push(jit(g, base, 0.2));
-          durs.push(between(g, 0.09, 0.16));
-          negs.push(g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0);
-        }
-        return { onsets, amps, durs, negs };
-      },
-      // One box from the first element to the end of the last (its afterwave included).
-      mark: (e) => {
-        const last = e.onsets.length - 1;
-        return { span: e.onsets[last] + e.durs[last] * (e.negs[last] > 0 ? 1.6 : 1) };
-      },
-      morphology: (t, e) => {
-        let v = 0;
-        for (let k = 0; k < e.onsets.length; k++) v += postsElement(t - e.onsets[k], e.amps[k], e.durs[k], e.negs[k]);
-        return v;
-      },
-    });
-    return {
-      next(ctx) {
-        const inTrains = ctx.postsForm === 'trains';
-        return singles.next(ctx.enabled && !inTrains) + trains.next(ctx.enabled && inTrains);
-      },
-      takeMarks: () => [...singles.takeMarks(), ...trains.takeMarks()],
-    };
-  },
-};
+// Gain of one occiput at the other (0.1793) and under itself (0.9646), O-A.
+const POSTS_SPILL = 0.1793, POSTS_SELF = 0.9646;
+/**
+ * The source drop that makes the smaller side `d` smaller on the page (O-A). The low
+ * occiput sees self*(1-a) + spill, the high one self + spill*(1-a); setting their
+ * ratio to 1-d and solving for a.
+ */
+const sourceDrop = (d: number): number =>
+  Math.min(1, ((POSTS_SELF + POSTS_SPILL) * d) / (POSTS_SELF - (1 - d) * POSTS_SPILL));
+
+type PostsSliders = { smallerPct: number; oneSidePct: number };
+/**
+ * Which side is smaller, or which side a one-sided POSTS is on. Two uniforms always,
+ * drawn last, so the slider values never shift the stream.
+ */
+function drawSides(g: Gaussian, o: PostsSliders): PostsSides {
+  const uOne = g.uniform(), uSide = g.uniform();
+  return {
+    low: uSide < 0.5 ? 'left' : 'right',
+    oneSide: uOne < o.oneSidePct / 100,
+    asym: sourceDrop(o.smallerPct / 100),
+  };
+}
+
+function postsSide(id: string, side: PostsSide, electrode: string): PatternSourceDescriptor {
+  // A one-sided POSTS is on the side that is NOT `low`.
+  const absent = (e: PostsSides) => e.oneSide && e.low === side;
+  const gain = (e: PostsSides) => (absent(e) ? 0 : POSTS_SIDE_GAIN * (e.low === side ? 1 - e.asym : 1));
+  // Each side marks its own event: a mark points at the rows of its own field. None
+  // where the POSTS is absent; the smaller side of a bilateral one says so.
+  const markOf = (e: PostsSides) => (absent(e) ? null
+    : e.low === side && !e.oneSide && e.asym > 0 ? { label: 'POSTS (smaller)' } : {});
+  const sliders: PostsSliders = { smallerPct: 0, oneSidePct: 0 };
+  return {
+    id,
+    toggles: ['posts'],
+    states: ['n1', 'n2'],
+    stateIntrinsic: true,
+    spec: synchronousPatches(id, { [electrode]: 1 }, { extent: 0.3 }),
+    make(_seed, dt, subjectSeed) {
+      const seed = deriveSeed(subjectSeed, 'posts');
+      const singles = new TransientSource<PostsEvent>(seed, dt, {
+        schedule: POSTS_SCHEDULE,
+        duration: POSTS_EVENT_S,
+        onset: (g) => ({
+          amp: POSTS_SIZE * between(g, 24, 46),
+          dur: between(g, 0.09, 0.16),
+          neg: g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0,
+          ...drawSides(g, sliders),
+        }),
+        mark: (e) => { const m = markOf(e); return m && { ...m, dur: 0.2 }; },
+        morphology: (t, e) => gain(e) * postsElement(t, e.amp, e.dur, e.neg),
+      });
+      // The other form. Its own stream, so choosing it leaves the singles' untouched.
+      const trains = new TransientSource<PostsTrain>(deriveSeed(seed, 'trains'), dt, {
+        schedule: POSTS_SCHEDULE,
+        duration: POSTS_TRAIN_S,
+        onset: (g) => {
+          const n = 2 + Math.floor(g.uniform() * (POSTS_MAX_TRAIN - 1));
+          const rate = between(g, 4, 6);
+          // One size for the train, each element a little off it.
+          const base = POSTS_TRAIN_SIZE * between(g, 24, 46);
+          const onsets: number[] = [], amps: number[] = [], durs: number[] = [], negs: number[] = [];
+          for (let k = 0; k < n; k++) {
+            onsets.push(k === 0 ? 0 : onsets[k - 1] + jit(g, 1 / rate, 0.1));
+            amps.push(jit(g, base, 0.2));
+            durs.push(between(g, 0.09, 0.16));
+            negs.push(g.uniform() < 0.35 ? between(g, 0.15, 0.25) : 0);
+          }
+          return { onsets, amps, durs, negs, ...drawSides(g, sliders) };
+        },
+        // One box from the first element to the end of the last (its afterwave included).
+        mark: (e) => {
+          const m = markOf(e);
+          if (!m) return null;
+          const last = e.onsets.length - 1;
+          return { ...m, span: e.onsets[last] + e.durs[last] * (e.negs[last] > 0 ? 1.6 : 1) };
+        },
+        morphology: (t, e) => {
+          let v = 0;
+          for (let k = 0; k < e.onsets.length; k++) v += postsElement(t - e.onsets[k], e.amps[k], e.durs[k], e.negs[k]);
+          return gain(e) * v;
+        },
+      });
+      return {
+        next(ctx) {
+          sliders.smallerPct = ctx.postsSmallerPct;
+          sliders.oneSidePct = ctx.postsOneSidePct;
+          const inTrains = ctx.postsForm === 'trains';
+          return singles.next(ctx.enabled && !inTrains) + trains.next(ctx.enabled && inTrains);
+        },
+        takeMarks: () => [...singles.takeMarks(), ...trains.takeMarks()],
+      };
+    },
+  };
+}
+
+const posts = postsSide('posts', 'left', 'O1');
+const postsR = postsSide('posts-r', 'right', 'O2');
 
 // ---------------------------------------------------------------------------
 // Slow-wave sleep (N3).
@@ -628,6 +721,6 @@ function remLrs(id: string, side: -1 | 1): PatternSourceDescriptor {
 }
 
 export const SLEEP_SOURCES: PatternSourceDescriptor[] = [
-  vWave, kComplex, spindleFast, spindleSlow, posts, slowWaves, rovingEyes, remEyes,
+  vWave, kComplex, spindleFast, spindleSlow, posts, postsR, slowWaves, rovingEyes, remEyes,
   remLrs('rem-lrs-l', -1), remLrs('rem-lrs-r', 1),
 ];

@@ -61,6 +61,8 @@ import { MONTAGES, ALL_ELECTRODES } from '../../artifacts/eeg-simulator/src/util
 import { commonAverage, computeChannelVoltage } from '../../artifacts/eeg-simulator/src/utils/computeChannel';
 import { markRowSizes, markRows } from '../../artifacts/eeg-simulator/src/utils/markRows';
 import { PATTERN_CATEGORIES } from '../../artifacts/eeg-simulator/src/utils/patterns';
+import { PATTERN_INFO } from '../../artifacts/eeg-simulator/src/utils/patternInfo';
+import { PATTERN_GALLERY } from '../../artifacts/eeg-simulator/src/utils/patternGallery.generated';
 import { EDUCATIONAL_ANNOTATIONS } from '../../artifacts/eeg-simulator/src/utils/annotations';
 import { PATTERN_SOURCES } from '../../artifacts/eeg-simulator/src/engine/sources/registry';
 import type { ArtifactMark } from '../../artifacts/eeg-simulator/src/engine/engine';
@@ -97,7 +99,7 @@ mkdirSync(SCRATCH, { recursive: true });
 const FS = 250;
 const DT = 1 / FS;
 
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2932,10 +2934,43 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     const o1 = ref['O1-A1'];
     const pk = peaksPast(o1, 5, 0.03, +1);
     // One at a time since 2026-10-12 (owner's decision; sleep.ts). NPK gives singles
-    // as "more than 1 s apart", which caps the count at one a second.
-    check('POSTS: transients in 180 s (one at a time, more than 1 s apart)', pk.length, 40, 180);
-    check('POSTS O1-A1 median peak (NPK: 20-75 uV)', median(pk.map(i => o1[i])), 20, 75, ' uV');
-    check('POSTS O1-A1 largest peak (NPK: up to ~120 uV)', Math.max(...pk.map(i => o1[i])), 20, 120, ' uV');
+    // as "more than 1 s apart", which caps the count at one a second. Since 2026-11-16
+    // 1-2 per 10 s page at 30 mm/s (owner): 18-36 in 180 s, with room for the jitter.
+    check('POSTS: transients in 180 s (owner 2026-11-16: 1-2 per 10 s page)', pk.length, 15, 40);
+    // Sides (owner 2026-11-16; sleep.ts): POSTS are "bilateral, but not necessarily
+    // symmetric" (learningeeg; Rey et al. 2009, a consistent asymmetry in 38% of
+    // recordings). Here, by the owner's choice for teaching, random per POSTS: the
+    // smaller side of a bilateral one is down 40% on the page at the default slider,
+    // and 5% are on one side only. Both occiputs fire together, so O1's peak
+    // sample is O2's. The page drop is 1 - smaller/larger; one-sided POSTS (the absent
+    // occiput showing only the ~19% that volume-conducts across) are drops past 0.7.
+    // The instrument's own ~3.5% O1/O2 gain difference (chain.ts) rides on every one.
+    const o2 = ref['O2-A2'];
+    const drops = (a: Float64Array, b: Float64Array, at: number[]) =>
+      at.map(i => ({ drop: 1 - Math.min(Math.abs(a[i]), Math.abs(b[i])) / Math.max(Math.abs(a[i]), Math.abs(b[i])), o1Low: Math.abs(a[i]) < Math.abs(b[i]) }));
+    // Peaks on either occiput: a POSTS on the right alone barely shows at O1.
+    const evAt = peaksPast(Float64Array.from(o1, (v, i) => Math.max(v, o2[i])), 5, 0.03, +1);
+    const dr = drops(o1, o2, evAt), bil = dr.filter(e => e.drop < 0.7);
+    check('POSTS sides: median page drop of the smaller side, bilateral ones (owner 2026-11-16: 40%)', median(bil.map(e => e.drop)), 0.34, 0.46);
+    check('POSTS sides: smallest page drop of a bilateral one (a side labelled smaller looks it)', Math.min(...bil.map(e => e.drop)), 0.25, 0.7);
+    check('POSTS sides: share with O1 the smaller side (either side, at random)', bil.filter(e => e.o1Low).length / bil.length, 0.2, 0.8);
+    {
+      // The one-side slider at 50%, so the mechanism has enough events to measure.
+      const iso = (on: boolean) => runDisplay('reference-ipsi', 'awake', on ? ['posts'] : [], 300, 20, { postsOneSidePct: 50 });
+      const a = iso(true), b = iso(false);
+      const col = (r: ReturnType<typeof iso>, lab: string) => r.data[r.montage.channels.findIndex(c => c.label === lab)];
+      const p1 = col(a, 'O1-A1').map((v, i) => v - col(b, 'O1-A1')[i]), p2 = col(a, 'O2-A2').map((v, i) => v - col(b, 'O2-A2')[i]);
+      const d2 = drops(p1, p2, peaksPast(Float64Array.from(p1, (v, i) => Math.max(v, p2[i])), 5, 0.03, +1));
+      const one = d2.filter(e => e.drop >= 0.7);
+      check('POSTS sides: share on one side only, slider at 50%', one.length / d2.length, 0.3, 0.7);
+      check('POSTS sides: absent occiput / present occiput, one-sided ones, median (volume conduction only)', median(one.map(e => 1 - e.drop)), 0, 0.25);
+    }
+    // A POSTS's size is that of its larger side: since 2026-11-16 one side is often
+    // 40% smaller, so O1 alone read the smaller side half the time (median 21.9 uV
+    // against NPK's floor of 20, from 30.8) — the estimator, not the model, at fault.
+    const big = (i: number) => Math.max(o1[i], ref['O2-A2'][i]);
+    check('POSTS larger occiput (O1-A1 / O2-A2) median peak (NPK: 20-75 uV)', median(pk.map(big)), 20, 75, ' uV');
+    check('POSTS larger occiput (O1-A1 / O2-A2) largest peak (NPK: up to ~120 uV)', Math.max(...pk.map(big)), 20, 120, ' uV');
     const dur = pk.map(i => {
       const t = 0.05 * o1[i]; let a = i, b = i;
       while (a > 0 && o1[a] > t) a--;
@@ -2962,6 +2997,8 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     const trOn = trainsRun(true), trOff = trainsRun(false);
     const kO1 = trOn.montage.channels.findIndex(c => c.label === 'O1-A1');
     const tr = trOn.data[kO1].map((v, i) => v - trOff.data[kO1][i]);
+    const kO2 = trOn.montage.channels.findIndex(c => c.label === 'O2-A2');
+    const tr2 = trOn.data[kO2].map((v, i) => v - trOff.data[kO2][i]);
     const trPk = peaksPast(tr, 5, 0.03, +1);
     const trGaps = trPk.slice(1).map((v, k) => (v - trPk[k]) / FS);
     // Consecutive transients under 0.5 s apart belong to one train.
@@ -2971,7 +3008,7 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     trSizes.push(trSize);
     check('POSTS trains: within-train rate (NPK: trains of 4-6 per second)', 1 / median(trGaps.filter(g => g < 0.5)), 4, 6.5, ' Hz');
     check('POSTS trains: elements per train, median (NPK: about a second at 4-6 per second)', median(trSizes), 2, 6);
-    check('POSTS trains: O1-A1 median peak (NPK: 20-75 uV)', median(trPk.map(i => tr[i])), 20, 75, ' uV');
+    check('POSTS trains: larger occiput median peak (NPK: 20-75 uV)', median(trPk.map(i => Math.max(tr[i], tr2[i]))), 20, 75, ' uV');
   }
 
   console.log('\nVertex waves (SP: surface-negative, ~100 ms, reversing at the vertex; AASM: < 0.5 s; LE: parasagittal AND central chains):');
@@ -3008,6 +3045,32 @@ console.log('\n=== Step 19b: sleep architecture against its sources (2026-09-11 
     check('V-wave T3-T5 / Fz-Cz (not a temporal field)', peakAbs(bip['T3-T5']) / peakAbs(bip['Fz-Cz']), 0, 0.35);
     const at = argAbsMax(bip['Fz-Cz']);
     check('V-wave reverses at C3 (sign of F3-C3 x C3-P3 at the peak)', Math.sign(bip['F3-C3'][at]) * Math.sign(bip['C3-P3'][at]), -1, -1);
+  }
+
+  // POSTS a quarter smaller (owner, 2026-11-16: "reduce the amplitude of POSTS by 20
+  // to 30%"). Read where the owner reads it, on the double banana: each event's largest
+  // row, POSTS on the occipital links and vertex waves on the central and midline ones.
+  // Before the cut POSTS were 0.80 of a vertex wave there (23.1 against 29.1 uV); the
+  // 25% cut puts them near 0.6.
+  console.log('\nPOSTS against vertex waves on the double banana (owner 2026-11-16):');
+  {
+    const eventPeaks = (rows: Record<string, Float64Array>, labs: string[], gapS: number) => {
+      const n = rows[labs[0]].length, env = new Float64Array(n);
+      for (let i = 0; i < n; i++) env[i] = Math.max(...labs.map(l => Math.abs(rows[l][i])));
+      const top = Math.max(...env), gap = Math.round(gapS * FS), out: number[] = [];
+      for (let i = 0; i < n;) {
+        if (env[i] > 0.25 * top) {
+          let b = i;
+          for (let k = i; k < Math.min(n, i + gap); k++) if (env[k] > env[b]) b = k;
+          out.push(env[b]); i = b + gap;
+        } else i++;
+      }
+      return out;
+    };
+    const pp = eventPeaks(isolated('bipolar-ap', 'posts', 240, 20), ['P3-O1', 'T5-O1', 'P4-O2', 'T6-O2'], 1);
+    const vp = eventPeaks(isolated('bipolar-ap', 'v-waves', 240, 20), ['Fz-Cz', 'Cz-Pz', 'F3-C3', 'C3-P3', 'F4-C4', 'C4-P4'], 0.5);
+    check('POSTS / vertex wave, median of each event largest bipolar-ap row (owner 2026-11-16: POSTS cut 25%, from 0.80)',
+      median(pp) / median(vp), 0.5, 0.72);
   }
 
   console.log('\nK-complexes (AASM: negative sharp wave then positive component, >= 0.5 s, frontal max; COL; LE: diffuse, often followed by a spindle):');
@@ -4959,6 +5022,36 @@ console.log('\n=== Step 27: annotation arrows — every artifact pointed at, on 
     // second (rarely > 2 s)" keeps the ceiling at 2.5.
     check('boxes: POSTS train boxes outside 0.2-2.5 s long',
       trains.marks.filter((m) => m.span != null && (m.span < 0.2 || m.span > 2.5)).length, 0, 0);
+    // POSTS sides (owner, 2026-11-16): a one-sided POSTS is pointed at on its own side
+    // only, and the smaller side of a bilateral one says so. A row's side is that of its
+    // electrodes (odd numbers left, even right); a midline row has none.
+    const rowSide = (r: string) => (r.split('-').every((e) => /[13579]$/.test(e)) ? 'L' : r.split('-').every((e) => /[02468]$/.test(e)) ? 'R' : '');
+    const byEvent = (ms: Mark[]) => {
+      const g = new Map<number, Mark[]>();
+      for (const m of ms) { const k = Math.round(m.t * 100); g.set(k, [...(g.get(k) ?? []), m]); }
+      return [...g.values()];
+    };
+    const allOne = byEvent(appRun('n1', ['posts'], { postsOneSidePct: 100 }, 120).marks.filter((m) => m.id === 'posts'));
+    check('POSTS sides: one-sided events in 120 s (the test has something to test)', allOne.length, 8, 1e6);
+    check('POSTS sides: one-sided events with other than one mark', allOne.filter((e) => e.length !== 1).length, 0, 0);
+    check('POSTS sides: one-sided marks with arrows on both sides',
+      allOne.filter((e) => new Set(e[0].rows.map(rowSide).filter(Boolean)).size !== 1).length, 0, 0);
+    {
+      const on = appRun('n1', ['posts'], undefined, 300), off = appRun('n1', [], undefined, 300);
+      const row = (lab: string) => { const k = chans.findIndex(({ c }) => c.label === lab); return on.data[k].map((v, i) => v - off.data[k][i]); };
+      const pl = row('P3-O1'), pr = row('P4-O2');
+      const peak = (x: Float64Array, t: number) => { let m = 0; for (let i = Math.round(t * FS); i < Math.min(x.length, Math.round((t + 0.3) * FS)); i++) m = Math.max(m, Math.abs(x[i])); return m; };
+      const bil = byEvent(on.marks.filter((m) => m.id === 'posts')).filter((e) => e.length === 2);
+      check('POSTS sides: bilateral events in 300 s (the test has something to test)', bil.length, 15, 1e6);
+      check('POSTS sides: bilateral events without exactly one "POSTS (smaller)" mark',
+        bil.filter((e) => e.filter((m) => m.label === 'POSTS (smaller)').length !== 1).length, 0, 0);
+      const right = bil.map((e) => {
+        const sm = e.find((m) => m.label === 'POSTS (smaller)')!;
+        const smL = sm.rows.some((r) => rowSide(r) === 'L');
+        return (smL ? peak(pl, sm.t) < peak(pr, sm.t) : peak(pr, sm.t) < peak(pl, sm.t)) ? 1 : 0;
+      });
+      check('POSTS sides: "smaller" label on the side whose occipital link is lower', right.reduce((a: number, v) => a + v, 0) / right.length, 0.95, 1);
+    }
     // Vertex waves: a run (waves joined by gaps under 1.2 s, 0.6 s or longer) gets a box, a single wave an arrow.
     const v = survey('n1', ['v-waves'], 'v-waves');
     const runs = v.episodes(1.2).filter(([a, b]) => b - a >= 0.6);
@@ -5286,6 +5379,193 @@ console.log('\n=== Step 28: normal variants and artifacts against SCORE, eegpedi
   {
     const ev = runApp('bipolar-ap', 'drowsy', ['wicket'], 300, 13).marks.filter(({ m }) => m.id === 'wicket');
     check('wicket share of events that are a single wave', ev.filter(({ m }) => m.span == null).length / ev.length, 0.15, 0.5);
+  }
+  // Runs are short and diamond-shaped, and a single is a run's sharpest wave on its own
+  // (Gelisse et al., J Neurol 2024: "diamond or lozenge-shaped"; a single's morphology
+  // "is identical to the morphology of the most sharply contoured waveforms in the
+  // runs"). Measured on the wicket's own contribution, on the row of the side it is on.
+  console.log('\nWickets: short diamond runs; a single is the peak wave of a run (Gelisse 2024):');
+  {
+    const { d, marks } = isoApp('bipolar-ap', 'drowsy', ['wicket'], 300, 13);
+    const peakAt: number[] = [], runPk: number[] = [], singlePk: number[] = [], lens: number[] = [], shapeCv: number[] = [];
+    for (const { i, m } of marks.filter(({ m }) => m.id === 'wicket')) {
+      const x = d[(m.fields[0]?.T3 ?? 0) > (m.fields[0]?.T4 ?? 0) ? 'T3-T5' : 'T4-T6'];
+      const n = Math.round((m.span ?? m.dur ?? 0) * FS);
+      if (i + n >= x.length) continue;
+      let pk = 0, at = 0;
+      const downs: number[] = [];
+      for (let k = i; k < i + n; k++) {
+        if (Math.abs(x[k]) > pk) { pk = Math.abs(x[k]); at = k - i; }
+        // The sharp side is negative at T3/T4, input 1: one entry below zero per wave.
+        if (k > i && x[k - 1] >= 0 && x[k] < 0) downs.push(k);
+      }
+      if (m.span == null) { singlePk.push(pk); continue; }
+      runPk.push(pk); lens.push(m.span);
+      if (downs.length <= 8) peakAt.push(at / n);
+      // Each wave's share of its cycle spent below zero: its spike against its lobe.
+      if (downs.length >= 5) {
+        const fr: number[] = [];
+        for (let j = 0; j + 1 < downs.length; j++) {
+          let neg = 0;
+          for (let k = downs[j]; k < downs[j + 1]; k++) if (x[k] < 0) neg++;
+          fr.push(neg / (downs[j + 1] - downs[j]));
+        }
+        const mu = fr.reduce((a, b) => a + b, 0) / fr.length;
+        shapeCv.push(Math.sqrt(fr.reduce((a, b) => a + (b - mu) ** 2, 0) / fr.length) / mu);
+      }
+    }
+    // Run length (owner, 2026-11-16, against learningeeg's figure, ~4 s, and a clinical
+    // record, 1-2 s): single waves up to runs of seconds. It was 4-7 waves.
+    check('wicket run length, median (owner 2026-11-16: single waves to runs of seconds)', median(lens), 0.8, 2, ' s');
+    check('wicket longest run in 300 s (learningeeg figure: about 4 s)', Math.max(...lens), 2.5, 4.5, ' s');
+    check('wicket shortest run in 300 s (short runs remain)', Math.min(...lens), 0, 0.7, ' s');
+    check('wicket position of the largest wave in a short run (8 waves or fewer), median (diamond: mid-run)', median(peakAt), 0.3, 0.7);
+    check('wicket wave-to-wave shape variation in a run, median CV of the share below zero (owner: not identical)', median(shapeCv), 0.05, 0.4);
+    check('wicket median single / median run peak (Gelisse 2024: a single is the sharpest wave of a run)', median(singlePk) / median(runPk), 0.8, 1.2);
+  }
+
+  // Not mirror images (owner, 2026-11-16: wickets "slightly less mirror like to the
+  // adjacent lead"). One generator under T3 made F7-T3 and T3-T5 exact negatives; a
+  // second under T5, its arches at their own size and lag (variants.ts), keeps the
+  // reversal at T3 and breaks the copy. Correlation over the samples the wickets reach.
+  {
+    const { d } = isoApp('bipolar-ap', 'drowsy', ['wicket'], 300, 20);
+    const corr = (a: Float64Array, b: Float64Array) => {
+      let top = 0;
+      for (const v of a) top = Math.max(top, Math.abs(v));
+      let sab = 0, saa = 0, sbb = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (Math.abs(a[i]) > 0.1 * top || Math.abs(b[i]) > 0.1 * top) { sab += a[i] * b[i]; saa += a[i] ** 2; sbb += b[i] ** 2; }
+      }
+      return sab / Math.sqrt(saa * sbb);
+    };
+    check('wicket F7-T3 against T3-T5 correlation, both sides (owner 2026-11-16: reversing at T3, not mirror images)',
+      (corr(d['F7-T3'], d['T3-T5']) + corr(d['F8-T4'], d['T4-T6'])) / 2, -0.85, -0.4);
+  }
+
+  // ── Blinks: width and the orbicularis EMG (owner, 2026-11-16) ──
+  // A clinical record shows narrow blinks (~0.2 s) beside broad ones (~0.4-0.5 s), and
+  // a little fast muscle activity on the frontopolar rows with each: the orbicularis
+  // oculi contraction that closes the lid. More subtle than the muscle artifact.
+  console.log('\nBlinks: varied width, a little orbicularis EMG (owner 2026-11-16):');
+  {
+    // Fast activity: a 61-tap windowed-sinc high-pass at 40 Hz. A moving-average
+    // difference was tried first and let the blink's own slope through (a ratio of
+    // ~1100 that measured the deflection, not the muscle); a blink has next to
+    // nothing above 40 Hz, the EMG most of its power.
+    const HP_TAPS = (() => {
+      const N = 61, fc = 40 / FS, h = new Float64Array(N);
+      for (let k = 0; k < N; k++) {
+        const m = k - (N - 1) / 2, w = 0.54 - 0.46 * Math.cos((2 * Math.PI * k) / (N - 1));
+        h[k] = -(m === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * m) / (Math.PI * m)) * w;
+      }
+      h[(N - 1) / 2] += 1;
+      return h;
+    })();
+    const hf = (x: Float64Array) => {
+      const y = new Float64Array(x.length), H = (HP_TAPS.length - 1) / 2;
+      for (let i = H; i < x.length - H; i++) {
+        let s = 0;
+        for (let k = 0; k < HP_TAPS.length; k++) s += HP_TAPS[k] * x[i - H + k];
+        y[i] = s;
+      }
+      return y;
+    };
+    const on = runApp('bipolar-ap', 'awake', ['blink', 'eyes-open'], 240, 20);
+    const off = runApp('bipolar-ap', 'awake', ['eyes-open'], 240, 20);
+    const diff = (lab: string) => on.data[lab].map((v, i) => v - off.data[lab][i]);
+    const fp = diff('Fp1-F3');
+    let top = 0;
+    for (const v of fp) top = Math.max(top, Math.abs(v));
+    // Each blink: the half-height width of its downward deflection, and its span.
+    const widths: number[] = [];
+    const inBlink = new Uint8Array(fp.length);
+    for (let i = 1; i < fp.length; i++) {
+      if (fp[i - 1] < 0.25 * top && fp[i] >= 0.25 * top) {
+        let pk = i;
+        for (let k = i; k < Math.min(fp.length, i + Math.round(0.6 * FS)); k++) if (fp[k] > fp[pk]) pk = k;
+        let a = pk, b = pk;
+        while (a > 0 && fp[a] > fp[pk] / 2) a--;
+        while (b < fp.length - 1 && fp[b] > fp[pk] / 2) b++;
+        widths.push((b - a) / FS);
+        for (let k = Math.max(0, pk - Math.round(0.3 * FS)); k < Math.min(fp.length, pk + Math.round(0.5 * FS)); k++) inBlink[k] = 1;
+      }
+    }
+    const ws = [...widths].sort((p, q) => p - q);
+    check('blink half-height width, 90th / 10th percentile (owner: narrow and broad blinks; was ~1.6)',
+      ws[Math.floor(0.9 * (ws.length - 1))] / ws[Math.floor(0.1 * (ws.length - 1))], 1.8, 4);
+    const pw = (y: Float64Array, want: number) => {
+      let s = 0, c = 0;
+      for (let i = 0; i < y.length; i++) if (inBlink[i] === want) { s += y[i] ** 2; c++; }
+      return s / c;
+    };
+    const hfp = hf(fp), hfo = hf(diff('P3-O1'));
+    check('blink Fp1-F3 fast activity above 40 Hz, during blinks / between (orbicularis EMG present)', pw(hfp, 1) / pw(hfp, 0), 2, Infinity);
+    const mus = isoApp('bipolar-ap', 'awake', ['muscle'], 120, 20).d['Fp1-F3'];
+    const hm = hf(mus);
+    check('blink EMG / muscle EMG, Fp1-F3 power above 40 Hz (owner: more subtle than the muscle artifact)',
+      pw(hfp, 1) / (hm.reduce((s, v) => s + v * v, 0) / hm.length), 0.1, 0.4);
+    check('blink EMG P3-O1 / Fp1-F3 fast power during blinks (frontal only)', pw(hfo, 1) / pw(hfp, 1), 0, 0.2);
+  }
+
+  // ── The reader's filters (top bar, 2026-11-16) ──
+  // Instrument behaviour, not a clinical claim: the notch removes the mains, the high
+  // cut removes fast activity, the low cut shortens a blink's recovery swing.
+  console.log('\nFilters: notch, high cut, low cut (top bar):');
+  {
+    const runF = (patterns: string[], filters: SimSettings['filters'], lab: string, secs: number) => {
+      const montage = MONTAGES['bipolar-ap'];
+      const ch = montage.channels.find(c => c.label === lab)!;
+      const settings: SimSettings = {
+        speed: 30, sensitivity: 7, patientState: 'awake', activePatterns: new Set(patterns),
+        ictalParams: defaultIctalParamsMap(), artifactParams: { ...defaultArtifactParams() }, filters,
+      };
+      const src = new SimulationSource(20, FS);
+      src.useAppMode();
+      const n = Math.floor(secs * FS), out = new Float64Array(n);
+      for (let i = 0; i < n; i++) { const v = src.next(settings); out[i] = computeChannelVoltage(ch, src.t, v, commonAverage(v)); }
+      return out.slice(Math.round(2 * FS)); // past the settling of a newly set filter
+    };
+    const at50 = (x: Float64Array) => {
+      let re = 0, im = 0;
+      for (let i = 0; i < x.length; i++) { re += x[i] * Math.cos(2 * Math.PI * 50 * i / FS); im += x[i] * Math.sin(2 * Math.PI * 50 * i / FS); }
+      return (re * re + im * im) / x.length;
+    };
+    const base = { lowCutHz: 1, highCutHz: 70, notchHz: null };
+    check('notch 50 Hz: mains power at 50 Hz with the notch / without (F7-T3)',
+      at50(runF(['50hz'], { ...base, notchHz: 50 }, 'F7-T3', 20)) / at50(runF(['50hz'], base, 'F7-T3', 20)), 0, 0.05);
+    const fast = (x: Float64Array) => {
+      let s = 0;
+      for (let i = 2; i < x.length - 2; i++) s += (x[i] - (x[i - 2] + x[i - 1] + x[i] + x[i + 1] + x[i + 2]) / 5) ** 2;
+      return s;
+    };
+    check('high cut 15 Hz: fast power of muscle / at 70 Hz (F7-T3)',
+      fast(runF(['muscle'], { ...base, highCutHz: 15 }, 'F7-T3', 30)) / fast(runF(['muscle'], base, 'F7-T3', 30)), 0, 0.2);
+    // A blink's recovery swing: the mean opposite-going excursion 1-2.5 s after each
+    // blink peak, at 1 Hz against the engine's own 0.25 Hz.
+    const swing = (lowCutHz: number) => {
+      const x = runF(['blink', 'eyes-open'], { ...base, lowCutHz }, 'Fp1-F3', 120);
+      let top = 0;
+      for (const v of x) top = Math.max(top, v);
+      let s = 0, c = 0;
+      for (let i = 1; i < x.length; i++) {
+        if (x[i - 1] < 0.5 * top && x[i] >= 0.5 * top) {
+          for (let k = i + Math.round(1.0 * FS); k < Math.min(x.length, i + Math.round(2.5 * FS)); k++) { s += Math.min(0, x[k]); c++; }
+        }
+      }
+      return -s / c;
+    };
+    check('low cut 1 Hz: blink recovery swing 1-2.5 s after the blink / at 0.25 Hz (shorter)', swing(1) / swing(0.25), 0, 0.6);
+  }
+
+  // ── The information panel (2026-11-16): every toggle has its text and its picture ──
+  console.log('\nInformation panel: text and example image for every toggle:');
+  {
+    const ids = PATTERN_CATEGORIES.flatMap(c => c.patterns.map(p => p.id));
+    check('toggles without information-panel text', ids.filter(id => !PATTERN_INFO[id]).length, 0, 0);
+    const pub = fileURLToPath(new URL('../../artifacts/eeg-simulator/public/', import.meta.url));
+    check('toggles without an example image (run renderPatternGallery.ts)',
+      ids.filter(id => !PATTERN_GALLERY[id] || !existsSync(join(pub, PATTERN_GALLERY[id].file))).length, 0, 0);
   }
 
   // ── 14 & 6 ──
