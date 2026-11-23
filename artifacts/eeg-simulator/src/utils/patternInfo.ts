@@ -142,7 +142,7 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
   },
   '50hz': {
     summary: 'Mains (AC line) interference: very fast, monotonous activity at the mains frequency — 50 Hz in India, Britain and most of the world, 60 Hz in the Americas. It is uneven across the page and worst on the rows of a poorly connected electrode. The notch filter in the top bar removes it.',
-    seenIn: 'Any state, near electrical equipment or with high electrode impedance. It is not biological; fixing the electrode is better than notching, since the notch also removes real activity at that frequency.',
+    seenIn: 'Any state, near electrical equipment or with high electrode impedance. It is not biological. Re-gelling the electrode is the fix; the notch is kept off by default and used only when that fails, because it can distort or blunt spikes.',
   },
 
   // ── Non-epileptiform abnormalities ─────────────────────────────────────────

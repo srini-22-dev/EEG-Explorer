@@ -468,6 +468,11 @@ export class EegEngine {
     if (recordingChain) {
       this.defects = sampleDefects(seed, this.electrodes.length, S.artifactBurden);
       this.chain = new RecordingChain(seed, this.dt, this.electrodes.length, this.defects);
+      // The one scalp contact that picks up the mains (chain.ts MAINS_CONTACT_COUPLING),
+      // never an ear reference, from its own stream so no other draw moves.
+      const scalp = this.electrodes.flatMap((e, c) => (/^A[12]$/.test(e) ? [] : [c]));
+      const gContact = new Gaussian(deriveSeed(seed, 'mainsContact'));
+      this.chain.setMainsContact(scalp[Math.floor(gContact.uniform() * scalp.length)]);
     }
 
     // One unit field per electrode: a mark on a single channel (a pop, the breach).
@@ -714,6 +719,7 @@ export class EegEngine {
     if (f === this.filters) return;
     this.filters = f;
     if (f && this.chain) this.chain.setFilters(f);
+    this.artifactLayer.setNotch(f?.notchHz ?? null);
   }
 
   /** Choices between forms of one pattern (see `PatternOptions`); omitted means the defaults. */

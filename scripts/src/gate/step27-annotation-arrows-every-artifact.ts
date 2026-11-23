@@ -373,7 +373,7 @@ section(null, () => {
     check(`arrows: ${toggle} rows moved by half its largest row or more and never pointed at`, r.rowsLeftOut.length, 0, 0);
   }
 
-  console.log('\nECG and mains: under a millimetre on this montage, so on one row and not ten:');
+  console.log('\nECG under a millimetre on this montage, so on one row and not ten; mains on the two rows of its poor contact:');
   {
     const ecg = survey('awake', ['ecg-artifact'], 'ecg-artifact');
     check('arrows: ecg-artifact longest stretch with no arrow (one a beat)', ecg.longestGap, 0, 2, ' s');
@@ -381,7 +381,7 @@ section(null, () => {
       Math.max(...ecg.marks.map((m) => m.rows.length)), 1, 1);
     const mains = survey('awake', ['50hz'], '50hz');
     check('boxes: 50hz boxes over the whole run (one)', wholeRun(mains), 1, 1);
-    check('boxes: 50hz rows boxed, bipolar-ap at 7 uV/mm', Math.max(...mains.marks.map((m) => m.rows.length)), 1, 1);
+    check('boxes: 50hz rows boxed, bipolar-ap at 7 uV/mm (the two rows of its poor contact)', Math.max(...mains.marks.map((m) => m.rows.length)), 2, 2);
   }
 
   console.log('\nSpindles: each kind pointed at where it is, not both everywhere:');

@@ -1,6 +1,10 @@
-import type { PatientState } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
+import type { PatientState, SimSettings } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
+import { defaultArtifactParams, defaultIctalParamsMap, DEFAULT_FILTERS } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
+import { SimulationSource } from '../../../artifacts/eeg-simulator/src/engine/adapter';
+import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
+import { commonAverage, computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
 import { welch, spectralPeak } from '../dsp';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
+import { toggle, quizPage, effective } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { ANTERIOR_SITES, FS, IPSI_EAR, POSTERIOR_SITES, SLEEP_OPTS, absPeak, check, displayContribAll, eventIntervals, largestSideDifference, largestStep, meanPeakAt, rmsOf, runEngineState, section, step } from './harness';
 
 // ===========================================================================
@@ -102,6 +106,88 @@ section('\nMains: reaches a bipolar page:', () => {
   const amps = Object.values(bip).map(rmsOf).sort((a, b) => a - b);
   check('mains median double-banana row at the default 5 uV, toggle on minus off (RMS; measured 0.0 uV before the fix)',
     amps[Math.floor(amps.length / 2)], 0.9, 5, ' uV');
+});
+
+// Source: learningeeg, Artifacts — its one mains figure, "60 Hz electrode artifact":
+// "the Fp1 electrode is likely not well connected, leading to a lot of electrical
+// interference", and "this would likely be much reduced with the notch filter". Read
+// against its own background (read skill): a solid band on the two rows that hold Fp1,
+// 37 px peak to peak, against 42 px for the median background row of that slow-wave-
+// sleep page (0.88), and none on the other sixteen rows (2026-11-23). Measured as the
+// app shows it: app mode, its 1 Hz / 70 Hz filters, the default 5 uV of mains.
+
+section('\nMains: a band on the rows of one poorly connected electrode, much reduced by the notch:', () => {
+  const run = (state: PatientState, patterns: Iterable<string>, notch: boolean, seed: number) => {
+    const montage = MONTAGES['bipolar-ap'];
+    const settings: SimSettings = {
+      speed: 30, sensitivity: 7, patientState: state, activePatterns: new Set(patterns),
+      ictalParams: defaultIctalParamsMap(), artifactParams: { ...defaultArtifactParams() },
+      filters: { ...DEFAULT_FILTERS, notchHz: notch ? 50 : null },
+    };
+    const src = new SimulationSource(seed, FS);
+    src.useAppMode();
+    const rows: Record<string, number[]> = {};
+    const chans = montage.channels.filter((c) => c.group !== 'ecg');
+    for (const c of chans) rows[c.label] = [];
+    for (let i = 0; i < 15 * FS; i++) {
+      const v = src.next(settings);
+      const avg = commonAverage(v);
+      if (i >= 5 * FS) for (const c of chans) rows[c.label].push(computeChannelVoltage(c, src.t, v, avg));
+    }
+    return rows;
+  };
+  const p2p = (x: number[]) => {
+    const s = [...x].sort((a, b) => a - b);
+    return s[Math.floor(0.99 * (s.length - 1))] - s[Math.floor(0.01 * (s.length - 1))];
+  };
+  const mainsRows = (notch: boolean, seed: number) => {
+    const on = run('awake', ['50hz'], notch, seed), off = run('awake', [], notch, seed);
+    return Object.keys(on).map((k) => ({ k, p: p2p(on[k].map((v, i) => v - off[k][i])) })).sort((a, b) => b.p - a.p);
+  };
+  const median = (a: number[]) => [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)];
+  let shared = 0, worstOther = 0, worstNotch = 0;
+  const ratios: number[] = [];
+  const SEEDS = [20, 7, 3];
+  for (const seed of SEEDS) {
+    const r = mainsRows(false, seed);
+    const [a, b] = [r[0].k.split('-'), r[1].k.split('-')];
+    const contact = a.find((e) => b.includes(e));
+    if (contact) shared++;
+    const band = Math.min(r[0].p, r[1].p);
+    worstOther = Math.max(worstOther, r[2].p / band);
+    const n3 = run('n3', effective(quizPage(['slow-waves'])), false, seed);
+    ratios.push(band / median(Object.values(n3).map(p2p)));
+    const notched = mainsRows(true, seed);
+    const byRow = (k: string) => notched.find((x) => x.k === k)!.p;
+    worstNotch = Math.max(worstNotch, byRow(r[0].k) / r[0].p, byRow(r[1].k) / r[1].p);
+  }
+  check('mains: subjects whose two largest rows share one electrode (the poor contact)', shared, SEEDS.length, SEEDS.length);
+  check('mains: band on the poor contact\'s rows / the N3 page\'s median row, peak to peak, median of 3 (learningeeg figure: 0.88)',
+    median(ratios), 0.6, 1.2);
+  check('mains: largest other row / the band, worst of 3 (learningeeg figure: nothing on the other rows)', worstOther, 0, 0.2);
+  check('notch 50 Hz: the band with the notch on / off, worst row of 3 subjects (learningeeg: "much reduced")', worstNotch, 0, 0.25);
+  // A box marks what is drawn: none while the notch has taken the mains off the page.
+  const boxesOpen = (notch: boolean, lineFreq: 50 | 60) => {
+    const settings: SimSettings = {
+      speed: 30, sensitivity: 7, patientState: 'awake', activePatterns: new Set(['50hz']),
+      ictalParams: defaultIctalParamsMap(), artifactParams: { ...defaultArtifactParams(), lineFreq },
+      filters: { ...DEFAULT_FILTERS, notchHz: notch ? 50 : null },
+    };
+    const src = new SimulationSource(20, FS);
+    src.useAppMode();
+    const open = new Set<string>();
+    for (let i = 0; i < 3 * FS; i++) {
+      src.next(settings);
+      for (const m of src.groundTruth.marks) {
+        if (m.id !== '50hz' || m.key == null) continue;
+        if (m.span === Infinity) open.add(m.key); else open.delete(m.key);
+      }
+    }
+    return open.size;
+  };
+  check('mains boxes open, 50 Hz mains, notch off', boxesOpen(false, 50), 1, 1);
+  check('mains boxes open, 50 Hz mains under a 50 Hz notch (nothing left to box)', boxesOpen(true, 50), 0, 0);
+  check('mains boxes open, 60 Hz mains under a 50 Hz notch (the notch misses it)', boxesOpen(true, 60), 1, 1);
 });
 
 // Sources: eegpedia (ECG artifact) — "most prominent in referential montages using

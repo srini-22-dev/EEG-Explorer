@@ -7,7 +7,7 @@ This file is not documentation of how the code works — the engine source (`src
 that. This is a list of things that must remain **true of the output**, whatever the
 implementation happens to be.
 
-> **47 entries · highest ID `IK-047` · 45 enforced by an automated check, 2 unverified in code.**
+> **48 entries · highest ID `IK-048` · 45 enforced by an automated check, 3 unverified in code.**
 
 ---
 
@@ -998,6 +998,45 @@ fast activity on Fp2-F4 and Fp2-F8 around each blink for about half a second), w
 that the blink's muscle component be "more subtle than the actual muscle eeg artifact". The
 0.1–0.4 ratio and the 1.8–4 width spread are Claude's numbers for those words, not measured from a
 source. Approved by the user 2026-11-20.
+
+### IK-048 — Mains interference shows on the rows of a poorly connected electrode, and the notch takes it away
+
+**Claim.** Mains interference is very fast, monotonous activity at the mains frequency (50 Hz in
+India and most of the world, 60 Hz in the Americas). It appears as a dense band on the derivations
+that include one poorly connected electrode and little or nothing elsewhere. A notch filter at the
+mains frequency much reduces it. The notch is off by default and used only when other measures
+fail, because it can distort or attenuate spikes.
+
+**Observable.** Montage `bipolar-ap`, state `awake`, toggle `50hz`, the app's 1/70 Hz filters at
+the default 5 µV, three subjects. The two largest rows share one electrode (currently 3 of 3). The
+band divided by the N3 page's median row, peak to peak, is 0.6–1.2 (currently 0.80; learningeeg
+figure 0.88). The largest other row is at most 0.2 of the band (currently 0.156). With a 50 Hz
+notch on, at most 0.25 of the band remains (currently 0.127). The mains box is open with the notch
+off, closed under a matching notch, and open under a mismatched one (60 Hz mains, 50 Hz notch). The
+app opens with the notch off.
+
+**Mechanism.** *(non-binding)* The amplifier rejects interference common to both inputs; a contact's
+impedance imbalance turns part of it into a difference between them.
+
+**Check.** `validateEngine.ts` Step 25 — `check('mains: subjects whose two largest rows share one
+electrode (the poor contact)', …)`, `check('mains: band on the poor contact\'s rows / the N3 page\'s
+median row, peak to peak, median of 3 (learningeeg figure: 0.88)', …)`, `check('mains: largest
+other row / the band, worst of 3 (learningeeg figure: nothing on the other rows)', …)`,
+`check('notch 50 Hz: the band with the notch on / off, worst row of 3 subjects (learningeeg: "much
+reduced")', …)`, `check('mains boxes open, 50 Hz mains, notch off', …)`, `check('mains boxes open,
+50 Hz mains under a 50 Hz notch (nothing left to box)', …)`, `check('mains boxes open, 60 Hz mains
+under a 50 Hz notch (the notch misses it)', …)`; Step 27 — `check('boxes: 50hz rows boxed,
+bipolar-ap at 7 uV/mm (the two rows of its poor contact)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg, Artifacts — its one mains figure, "60 Hz
+electrode artifact" ("the Fp1 electrode is likely not well connected, leading to a lot of
+electrical interference"; "this would likely be much reduced with the notch filter"); ACNS
+Guideline One (Epstein 2009) §3.6 ("The 60-Hz notch filter can distort or attenuate spikes; it
+therefore should be used only when other measures against 60 Hz interference fail"). The figure was
+measured against its own background on 2026-11-23: a 37 px band against a 42 px median background
+row on its slow-wave-sleep page. One figure, so the ratio is a reading of it, not a range. The
+notch-off default and the poor-contact model are the owner's choice (2026-11-23). Approved by the
+user 2026-11-23.
 
 ## 5. Normal variants
 

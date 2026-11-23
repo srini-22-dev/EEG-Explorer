@@ -155,6 +155,30 @@ export type ChannelDefect =
  * high-impedance electrode more, a disconnected one almost none. `process` applies
  * it; the annotation of mains reads it too, so its box follows the bad contact.
  */
+/**
+ * The mains pickup of the one poorly connected electrode, relative to the 0.5-1.5 of
+ * a good contact (2026-11-23).
+ *
+ * Mains reaches every electrode, and almost all of it is equal at all of them, so a
+ * differential amplifier rejects it: on a bipolar row each electrode's share cancels
+ * its neighbour's. What reaches the page is the imbalance a high-impedance contact
+ * makes — so mains is drawn on the rows of that electrode and hardly anywhere else.
+ * learningeeg's only mains figure (Artifacts, "60 Hz electrode artifact": "the Fp1
+ * electrode is likely not well connected") shows exactly that: a solid band on the two
+ * rows that hold Fp1 and nothing on the other sixteen. Before this, with every contact
+ * good, the toggle put 2.4-2.7 uV peak to peak on the median row (0.4 mm at 7 uV/mm,
+ * thinner than the trace) and the notch filter had nothing visible to take away.
+ *
+ * The size is read off that figure against its own background, the one scale an
+ * uncalibrated figure keeps (read skill): the band is 37 px peak to peak (interquartile
+ * 36-37) on both Fp1 rows, against a median of 42 px for the 1st-99th percentile span of
+ * nine cleanly traced background rows on that slow-wave-sleep page — 0.88. The engine's
+ * N3 page has a median row of 60-68 uV by the same estimator, so the band is set to
+ * ~57 uV peak to peak at the default 5 uV mains, through the app's 70 Hz high cut.
+ * One figure: the ratio is a reading of it, not a range from several.
+ */
+export const MAINS_CONTACT_COUPLING = 7;
+
 export function defectLineMultiplier(d: ChannelDefect): number {
   return d.kind === 'noisy' ? d.lineMultiplier : d.kind === 'flat' ? 0.2 : 1;
 }
@@ -278,6 +302,11 @@ export class RecordingChain {
   /** How much of the mains this electrode picks up, relative to the others. */
   lineCouplingAt(c: number): number {
     return this.lineCoupling[c];
+  }
+
+  /** Make electrode `c` the poorly connected one the mains shows on (MAINS_CONTACT_COUPLING). */
+  setMainsContact(c: number) {
+    this.lineCoupling[c] = MAINS_CONTACT_COUPLING;
   }
 
   /**

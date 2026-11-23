@@ -289,6 +289,11 @@ export class ArtifactLayer {
   /** Mains amplitude now, microvolts, for the recording chain. */
   get lineAmp(): number { return this.aparams.lineAmpUv ?? this.subject.lineAmp; }
 
+  // The reader's notch (the top bar), Hz, or null when off.
+  private notchHz: number | null = null;
+  /** The notch now set, so the mains box closes while the notch takes the mains away. */
+  setNotch(hz: number | null) { this.notchHz = hz; }
+
   /**
    * Add this sample's artifact sources into the source vector `V`, and report their
    * marks when `marking`. Returns the mains value for the recording chain.
@@ -384,7 +389,10 @@ export class ArtifactLayer {
       // present in the signals should be by design").
       M.markWhile('muscle', g.emg && atonia > 0.5 && emgSev > 0, this.muscleField(regions));
       M.markWhile('sweat', g.sweat, F.sweat);
-      M.markWhile('50hz', g.line, this.lineField(), { inUv: true });
+      // Not while a notch at the mains frequency has taken it off the page: a box marks
+      // what is drawn. A 50 Hz notch against 60 Hz mains leaves it, and its box.
+      const notched = this.notchHz != null && this.notchHz === (this.aparams.lineFreq ?? this.subject.lineFreq);
+      M.markWhile('50hz', g.line && !notched, this.lineField(), { inUv: true });
       M.markWhile('bad-electrodes', g.defects && this.hasDefects, F.defects);
       // Between its two arrows, the eyes are open and the alpha rhythm is blocked
       // everywhere: that stretch is part of the manoeuvre, so it is boxed too.
