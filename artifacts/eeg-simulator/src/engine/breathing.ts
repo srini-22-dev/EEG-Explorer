@@ -54,6 +54,11 @@ export class RespirationGenerator {
 
   /** On the ventilator at this many breaths a minute, or breathing on its own (null). Takes effect at the next breath. */
   setVentilator(ratePerMin: number | null) { this.ventRate = ratePerMin; }
+  private rateScale = 1;
+  /** Spontaneous breathing faster or slower than this subject's own rate (recording conditions); never the ventilator's. */
+  setRateScale(k: number) { this.rateScale = k; }
+  /** Breaths a minute now: the ventilator's, or this subject's own times the scale. */
+  get rate(): number { return this.ventRate ?? this.ownRate * this.rateScale; }
 
   next(state: PatientState): number {
     this.phase += this.dt;
@@ -63,7 +68,7 @@ export class RespirationGenerator {
       this.inspirationStarted = true;
       this.interval = this.ventRate != null
         ? 60 / this.ventRate
-        : (60 / this.ownRate) * Math.max(0.5, 1 + BREATH_CV[state] * this.g.next());
+        : (60 / (this.ownRate * this.rateScale)) * Math.max(0.5, 1 + BREATH_CV[state] * this.g.next());
     }
     const u = this.phase / this.interval;
     this.volume = u < INSPIRATION_SHARE

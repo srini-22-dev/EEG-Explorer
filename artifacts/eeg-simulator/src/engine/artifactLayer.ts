@@ -74,6 +74,11 @@ export type LiveArtifacts = {
   movementRate: number;
   /** Water in the ventilator tubing, 0 (just suctioned) to 1. */
   tubingWater: number;
+  /** Heart rate, breaths a minute, sweat severity and pop rate in effect. */
+  heartRate: number;
+  breathRate: number;
+  sweatSeverity: number;
+  popRate: number;
 };
 
 export type ArtifactGates = {
@@ -356,7 +361,7 @@ export class ArtifactLayer {
   /** What the artifacts are doing now (see LiveArtifacts); updated in place every sample. */
   readonly live: LiveArtifacts = {
     level: false, emgOn: false, emgRegions: null, emgSeverity: 1, blinkRate: 16, saccadeRate: 25,
-    movementActive: true, movementRate: 0.7, tubingWater: 1,
+    movementActive: true, movementRate: 0.7, tubingWater: 1, heartRate: 68, breathRate: 15, sweatSeverity: 1, popRate: 1,
   };
   private conditionLevel: ConditionLevel = 'none';
   // The muscles of the current episode that the Muscle toggle's own region choice
@@ -370,8 +375,22 @@ export class ArtifactLayer {
     this.conditionLevel = level;
     this.director = level === 'none' || !this.blink ? null : new ConditionsDirector(level, this.seed, this.dt);
     this.applyMovementRate();
+    this.applyPopRate();
+    // Back to the settings as they are, when the level stops moving them.
+    if (!this.director) {
+      if (this.aparams.ecgBpm != null) this.ecg.setBpm(this.aparams.ecgBpm);
+      this.resp.setRateScale(1);
+    }
     // Still until the first activity stretch, where stillness is the schedule.
     if (this.director?.movementScale === 0) this.movement?.startSoon(Infinity);
+  }
+
+  /** Pop rate: the toggle's own rate, times the conditions' activity now (cable tugs). */
+  private applyPopRate() {
+    const base = this.aparams.popRatePerMin;
+    if (base == null) return;
+    const rate = base * (this.director ? this.director.popScale : 1);
+    this.pop?.setMeanInterval(rate > 0 ? 60 / rate : Infinity);
   }
 
   /** Movement rate: the toggle's own rate, times the conditions' activity now (0: still). */
@@ -402,6 +421,10 @@ export class ArtifactLayer {
       dir.step();
       // An activity stretch begins: the first movement comes promptly. It ends: the
       // next one is a quiet stretch away, or never while quiet means still.
+      if (dir.activityEdge) this.applyPopRate();
+      // The patient's heart and breathing, read at the next beat and the next breath.
+      this.ecg.setBpm((p.ecgBpm ?? 68) * dir.heartRate);
+      this.resp.setRateScale(dir.breathRate);
       if (dir.activityEdge && this.movement) {
         this.applyMovementRate();
         const rate = (p.movementRatePerMin ?? 0.7) * dir.movementScale;
@@ -467,7 +490,7 @@ export class ArtifactLayer {
     }
     const heartV = ecgRaw * ECG_SCALP_UV;
     if (g.ecgScalp) V[ix.heart] += heartV;
-    const sweatV = this.sweat!.next() * SWEAT_SKIN_UV * (p.sweatSeverity ?? 1);
+    const sweatV = this.sweat!.next() * SWEAT_SKIN_UV * (p.sweatSeverity ?? 1) * (dir ? dir.sweat : 1);
     if (g.sweat) V[ix.sweatFrontal] += sweatV;
     const mv = this.movement!.next() * 60 * (p.movementSeverity ?? 1);
     if (g.movement) eyes(mv);
@@ -485,10 +508,14 @@ export class ArtifactLayer {
       L.saccadeRate = (p.saccadeRatePerMin ?? 25) * dir.ocularRate;
       L.movementActive = !dir.hasActivity || dir.activityOn;
       L.movementRate = (p.movementRatePerMin ?? 0.7) * dir.movementScale;
+      L.heartRate = (p.ecgBpm ?? 68) * dir.heartRate;
+      L.sweatSeverity = (p.sweatSeverity ?? 1) * dir.sweat;
+      L.popRate = (p.popRatePerMin ?? 1) * dir.popScale;
     } else {
       this.live.level = false;
     }
     this.live.tubingWater = this.water?.waterLevel ?? 1;
+    this.live.breathRate = this.resp.rate;
 
     if (marking) {
       const F = this.markField;
@@ -698,7 +725,10 @@ export class ArtifactLayer {
 
     if (p.blinkRatePerMin != null) this.blink?.setRatePerMin(p.blinkRatePerMin);
     if (p.saccadeRatePerMin != null) this.saccade?.setRatePerMin(p.saccadeRatePerMin);
-    if (p.popRatePerMin != null) this.pop?.setMeanInterval(p.popRatePerMin > 0 ? 60 / p.popRatePerMin : Infinity);
+    if (p.popRatePerMin != null) {
+      if (this.director) this.applyPopRate();
+      else this.pop?.setMeanInterval(p.popRatePerMin > 0 ? 60 / p.popRatePerMin : Infinity);
+    }
     if (p.movementRatePerMin != null) this.applyMovementRate();
     if (p.lineFreq != null) this.line?.setFreq(p.lineFreq);
     if (p.mainsContacts != null && p.mainsContacts !== this.mainsContacts) {

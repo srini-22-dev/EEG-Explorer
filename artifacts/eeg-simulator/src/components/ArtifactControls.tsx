@@ -175,6 +175,7 @@ export function ArtifactControls({
               electrode is flat, so it grays out while the selection is detached. */}
           <Slider
             label="Pop rate" value={params.popRatePerMin} min={0} max={6} step={0.1} unit="/min"
+            live={lv?.popRate}
             offAtMin disabled={isDetached}
             onChange={v => update({ popRatePerMin: v })}
           />
@@ -255,6 +256,7 @@ export function ArtifactControls({
       return wrap(
         <Slider
           label="Severity" value={params.sweatSeverity} min={0.25} max={3} step={0.05} unit="×"
+          live={lv?.sweatSeverity}
           onChange={v => update({ sweatSeverity: v })}
         />,
       );
@@ -263,6 +265,7 @@ export function ArtifactControls({
       return wrap(
         <Slider
           label="Heart rate" value={params.ecgBpm} min={40} max={140} step={1} unit=" bpm"
+          live={lv?.heartRate}
           onChange={v => update({ ecgBpm: v })}
         />,
       );

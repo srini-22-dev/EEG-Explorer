@@ -413,3 +413,50 @@ section('\nIV drip (IK-052): a brief polyphasic spike at each drop, on a few ele
   check('iv drip: changes of sign within a transient, fewest of 3', Math.min(...signs), 2, Infinity);
   check('iv drip: channels at half the largest or more, most of 3', Math.max(...wide), 1, 3);
 });
+
+section('\nThe patient under each level: heart and breathing that settle, rise with activity, and a ventilator that never varies:', () => {
+  /** A level's page, run: R waves on the ECG row, inspirations on the Resp row, and when the patient was active. */
+  const runVitals = (level: ConditionLevel, secs: number, seed: number) => {
+    const { toggles, params } = levelPage(level);
+    const settings: SimSettings = {
+      speed: 30, sensitivity: 7, patientState: 'awake', activePatterns: effective(toggles),
+      ictalParams: defaultIctalParamsMap(), artifactParams: params, filters: DEFAULT_FILTERS, conditions: level,
+    };
+    const src = new SimulationSource(seed, FS);
+    src.useAppMode();
+    const n = secs * FS;
+    const ecg = new Float64Array(n), resp = new Float64Array(n), active = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = src.next(settings);
+      ecg[i] = v['ECG']; resp[i] = v['Resp'];
+      active[i] = src.groundTruth.live.movementActive ? 1 : 0;
+    }
+    const peak = Math.max(...Array.from(ecg));
+    const rs: number[] = [];
+    for (let i = 1; i < n; i++) if (ecg[i] > 0.5 * peak && ecg[i - 1] <= 0.5 * peak) rs.push(i / FS);
+    return { rs, insp: inspirations(resp), active };
+  };
+  /** Beats (or breaths) a minute over [a, b), from the intervals inside it. */
+  const ratePerMin = (events: number[], a: number, b: number, keep: (t: number) => boolean = () => true) => {
+    const iv = events.slice(1).map((t, k) => [t, t - events[k]] as const).filter(([t]) => t >= a && t < b && keep(t)).map(([, d]) => d);
+    return iv.length ? 60 / (iv.reduce((x, y) => x + y, 0) / iv.length) : NaN;
+  };
+  const settle: number[] = [], hrActive: number[] = [], brActive: number[] = [], ventCv: number[] = [];
+  for (const seed of SEEDS) {
+    const r = runVitals('routine', 300, seed);
+    settle.push(ratePerMin(r.rs, 3, 60) / ratePerMin(r.rs, 180, 300));
+    const a = runVitals('ambulatory', 300, seed);
+    // Well inside an activity stretch (the heart takes ~10 s to quicken), against well outside one.
+    const at = (t: number) => a.active[Math.min(a.active.length - 1, Math.round(t * FS))];
+    const inside = (t: number) => at(t) === 1 && at(t - 15) === 1;
+    const outside = (t: number) => at(t) === 0 && at(t - 30) === 0;
+    hrActive.push(ratePerMin(a.rs, 3, 300, inside) / ratePerMin(a.rs, 3, 300, outside));
+    brActive.push(ratePerMin(a.insp, 3, 300, inside) / ratePerMin(a.insp, 3, 300, outside));
+    const icu = runVitals('icu', 120, seed);
+    ventCv.push(cv(diffs(icu.insp.filter((t) => t >= 3))));
+  }
+  check('vitals, routine: heart rate in the first minute / in minutes 3-5, median of 3 (an anxious patient settles)', median(settle), 1.07, Infinity);
+  check('vitals, ambulatory: heart rate while active / while quiet, median of 3', median(hrActive), 1.15, Infinity);
+  check('vitals, ambulatory: breathing rate while active / while quiet, median of 3', median(brActive), 1.2, Infinity);
+  check('vitals, icu: Resp-row breath interval CV on the ventilator, worst of 3 (the machine sets it)', Math.max(...ventCv), 0, 0.01);
+});

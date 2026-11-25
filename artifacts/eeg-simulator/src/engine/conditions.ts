@@ -53,7 +53,25 @@ type ActivitySchedule = {
   scaleOn: number; scaleOff: number;
 };
 
-type Schedule = { muscle?: MuscleSchedule; ocular?: OcularSchedule; activity?: ActivitySchedule };
+/**
+ * The patient's own rates and sweating (owner, 2026-11-25: "other variations like heart
+ * rate"). Multipliers on the toggles' settings: a settling trend, a slow wander (time
+ * constant 30 s), and a rise while active. The ventilator's rate is the machine's and is
+ * never varied; nor are the drip rate, the mains or the contacts, which are equipment.
+ */
+type VitalsSchedule = {
+  /** Heart rate at the start and once settled (settling with `settleS`), its wander SD, and its rise while active. */
+  hrEarly: number; hrLate: number; hrSd: number; hrActive: number;
+  /** The same for spontaneous breathing. */
+  brEarly: number; brLate: number; brSd: number; brActive: number;
+  settleS: number;
+  /** Sweat builds from the setting toward this multiple of it over `sweatBuildS` (fever, exertion). */
+  sweatTo?: number; sweatBuildS?: number;
+  /** Electrode pops while active, a multiple of the setting (cable tugs). */
+  popActive?: number;
+};
+
+type Schedule = { muscle?: MuscleSchedule; ocular?: OcularSchedule; activity?: ActivitySchedule; vitals?: VitalsSchedule };
 
 const BOTH_TEMPORALIS: EmgRegion[] = ['temporalisL', 'temporalisR'];
 const ALL_MUSCLES: EmgRegion[] = ['temporalisL', 'temporalisR', 'frontalis', 'nuchal'];
@@ -67,6 +85,8 @@ export const SCHEDULES: Record<Exclude<ConditionLevel, 'none'>, Schedule> = {
   controlled: {
     muscle: { offEarlyS: 80, offLateS: 80, settleS: 1, onS: [0.8, 2], groups: [[1, BOTH_TEMPORALIS]] },
     ocular: { early: 1, late: 1, settleS: 1, driftSd: 0.15 },
+    // Calm from the start: only the ordinary wander of heart and breathing.
+    vitals: { hrEarly: 1, hrLate: 1, hrSd: 0.03, hrActive: 1, brEarly: 1, brLate: 1, brSd: 0.05, brActive: 1, settleS: 1 },
   },
   // An adult outpatient: anxious on the couch at first — clenching the jaw, frowning,
   // blinking a lot — and settling over the first couple of minutes. Jaw clenching is
@@ -78,6 +98,8 @@ export const SCHEDULES: Record<Exclude<ConditionLevel, 'none'>, Schedule> = {
       groups: [[0.55, BOTH_TEMPORALIS], [0.25, ['frontalis']], [0.1, ['temporalisL']], [0.1, ['temporalisR']]],
     },
     ocular: { early: 1.6, late: 0.8, settleS: 90, driftSd: 0.2 },
+    // Anxious on the couch: heart and breathing a little fast at first, settling.
+    vitals: { hrEarly: 1.15, hrLate: 1, hrSd: 0.04, hrActive: 1, brEarly: 1.15, brLate: 1, brSd: 0.06, brActive: 1, settleS: 120 },
   },
   // Up and about at home, unsupervised: talking, turning the head, walking, eating
   // (the chewing toggle's own runs). Muscle is frequent and often the neck; blinking
@@ -89,6 +111,12 @@ export const SCHEDULES: Record<Exclude<ConditionLevel, 'none'>, Schedule> = {
     },
     ocular: { early: 1.2, late: 1.2, settleS: 1, driftSd: 0.35 },
     activity: { offS: 60, onS: [20, 40], scaleOn: 6, scaleOff: 0.5 },
+    // Up and about: heart and breathing rise with each bout of activity, sweat builds
+    // over the day, and moving tugs the cables.
+    vitals: {
+      hrEarly: 1, hrLate: 1, hrSd: 0.05, hrActive: 1.3, brEarly: 1, brLate: 1, brSd: 0.08, brActive: 1.4, settleS: 1,
+      sweatTo: 1.6, sweatBuildS: 300, popActive: 3,
+    },
   },
   // Sedated and ventilated: still, except for brief episodes of agitation (every
   // muscle at once) and nursing care — turning, suctioning, repositioning — which
@@ -96,6 +124,12 @@ export const SCHEDULES: Record<Exclude<ConditionLevel, 'none'>, Schedule> = {
   icu: {
     muscle: { offEarlyS: 120, offLateS: 120, settleS: 1, onS: [3, 10], groups: [[1, ALL_MUSCLES]] },
     activity: { offS: 120, onS: [20, 40], scaleOn: 10, scaleOff: 0 },
+    // Sedated: a steady heart that quickens a little when handled; fever building. On
+    // the ventilator the breathing is the machine's and does not vary at all.
+    vitals: {
+      hrEarly: 1, hrLate: 1, hrSd: 0.03, hrActive: 1.1, brEarly: 1, brLate: 1, brSd: 0.05, brActive: 1.15, settleS: 1,
+      sweatTo: 1.3, sweatBuildS: 300,
+    },
   },
   // The record a technologist redoes: a restless patient who never settles.
   worst: {
@@ -105,10 +139,15 @@ export const SCHEDULES: Record<Exclude<ConditionLevel, 'none'>, Schedule> = {
     },
     ocular: { early: 1.5, late: 1.5, settleS: 1, driftSd: 0.4 },
     activity: { offS: 30, onS: [15, 40], scaleOn: 6, scaleOff: 1 },
+    vitals: {
+      hrEarly: 1.1, hrLate: 1.1, hrSd: 0.06, hrActive: 1.2, brEarly: 1, brLate: 1, brSd: 0.1, brActive: 1.3, settleS: 1,
+      sweatTo: 1.5, sweatBuildS: 180, popActive: 2,
+    },
   },
 };
 
 const RAMP_S = 0.3;
+const ACTIVITY_RAMP_S = 10;
 const DRIFT_TAU_S = 30;
 
 export class ConditionsDirector {
@@ -128,6 +167,17 @@ export class ConditionsDirector {
   movementScale = 1;
   /** Set on the sample an activity stretch starts or ends, so the layer can reschedule. */
   activityEdge: 'start' | 'end' | null = null;
+  /** Multipliers on the heart rate, the spontaneous breathing rate, sweat and the pop rate. */
+  heartRate = 1;
+  breathRate = 1;
+  sweat = 1;
+  popScale = 1;
+  // The vitals' own stream, so adding them left every level's episodes as they were.
+  private readonly gv: Gaussian;
+  private hrDrift = 0;
+  private brDrift = 0;
+  /** Activity, ramped over ~10 s: a heart quickens over a few beats, not in one. */
+  private activeLevel = 0;
 
   private emgOn = false;
   private emgLeft: number;
@@ -137,6 +187,7 @@ export class ConditionsDirector {
 
   constructor(level: Exclude<ConditionLevel, 'none'>, seed: number, private readonly dt: number) {
     this.g = new Gaussian(deriveSeed(seed, 'conditions'));
+    this.gv = new Gaussian(deriveSeed(seed, 'conditionsVitals'));
     this.s = SCHEDULES[level];
     // A record starts quiet: the first muscle episode and the first activity stretch
     // come after an off-stretch, not on the first sample.
@@ -189,6 +240,17 @@ export class ConditionsDirector {
       this.drift += -a * this.drift + o.driftSd * Math.sqrt(2 * a) * this.g.next();
       this.ocularRate = (o.late + (o.early - o.late) * Math.exp(-this.t / o.settleS)) * Math.exp(this.drift);
     }
+    const v = this.s.vitals;
+    if (v) {
+      const a = dt / DRIFT_TAU_S;
+      this.hrDrift += -a * this.hrDrift + v.hrSd * Math.sqrt(2 * a) * this.gv.next();
+      this.brDrift += -a * this.brDrift + v.brSd * Math.sqrt(2 * a) * this.gv.next();
+      this.activeLevel += ((this.activeOn ? 1 : 0) - this.activeLevel) * Math.min(1, dt / ACTIVITY_RAMP_S);
+      const settle = Math.exp(-this.t / v.settleS);
+      this.heartRate = (v.hrLate + (v.hrEarly - v.hrLate) * settle) * Math.exp(this.hrDrift) * (1 + (v.hrActive - 1) * this.activeLevel);
+      this.breathRate = (v.brLate + (v.brEarly - v.brLate) * settle) * Math.exp(this.brDrift) * (1 + (v.brActive - 1) * this.activeLevel);
+      if (v.sweatTo != null) this.sweat = 1 + (v.sweatTo - 1) * Math.min(1, this.t / (v.sweatBuildS ?? 300));
+    }
     const act = this.s.activity;
     this.activityEdge = null;
     if (act) {
@@ -197,6 +259,7 @@ export class ConditionsDirector {
         this.activeOn = !this.activeOn;
         this.activityEdge = this.activeOn ? 'start' : 'end';
         this.movementScale = this.activeOn ? act.scaleOn : act.scaleOff;
+        this.popScale = this.activeOn ? (this.s.vitals?.popActive ?? 1) : 1;
         this.activityLeft = this.activeOn ? this.g.range(act.onS[0], act.onS[1]) : this.g.exponential(act.offS);
       }
     }

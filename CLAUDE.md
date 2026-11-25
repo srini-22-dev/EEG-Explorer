@@ -186,7 +186,7 @@ conflict with §6.
 | `pnpm --filter @workspace/scripts run validate` | **The regression gate.** Signal-model changes must leave it green. Also audits `INFORMING-KNOWLEDGE.md`'s statuses — see below. |
 | `pnpm --filter @workspace/scripts run validate -- --only <regex>` | Only the sections whose step or title matches (`--list` shows them). For iterating; **not a verification** — it skips the knowledge-base audit, so report only after a full run. |
 | `pnpm run typecheck` | Full workspace typecheck (builds `lib/*` refs, then `artifacts/*` + `scripts`). |
-| `pnpm run dev` | Runs the simulator from the repo root and opens it in the browser; sets `PORT`/`BASE_PATH` itself via `cross-env`. `run-eeg-explorer.bat` does the same on a double-click, or just opens the page if it is already running. |
+| `pnpm run dev` | Runs the simulator from the repo root and opens it in the browser; sets `PORT`/`BASE_PATH` itself via `cross-env`. `run-eeg-explorer.bat` (Windows) and `run-eeg-explorer.command` (macOS, from Finder) do the same on a double-click, or just open the page if it is already running. |
 | `pnpm run build` | Typecheck, then each package's `build`. |
 
 There is no unit-test runner. The gate is the de facto test suite — a battery asserting spectral,

@@ -46,8 +46,11 @@ function liveDetail(id: string, live: LiveArtifacts | null, s: SimSettings): str
       return `${(lv?.emgRegions ?? p.emgRegions).map(r => MUSCLE_NAME[r] ?? r).join(', ')} ${(lv ? lv.emgSeverity : p.emgSeverity).toFixed(1)}×`;
     case 'movement': return lv ? (lv.movementActive ? `active, ${lv.movementRate.toFixed(1)}/min` : 'still') : `${p.movementRatePerMin.toFixed(1)}/min`;
     case 'ventilator': return live && live.tubingWater <= 0 ? 'tubing dry (suctioned)' : `${p.ventRatePerMin}/min`;
-    case 'ecg-artifact': return `${p.ecgBpm} bpm`;
-    case 'pulse': return `${p.pulseElectrode}, ${p.ecgBpm} bpm`;
+    case 'ecg-artifact': return `${Math.round(lv ? lv.heartRate : p.ecgBpm)} bpm`;
+    case 'pulse': return `${p.pulseElectrode}, ${Math.round(lv ? lv.heartRate : p.ecgBpm)} bpm`;
+    case 'respiration': return live ? `${Math.round(live.breathRate)}/min` : '';
+    case 'sweat': return `${(lv ? lv.sweatSeverity : p.sweatSeverity).toFixed(1)}×`;
+    case 'electrode-pop': return `${(lv ? lv.popRate : p.popRatePerMin).toFixed(1)}/min`;
     case 'iv-drip': return `${p.dripRatePerMin}/min`;
     case '50hz': return `${p.lineFreq} Hz${s.filters?.notchHz === p.lineFreq ? ', notched' : ''}`;
     default: return '';
