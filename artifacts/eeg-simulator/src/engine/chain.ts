@@ -120,16 +120,25 @@ export class AmplifierLowPass {
 }
 
 /**
- * Mains notch: a second-order IIR band-stop (the RBJ cookbook notch), Q 30, so
- * about 1.7 Hz wide at -3 dB around the mains frequency. An EEG machine's notch
- * removes the interference and anything else at that frequency — EMG included, so
- * a notched record can make muscle look cleaner than it is. Causal, like the rest
- * of the chain.
+ * Mains notch: a second-order IIR band-stop (the RBJ cookbook notch). An EEG
+ * machine's notch removes the interference and anything else near that frequency —
+ * EMG included, so a notched record can make muscle look cleaner than it is. Causal,
+ * like the rest of the chain.
+ *
+ * Width: -3 dB at 0.82 and 1.18 of the mains frequency (41 and 59 Hz for 50 Hz), the
+ * one clinical recorder's notch found documented (University of Zurich sleep
+ * laboratory, "Filter characteristics": "Notch filter for 50-Hz-rejection ... -3 dB
+ * points at 41 and 59 Hz"), so Q = 50 / 18. It was Q 30 (1.7 Hz wide), a number with
+ * no source; mains drifts (here +/-0.05 Hz, the grid's own wander), and that narrow
+ * notch left about 6% of the fundamental at a 0.05 Hz offset, so on a record with
+ * heavy mains it could not give the background back (2026-11-25, Step 29).
  */
+export const NOTCH_Q = 50 / 18;
+
 export class NotchFilter {
   private b0: number; private b1: number; private b2: number; private a1: number; private a2: number;
   private x1 = 0; private x2 = 0; private y1 = 0; private y2 = 0;
-  constructor(dt: number, hz: number, q = 30) {
+  constructor(dt: number, hz: number, q = NOTCH_Q) {
     const w0 = 2 * Math.PI * hz * dt, alpha = Math.sin(w0) / (2 * q), a0 = 1 + alpha;
     this.b0 = 1 / a0; this.b1 = -2 * Math.cos(w0) / a0; this.b2 = 1 / a0;
     this.a1 = -2 * Math.cos(w0) / a0; this.a2 = (1 - alpha) / a0;

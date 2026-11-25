@@ -1,9 +1,12 @@
 import React, { useEffect, useRef } from 'react';
+import { Info } from 'lucide-react';
 import { MONTAGES } from '../utils/montages';
 import {
   SPEED_VALUES, SENSITIVITY_VALUES, LOW_CUT_VALUES, HIGH_CUT_VALUES, NOTCH_HZ,
-  type Speed, type Sensitivity, type FilterSettings,
+  type Speed, type Sensitivity, type FilterSettings, type ConditionLevel,
 } from '../utils/simTypes';
+import { CONDITION_LEVELS, RECIPES } from '../utils/recordingConditions';
+import { INFO_TRIGGER_ATTR } from './InfoPanel';
 
 /**
  * The reading controls, as on an EEG review station's toolbar: what the page is
@@ -50,14 +53,39 @@ function WheelSelect<T extends string | number>({
 const MONTAGE_IDS = Object.keys(MONTAGES);
 const hz = (v: number) => `${v} Hz`;
 
+/** The "i" beside a control: opens the information panel on `id`, or closes it. */
+function InfoButton({ id, about, infoId, onShowInfo }: {
+  id: string; about: string; infoId: string | null; onShowInfo: (id: string | null) => void;
+}) {
+  return (
+    <button
+      {...{ [INFO_TRIGGER_ATTR]: '' }}
+      onClick={() => onShowInfo(infoId === id ? null : id)}
+      aria-label={`About ${about}`}
+      title={`About ${about}`}
+      className={`self-end mb-1.5 rounded p-0.5 transition-colors ${
+        infoId === id ? 'text-emerald-300 bg-emerald-800/50' : 'text-slate-500 hover:text-slate-300'
+      }`}>
+      <Info className="w-3 h-3" />
+    </button>
+  );
+}
+
 type Props = {
   montageId: string; setMontageId: (id: string) => void;
   sensitivity: Sensitivity; setSensitivity: (v: Sensitivity) => void;
   speed: Speed; setSpeed: (v: Speed) => void;
   filters: FilterSettings; setFilters: (f: FilterSettings) => void;
+  conditions: ConditionLevel; setConditions: (l: ConditionLevel) => void;
+  /** The page has been changed by hand since the level was chosen. */
+  conditionsEdited: boolean;
+  infoId: string | null; onShowInfo: (id: string | null) => void;
 };
 
-export function TopBar({ montageId, setMontageId, sensitivity, setSensitivity, speed, setSpeed, filters, setFilters }: Props) {
+export function TopBar({
+  montageId, setMontageId, sensitivity, setSensitivity, speed, setSpeed, filters, setFilters,
+  conditions, setConditions, conditionsEdited, infoId, onShowInfo,
+}: Props) {
   const divider = <div className="w-px self-stretch bg-[#2e4a2e]" />;
   return (
     <div className="flex items-end gap-3 px-3 py-1.5 bg-[#1e2a1e] border-b border-[#2e4a2e] text-slate-200 overflow-x-auto flex-shrink-0">
@@ -82,6 +110,12 @@ export function TopBar({ montageId, setMontageId, sensitivity, setSensitivity, s
         />
         <span className="text-[11px] font-mono text-emerald-300 whitespace-nowrap">Notch {NOTCH_HZ} Hz</span>
       </label>
+      <InfoButton id="notch" about="the notch filter" infoId={infoId} onShowInfo={onShowInfo} />
+      {divider}
+      <WheelSelect label="Recording conditions" value={conditions} options={CONDITION_LEVELS} wide
+        format={l => RECIPES[l].name + (l === conditions && conditionsEdited ? ' (edited)' : '')}
+        onChange={setConditions} />
+      <InfoButton id="conditions" about="recording conditions" infoId={infoId} onShowInfo={onShowInfo} />
     </div>
   );
 }

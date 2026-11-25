@@ -1011,15 +1011,15 @@ the head, where contact through hair is poorest.
 
 **Observable.** Montage `bipolar-ap`, state `awake`, toggle `50hz`, the app's 1/70 Hz filters at
 the default 5 µV, three subjects. The two largest rows share one electrode (currently 3 of 3). The
-band divided by the N3 page's median row, peak to peak, is 0.6–1.2 (currently 0.80; learningeeg
+band divided by the N3 page's median row, peak to peak, is 0.6–1.2 (currently 0.78; learningeeg
 figure 0.88). The largest other row is at most 0.2 of the band (currently 0.156). With a 50 Hz
-notch on, at most 0.25 of the band remains (currently 0.127). The mains box is open with the notch
+notch on, at most 0.25 of the band remains (currently 0.056). The mains box is open with the notch
 off, closed under a matching notch, and open under a mismatched one (60 Hz mains, 50 Hz notch). The
 app opens with the notch off. With *Poor contacts: Many*, on `reference-ipsi`, against the page's
-median row, peak to peak: occipital channels 1.5–3.5 (currently 2.26; reference 2.2 or more);
+median row, peak to peak: occipital channels 1.5–3.5 (currently 2.22; reference 2.2 or more);
 frontopolar channels at most 0.5 (currently 0.40; reference 0.2); occipital at least 3× the
 frontopolar and frontal (currently 6.9 at the smallest; reference about 9); the notch leaves at most
-0.25 (currently 0.13). *Poor contacts* defaults to *One*.
+0.25 (currently 0.056). *Poor contacts* defaults to *One*.
 
 **Mechanism.** *(non-binding)* The amplifier rejects interference common to both inputs; a contact's
 impedance imbalance turns part of it into a difference between them.
@@ -1050,7 +1050,11 @@ notch-off default and the poor-contact model are the owner's choice (2026-11-23)
 contacts: the owner's reference image (Zeto, "Impact of Digital EEG Filter on EEG Signal
 Morphology"), read row by row against its own filtered panel on 2026-11-23. Its limits: a 674 px
 image with no stated filters or reference, at a resolution where mains can't be told from muscle;
-read as mains on many poor contacts by the owner's choice. Approved by the user 2026-11-23; the
+read as mains on many poor contacts by the owner's choice. The notch's width: -3 dB at 41 and
+59 Hz for 50 Hz mains, the one clinical recorder's notch found documented (University of Zurich
+sleep laboratory, "Filter characteristics": "Notch filter for 50-Hz-rejection ... -3 dB points at
+41 and 59 Hz"); refreshed 2026-11-25 when the notch was widened to it from an unsourced Q 30.
+Approved by the user 2026-11-23; the
 many-contacts addition approved 2026-11-25.
 
 ## 5. Normal variants

@@ -27,10 +27,11 @@ import {
 } from './artifacts';
 import { defectLineMultiplier, type ChannelDefect, type RecordingChain } from './chain';
 import { deriveSeed } from './rng';
+import { ConditionsDirector } from './conditions';
 import type { VigilanceGains } from './state';
 import type { SubjectParams } from './subject';
 import { NO_FIELDS, type MarkBook, type MarkFields } from './marks';
-import type { ArtifactParams, EmgRegion, MainsContacts, PatientState } from '../utils/simTypes';
+import type { ArtifactParams, ConditionLevel, EmgRegion, MainsContacts, PatientState } from '../utils/simTypes';
 import { POP_TARGET_ANY } from '../utils/simTypes';
 
 /**
@@ -155,6 +156,7 @@ type LayerOptions = {
 };
 
 export class ArtifactLayer {
+  private readonly seed: number;
   private readonly dt: number;
   private readonly subject: SubjectParams;
   private readonly electrodes: string[];
@@ -224,6 +226,7 @@ export class ArtifactLayer {
   private lineFieldDefects = false;
 
   constructor(o: LayerOptions) {
+    this.seed = o.seed;
     this.dt = o.dt;
     this.subject = o.subject;
     this.electrodes = o.electrodes;
@@ -290,6 +293,33 @@ export class ArtifactLayer {
   /** Mains amplitude now, microvolts, for the recording chain. */
   get lineAmp(): number { return this.aparams.lineAmpUv ?? this.subject.lineAmp; }
 
+  // Recording conditions (top bar): what the patient does over time. Null for `none`
+  // (Custom), which leaves every generator exactly as it was before levels existed.
+  private director: ConditionsDirector | null = null;
+  private conditionLevel: ConditionLevel = 'none';
+  // The muscles of the current episode that the Muscle toggle's own region choice
+  // allows, cached on both references so the mark's field is not rebuilt per sample.
+  private episodeRegionsKey: [EmgRegion[] | null, EmgRegion[] | undefined] = [null, undefined];
+  private episodeRegions: EmgRegion[] | undefined = undefined;
+
+  /** Set the recording conditions. A new level starts its patient from the beginning of the record. */
+  setConditions(level: ConditionLevel) {
+    if (level === this.conditionLevel) return;
+    this.conditionLevel = level;
+    this.director = level === 'none' || !this.blink ? null : new ConditionsDirector(level, this.seed, this.dt);
+    this.applyMovementRate();
+    // Still until the first activity stretch, where stillness is the schedule.
+    if (this.director?.movementScale === 0) this.movement?.startSoon(Infinity);
+  }
+
+  /** Movement rate: the toggle's own rate, times the conditions' activity now (0: still). */
+  private applyMovementRate() {
+    const base = this.aparams.movementRatePerMin;
+    if (base == null && !this.director) return;
+    const scale = this.director ? this.director.movementScale : 1;
+    this.movement?.setMeanInterval(scale === 0 ? Infinity : 60 / Math.max((base ?? 0.7) * scale, 0.05));
+  }
+
   // The reader's notch (the top bar), Hz, or null when off.
   private notchHz: number | null = null;
   /** The notch now set, so the mains box closes while the notch takes the mains away. */
@@ -305,6 +335,19 @@ export class ArtifactLayer {
     const ix = this.ix;
     const g = this.gates;
     const p = this.aparams;
+    const dir = this.director;
+    if (dir) {
+      dir.step();
+      // An activity stretch begins: the first movement comes promptly. It ends: the
+      // next one is a quiet stretch away, or never while quiet means still.
+      if (dir.activityEdge && this.movement) {
+        this.applyMovementRate();
+        const rate = (p.movementRatePerMin ?? 0.7) * dir.movementScale;
+        if (dir.activityEdge === 'start') this.movement.startSoon(0.5);
+        else this.movement.startSoon(rate > 0 ? dir.exponential(60 / rate) : Infinity);
+      }
+    }
+    const ocularRate = dir ? gains.ocularRate * dir.ocularRate : gains.ocularRate;
     // The ocular EVENT generators (blink, eye-opening, saccade) take their gate
     // directly: while disabled they are silent, and re-enabling schedules the
     // first event promptly (a fresh start, not a resumed schedule) so the toggle
@@ -321,7 +364,7 @@ export class ArtifactLayer {
       V[ix.eyeL] += d; V[ix.eyeR] += d;
       V[ix.eyeMonoL] += m; V[ix.eyeMonoR] += m;
     };
-    const blinkV = this.blink.next(g.blink, gains.ocularRate) * BLINK_DRIVE_UV;
+    const blinkV = this.blink.next(g.blink, ocularRate) * BLINK_DRIVE_UV;
     eyes(blinkV);
     // The orbicularis contraction behind the blink, at the orbits (the ocular
     // monopoles' radial patches) and gated with it. Its shot noise runs every
@@ -333,7 +376,7 @@ export class ArtifactLayer {
     // drives Fp negative -> upward, closing a smaller downward transient.
     const openV = this.eyeOpening!.next(g.eyeOpening) * BLINK_DRIVE_UV / 2;
     eyes(openV);
-    const saccadeV = this.saccade!.next(g.saccade, gains.ocularRate) * 45;
+    const saccadeV = this.saccade!.next(g.saccade, ocularRate) * 45;
     V[ix.gaze] += saccadeV;
     V[ix.lateralRectusL] += this.saccade!.lrsL * LRS_PEAK_UV;
     V[ix.lateralRectusR] += this.saccade!.lrsR * LRS_PEAK_UV;
@@ -342,7 +385,10 @@ export class ArtifactLayer {
     // Which muscles are tense is a separate question from how hard they are
     // contracting, so region selection and severity are separate controls.
     const emgSev = p.emgSeverity ?? 1;
-    const regions = p.emgRegions;
+    // Under a recording level, muscle comes in episodes, each contracting its own
+    // muscles — those of them the toggle's region choice allows.
+    const regions = dir?.emgRegions ? this.regionsOfEpisode(dir.emgRegions, p.emgRegions) : p.emgRegions;
+    const emgEnv = dir ? dir.emg : 1;
     const on = (r: EmgRegion) => regions == null || regions.includes(r);
     const atonia = STATE_EMG_SCALE[state];
     const emgLV = this.emgL!.next(gains.emg) * 9 * gains.emg * emgSev * atonia;
@@ -350,10 +396,10 @@ export class ArtifactLayer {
     const emgFV = this.emgF!.next(gains.emg) * 6 * gains.emg * emgSev * atonia;
     const emgNV = this.emgN!.next(gains.emg) * 8 * gains.emg * emgSev * atonia;
     if (g.emg) {
-      if (on('temporalisL')) V[ix.temporalisL] += emgLV;
-      if (on('temporalisR')) V[ix.temporalisR] += emgRV;
-      if (on('frontalis'))   V[ix.frontalis]   += emgFV;
-      if (on('nuchal'))      V[ix.nuchal]      += emgNV;
+      if (on('temporalisL')) V[ix.temporalisL] += emgLV * emgEnv;
+      if (on('temporalisR')) V[ix.temporalisR] += emgRV * emgEnv;
+      if (on('frontalis'))   V[ix.frontalis]   += emgFV * emgEnv;
+      if (on('nuchal'))      V[ix.nuchal]      += emgNV * emgEnv;
     }
     const heartV = ecgRaw * ECG_SCALP_UV;
     if (g.ecgScalp) V[ix.heart] += heartV;
@@ -388,7 +434,7 @@ export class ArtifactLayer {
       // it lasts. Until 2026-10-23 each was pointed at every 1.5 s, which left the
       // muscle burst or the drift between two arrows unannotated (owner: "whatever is
       // present in the signals should be by design").
-      M.markWhile('muscle', g.emg && atonia > 0.5 && emgSev > 0, this.muscleField(regions));
+      M.markWhile('muscle', g.emg && atonia > 0.5 && emgSev > 0 && emgEnv > 0, this.muscleField(regions));
       M.markWhile('sweat', g.sweat, F.sweat);
       // Not while a notch at the mains frequency has taken it off the page: a box marks
       // what is drawn. A 50 Hz notch against 60 Hz mains leaves it, and its box.
@@ -437,6 +483,15 @@ export class ArtifactLayer {
         }
       }
     }
+  }
+
+  private regionsOfEpisode(episode: EmgRegion[], allowed: EmgRegion[] | undefined): EmgRegion[] {
+    const [e, a] = this.episodeRegionsKey;
+    if (e !== episode || a !== allowed) {
+      this.episodeRegions = allowed == null ? episode : episode.filter(r => allowed.includes(r));
+      this.episodeRegionsKey = [episode, allowed];
+    }
+    return this.episodeRegions!;
   }
 
   /**
@@ -507,7 +562,7 @@ export class ArtifactLayer {
     if (p.blinkRatePerMin != null) this.blink?.setRatePerMin(p.blinkRatePerMin);
     if (p.saccadeRatePerMin != null) this.saccade?.setRatePerMin(p.saccadeRatePerMin);
     if (p.popRatePerMin != null) this.pop?.setMeanInterval(p.popRatePerMin > 0 ? 60 / p.popRatePerMin : Infinity);
-    if (p.movementRatePerMin != null) this.movement?.setMeanInterval(60 / Math.max(p.movementRatePerMin, 0.05));
+    if (p.movementRatePerMin != null) this.applyMovementRate();
     if (p.lineFreq != null) this.line?.setFreq(p.lineFreq);
     if (p.mainsContacts != null && p.mainsContacts !== this.mainsContacts) {
       this.mainsContacts = p.mainsContacts;

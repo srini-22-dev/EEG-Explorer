@@ -775,7 +775,11 @@ export class LineNoiseGenerator {
     this.phase += 2 * Math.PI * f * this.dt;
     if (this.phase > 2 * Math.PI) this.phase -= 2 * Math.PI;
     const amp = 1 + 0.08 * this.ampState;
-    return amp * (Math.sin(this.phase) + 0.12 * Math.sin(2 * this.phase) + 0.05 * Math.sin(3 * this.phase));
+    // Fundamental and second harmonic. A third (150 Hz, at 0.05) was here until
+    // 2026-11-25: above the 125 Hz Nyquist limit of 250 samples a second it folded back
+    // onto 100 Hz, a component a real record cannot carry, because the amplifier's
+    // anti-aliasing filter removes it before sampling.
+    return amp * (Math.sin(this.phase) + 0.12 * Math.sin(2 * this.phase));
   }
 }
 

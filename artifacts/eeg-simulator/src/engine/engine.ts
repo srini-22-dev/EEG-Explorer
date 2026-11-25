@@ -38,7 +38,7 @@ import {
   MU_MAX_RMS, STATE_VIGILANCE,
 } from './tuning';
 import { RecordingChain, sampleDefects, mainsManyRegion, MAINS_MANY_WEIGHT, MAINS_MANY_GAIN, type ChannelDefect } from './chain';
-import type { FilterSettings } from '../utils/simTypes';
+import type { ConditionLevel, FilterSettings } from '../utils/simTypes';
 import { Gaussian, deriveSeed } from './rng';
 import {
   PATTERN_SOURCES,
@@ -835,6 +835,11 @@ export class EegEngine {
   /** Switch the engine's own artifacts on and off (see ArtifactGates). */
   setArtifactGates(gates: Partial<ArtifactGates>) {
     this.artifactLayer.setGates(gates);
+  }
+
+  /** Recording conditions (top bar): when the artifacts the toggles allow happen. See conditions.ts. */
+  setConditions(level: ConditionLevel) {
+    this.artifactLayer.setConditions(level);
   }
 
   /**

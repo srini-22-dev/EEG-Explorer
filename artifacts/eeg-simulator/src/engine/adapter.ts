@@ -113,6 +113,7 @@ export class SimulationSource {
     this.engine.setIctalParams(settings.ictalParams);
     this.engine.setPatternOptions(settings.patternOptions);
     this.engine.setFilters(settings.filters);
+    this.engine.setConditions(settings.conditions ?? 'none');
 
     this.engine.next(this.buf);
     this.t += this.dt;

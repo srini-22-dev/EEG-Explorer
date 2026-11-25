@@ -9,6 +9,15 @@
 
 export type PatientState = 'awake' | 'drowsy' | 'n1' | 'n2' | 'n3' | 'rem';
 
+/**
+ * Recording conditions (top bar): the setting the record was made in, from a textbook
+ * page to the record a technologist redoes. `none` is Custom — the toggles as set by
+ * hand, held constant, exactly as before the levels existed. See
+ * utils/recordingConditions.ts (what each level turns on) and engine/conditions.ts
+ * (what the patient does over time).
+ */
+export type ConditionLevel = 'none' | 'ideal' | 'controlled' | 'routine' | 'ambulatory' | 'icu' | 'worst';
+
 export type IctalHemisphere = 'left' | 'right';
 
 /** Per-toggle seizure parameters: amplitude, discharge frequency, and (for focal seizures) onset side. */
@@ -164,6 +173,8 @@ export type SimSettings = {
   patternOptions?: PatternOptions;
   /** The reader's filters (top bar). Optional: omitted leaves the engine's own. */
   filters?: FilterSettings;
+  /** Recording conditions (top bar). Optional: omitted is `none`, the toggles held constant. */
+  conditions?: ConditionLevel;
 };
 
 /** The reader's filter settings; see `RecordingChain.setFilters`. */

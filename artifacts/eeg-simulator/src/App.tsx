@@ -9,7 +9,9 @@ import {
 } from './utils/toggleRules';
 import type {
   SimSettings, PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions, Speed, Sensitivity, FilterSettings,
+  ConditionLevel,
 } from './utils/simTypes';
+import { applyLevel, isEdited, type AppliedLevel } from './utils/recordingConditions';
 import { defaultIctalParamsMap, defaultArtifactParams, POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT, DEFAULT_FILTERS } from './utils/simTypes';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
@@ -66,6 +68,21 @@ export default function App() {
   const updateArtifactParams = (patch: Partial<ArtifactParams>) =>
     setArtifactParams(prev => ({ ...prev, ...patch }));
 
+  // Recording conditions (top bar). Choosing a level sets the artifact toggles and
+  // settings from its recipe; what was applied is kept so a later edit by hand shows
+  // as "(edited)". The level itself stays, and with it the patient's behaviour over
+  // time (engine/conditions.ts).
+  const [conditions, setConditionsLevel] = useState<ConditionLevel>('none');
+  const [appliedLevel, setAppliedLevel] = useState<AppliedLevel>({ level: 'none', on: [], params: {} });
+  const setConditions = (level: ConditionLevel) => {
+    const r = applyLevel(level, toggles, artifactParams);
+    setToggles(r.toggles);
+    setArtifactParams(r.params);
+    setAppliedLevel(r.applied);
+    setConditionsLevel(level);
+  };
+  const conditionsEdited = isEdited(appliedLevel, toggles, artifactParams);
+
   const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', pos146Sides: 'shifting', postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
     setPatternOptions(prev => ({ ...prev, ...patch }));
@@ -92,7 +109,7 @@ export default function App() {
 
   const settings: SimSettings = {
     speed, sensitivity, patientState, activePatterns: effectivePatterns, ictalParams, artifactParams,
-    patternOptions, filters,
+    patternOptions, filters, conditions,
   };
 
   // Build active-effects label list for canvas overlay
@@ -130,6 +147,8 @@ export default function App() {
             sensitivity={sensitivity} setSensitivity={setSensitivity}
             speed={speed} setSpeed={setSpeed}
             filters={filters} setFilters={setFilters}
+            conditions={conditions} setConditions={setConditions} conditionsEdited={conditionsEdited}
+            infoId={infoId} onShowInfo={setInfoId}
           />
           {/*
             The PanelGroup is unconditional and EEGCanvas is written exactly once.
@@ -196,7 +215,7 @@ export default function App() {
                   <div className="w-1 h-8 bg-slate-500 rounded-full" />
                 </PanelResizeHandle>
                 <Panel id="info" order={4} defaultSize={30} minSize={20}>
-                  <InfoPanel id={infoId} onClose={closeInfo} />
+                  <InfoPanel id={infoId} onClose={closeInfo} conditions={conditions} />
                 </Panel>
               </>
             )}
