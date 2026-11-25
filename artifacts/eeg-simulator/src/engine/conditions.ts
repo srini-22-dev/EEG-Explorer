@@ -120,6 +120,8 @@ export class ConditionsDirector {
   emg = 0;
   /** The muscles this episode contracts; null between episodes and with no muscle schedule. */
   emgRegions: EmgRegion[] | null = null;
+  /** How hard this episode contracts, relative to the toggle's severity (0.6-1.4): no two clenches are alike. */
+  emgIntensity = 1;
   /** Multiplier on blink and saccade rates. */
   ocularRate = 1;
   /** Multiplier on the movement rate; changes only at the edge of an activity stretch. */
@@ -169,6 +171,7 @@ export class ConditionsDirector {
         if (this.emgOn) {
           this.emgRegions = this.pickGroup(m.groups);
           this.emgLeft = this.g.range(m.onS[0], m.onS[1]);
+          this.emgIntensity = this.g.range(0.6, 1.4);
         } else {
           this.emgLeft = this.g.exponential(this.offMean());
         }
@@ -198,6 +201,11 @@ export class ConditionsDirector {
       }
     }
   }
+
+  /** Whether this level has activity stretches at all (movement otherwise comes at its own rate). */
+  get hasActivity(): boolean { return this.s.activity != null; }
+  /** An activity stretch is under way. */
+  get activityOn(): boolean { return this.activeOn; }
 
   /** A draw from this director's stream, for the layer's rescheduling (seconds to the next movement). */
   exponential(mean: number): number { return this.g.exponential(mean); }

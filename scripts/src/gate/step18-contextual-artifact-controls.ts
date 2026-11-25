@@ -24,7 +24,7 @@ const ART_OPTS: EngineOptions = {
 };
 const GATES_OFF: ArtifactGates = {
   blink: false, eyeOpening: false, saccade: false, flutter: false, emg: false, pop: false,
-  sweat: false, line: false, ecgScalp: false, movement: false, defects: false,
+  sweat: false, line: false, ecgScalp: false, movement: false, defects: false, respiration: false, ventilator: false,
 };
 
 function runArt(

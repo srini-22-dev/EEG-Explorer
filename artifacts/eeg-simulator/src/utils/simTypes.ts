@@ -115,6 +115,16 @@ export type ArtifactParams = {
    * electrode cap). See chain.ts MAINS_CONTACT_COUPLING and MAINS_MANY_WEIGHT.
    */
   mainsContacts: MainsContacts;
+  /** Breathing artifact: a smooth wave on one electrode's contact, or a sharp wave on the electrodes lain on (IK-049). */
+  respirationForm: 'electrode' | 'lying';
+  /** The electrode whose contact breathing moves, for the one-electrode form. */
+  respirationElectrode: string;
+  /** Ventilator rate, breaths a minute (IK-050). */
+  ventRatePerMin: number;
+  /** Which side of the patient the ventilator and its tubing are on. */
+  ventSide: 'left' | 'right';
+  /** Rising counter for "Suction the tubing", a moment rather than a state (like manualPopNonce). */
+  suctionNonce: number;
 };
 
 export type MainsContacts = 'one' | 'many';
@@ -136,6 +146,12 @@ export function defaultArtifactParams(): ArtifactParams {
     lineFreq: 50,
     lineAmpUv: 5,
     mainsContacts: 'one',
+    respirationForm: 'electrode',
+    // eegpedia's figure: "Breathing artifact in P4 in a intubated comatose patient".
+    respirationElectrode: 'P4',
+    ventRatePerMin: 16,
+    ventSide: 'left',
+    suctionNonce: 0,
   };
 }
 

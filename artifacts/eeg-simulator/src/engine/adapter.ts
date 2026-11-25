@@ -40,6 +40,7 @@ export class SimulationSource {
     // ECG is a recorded display channel, not a scalp electrode, so the engine
     // supplies it separately rather than through the leadfield projection.
     this.voltages['ECG'] = 0;
+    this.voltages['Resp'] = 0;
   }
 
   setPatientState(state: PatientState) {
@@ -99,6 +100,8 @@ export class SimulationSource {
       // was worth exposing, which is why this stayed hard-off until now.
       ecgScalp: ap.has('ecg-artifact'),
       movement: ap.has('movement'),
+      respiration: ap.has('respiration'),
+      ventilator: ap.has('ventilator'),
     });
 
     // The contextual settings behind those same toggles — which electrode pops,
@@ -123,6 +126,7 @@ export class SimulationSource {
       this.voltages[names[i]] = this.buf[i];
     }
     this.voltages['ECG'] = this.engine.ecgChannelValue;
+    this.voltages['Resp'] = this.engine.respChannelValue;
     return this.voltages;
   }
 

@@ -1,4 +1,4 @@
-import { Montage } from './montages';
+import { Montage, isAux } from './montages';
 
 export type HighlightState = {
   hoveredElectrodes: Set<string>;
@@ -100,7 +100,7 @@ export function getElectrodesForChannel(channelIndex: number, montage: Montage):
   const ch = montage.channels[channelIndex];
   if (!ch) return [];
   const electrodes = [];
-  if (ch.active && ch.active !== 'ECG') electrodes.push(ch.active);
+  if (ch.active && !isAux(ch)) electrodes.push(ch.active);
   if (ch.reference && ch.reference !== 'AVG' && ch.reference !== 'CONTRA' && ch.reference !== 'IPSI') {
     electrodes.push(ch.reference);
   }

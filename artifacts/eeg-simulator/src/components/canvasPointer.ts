@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Montage } from '../utils/montages';
+import { isAux, type Montage } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { setHoverChannels, toggleClickChannel } from '../utils/highlightStore';
 import { PX_PER_MM_X, pxPerMmFromHeight, pxPerUV as calcPxPerUV, ecgScale } from '../utils/displayGeometry';
@@ -64,7 +64,7 @@ export function useCanvasPointer({
     const totalU  = nonSp + (layout.length - nonSp) * GAP_UNITS;
     const pxPerMm = pxPerMmFromHeight(h, totalU);
     const isEcg = closestRow.channelIndex >= 0
-      && montage.channels[closestRow.channelIndex]?.label === 'ECG';
+      && isAux(montage.channels[closestRow.channelIndex]);
     return { row: closestRow, isEcg, scale: isEcg ? ecgScale(pxPerMm) : calcPxPerUV(pxPerMm, settingsRef.current.sensitivity) };
   };
 

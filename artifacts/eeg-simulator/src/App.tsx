@@ -3,7 +3,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { TopBar } from './components/TopBar';
 import { InfoPanel } from './components/InfoPanel';
 import { EEGCanvas } from './components/EEGCanvas';
-import { MONTAGES } from './utils/montages';
+import { MONTAGES, withResp } from './utils/montages';
 import {
   type ToggleState, initialToggles, effective, toggle, enterState, clearToggles, setPage, quizPage,
 } from './utils/toggleRules';
@@ -12,6 +12,7 @@ import type {
   ConditionLevel,
 } from './utils/simTypes';
 import { applyLevel, isEdited, type AppliedLevel } from './utils/recordingConditions';
+import { useLiveArtifacts } from './utils/liveArtifacts';
 import { defaultIctalParamsMap, defaultArtifactParams, POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT, DEFAULT_FILTERS } from './utils/simTypes';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
@@ -73,6 +74,9 @@ export default function App() {
   // as "(edited)". The level itself stays, and with it the patient's behaviour over
   // time (engine/conditions.ts).
   const [conditions, setConditionsLevel] = useState<ConditionLevel>('none');
+  // The respiration row under the ECG (IK-049): off unless asked for, or a level brings it.
+  const [showResp, setShowResp] = useState(false);
+  const montage = useMemo(() => (showResp ? withResp(MONTAGES[montageId]) : MONTAGES[montageId]), [montageId, showResp]);
   const [appliedLevel, setAppliedLevel] = useState<AppliedLevel>({ level: 'none', on: [], params: {} });
   const setConditions = (level: ConditionLevel) => {
     const r = applyLevel(level, toggles, artifactParams);
@@ -80,8 +84,11 @@ export default function App() {
     setArtifactParams(r.params);
     setAppliedLevel(r.applied);
     setConditionsLevel(level);
+    if (r.showResp != null) setShowResp(r.showResp);
   };
   const conditionsEdited = isEdited(appliedLevel, toggles, artifactParams);
+  // The controls follow what the level is doing (and the tubing's water after a suction).
+  const live = useLiveArtifacts(conditions !== 'none' || effectivePatterns.has('ventilator'));
 
   const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', pos146Sides: 'shifting', postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
@@ -89,6 +96,9 @@ export default function App() {
 
   const [theme, setTheme] = useState<EEGTheme>('green-paper');
   const [showAnnotations, setShowAnnotations] = useState(true);
+  // The artifact list at the canvas's top right, on its own switch (owner, 2026-11-25:
+  // "separate annotation for on signals and separate for the top right").
+  const [showArtifactList, setShowArtifactList] = useState(true);
   const [graphHover, setGraphHover] = useState(false);
   const [showSpectrum, setShowSpectrum] = useState(false);
   const [showRightSpectrum, setShowRightSpectrum] = useState(false);
@@ -130,6 +140,8 @@ export default function App() {
           clearAll={clearAll}
           theme={theme} setTheme={setTheme}
           showAnnotations={showAnnotations} setShowAnnotations={setShowAnnotations}
+          showArtifactList={showArtifactList} setShowArtifactList={setShowArtifactList}
+          live={live}
           graphHover={graphHover} setGraphHover={setGraphHover}
           showSpectrum={showSpectrum} setShowSpectrum={setShowSpectrum}
           showRightSpectrum={showRightSpectrum} setShowRightSpectrum={setShowRightSpectrum}
@@ -149,6 +161,7 @@ export default function App() {
             filters={filters} setFilters={setFilters}
             conditions={conditions} setConditions={setConditions} conditionsEdited={conditionsEdited}
             infoId={infoId} onShowInfo={setInfoId}
+            showResp={showResp} setShowResp={setShowResp}
           />
           {/*
             The PanelGroup is unconditional and EEGCanvas is written exactly once.
@@ -166,11 +179,12 @@ export default function App() {
           <PanelGroup direction="horizontal">
             <Panel id="eeg" order={1} minSize={30}>
               <EEGCanvas
-                montage={MONTAGES[montageId]}
+                montage={montage}
                 settings={settings}
                 activeEffectsLabel={quizMode ? '' : activeEffects}
                 theme={theme}
                 showAnnotations={showAnnotations && !quizMode}
+                showArtifactList={showArtifactList && !quizMode}
                 isFrozen={isFrozen}
                 setIsFrozen={setIsFrozen}
                 dataBuffer={dataBuffer}
@@ -186,7 +200,7 @@ export default function App() {
                 <Panel id="head3d" order={2} defaultSize={30} minSize={20}>
                   <Suspense fallback={<PanelLoading label="3D head model" />}>
                     <HeadModel3D
-                      montage={MONTAGES[montageId]}
+                      montage={montage}
                       headOpacity={headOpacity}
                       brainOpacity={brainOpacity}
                     />
@@ -203,7 +217,7 @@ export default function App() {
                   <Suspense fallback={<PanelLoading label="band panel" />}>
                     <RightSpectrumPanel
                       dataBuffer={dataBuffer}
-                      montage={MONTAGES[montageId]}
+                      montage={montage}
                     />
                   </Suspense>
                 </Panel>
@@ -224,7 +238,7 @@ export default function App() {
             <Suspense fallback={<div className="h-48 bg-[#1e2a1e] border-t border-[#2e4a2e]" />}>
               <SpectrumPanel
                 dataBuffer={dataBuffer}
-                montage={MONTAGES[montageId]}
+                montage={montage}
                 freezeYAxis={freezeYAxis}
                 setFreezeYAxis={setFreezeYAxis}
                 settings={settings}

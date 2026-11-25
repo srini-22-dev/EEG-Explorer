@@ -1,11 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { Montage, ALL_ELECTRODES } from '../utils/montages';
+import { Montage, ALL_ELECTRODES, isAux } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
 import { markRowSizes, markRows, markRowSigns, markBlocks } from '../utils/markRows';
 import { SimulationSource } from '../engine/adapter';
 import type { ArtifactMark } from '../engine/engine';
-import { PATTERN_BY_ID } from '../utils/patterns';
+import { PATTERN_BY_ID, PATTERN_CATEGORIES } from '../utils/patterns';
+import { liveArtifacts, isLiveOn } from '../utils/liveArtifacts';
+import type { LiveArtifacts } from '../engine/engine';
 import { THEMES, EEGTheme } from '../utils/themes';
 import { EDUCATIONAL_ANNOTATIONS, PATTERN_COLOR, REGION_ORDER } from '../utils/annotations';
 import { Pause, Play } from 'lucide-react';
@@ -27,12 +29,37 @@ import {
   traceY,
 } from '../utils/displayGeometry';
 
+/** The artifact toggles, in the panel's order, for the artifact list. */
+const ARTIFACT_IDS = PATTERN_CATEGORIES.find(c => c.patterns.some(p => p.id === 'blink'))?.patterns.map(p => p.id) ?? [];
+
+const MUSCLE_NAME: Record<string, string> = { temporalisL: 'temporalis L', temporalisR: 'temporalis R', frontalis: 'frontalis', nuchal: 'neck' };
+
+/** What an artifact is doing now, in a few words, where that moves (empty otherwise). */
+function liveDetail(id: string, live: LiveArtifacts | null, s: SimSettings): string {
+  const p = s.artifactParams;
+  const lv = live?.level ? live : null;
+  switch (id) {
+    case 'blink': return `${Math.round(lv ? lv.blinkRate : p.blinkRatePerMin)}/min`;
+    case 'eye-movement': return `${Math.round(lv ? lv.saccadeRate : p.saccadeRatePerMin)}/min`;
+    case 'muscle':
+      if (lv && !lv.emgOn) return 'resting';
+      return `${(lv?.emgRegions ?? p.emgRegions).map(r => MUSCLE_NAME[r] ?? r).join(', ')} ${(lv ? lv.emgSeverity : p.emgSeverity).toFixed(1)}×`;
+    case 'movement': return lv ? (lv.movementActive ? `active, ${lv.movementRate.toFixed(1)}/min` : 'still') : `${p.movementRatePerMin.toFixed(1)}/min`;
+    case 'ventilator': return live && live.tubingWater <= 0 ? 'tubing dry (suctioned)' : `${p.ventRatePerMin}/min`;
+    case 'ecg-artifact': return `${p.ecgBpm} bpm`;
+    case '50hz': return `${p.lineFreq} Hz${s.filters?.notchHz === p.lineFreq ? ', notched' : ''}`;
+    default: return '';
+  }
+}
+
 type EEGCanvasProps = {
   montage: Montage;
   settings: SimSettings;
   activeEffectsLabel: string;
   theme: EEGTheme;
   showAnnotations: boolean;
+  /** The list of artifacts at the top right, each marked on now or resting (separate from the trace's arrows). */
+  showArtifactList: boolean;
   isFrozen: boolean;
   setIsFrozen: (b: boolean) => void;
   dataBuffer: React.MutableRefObject<number[][]>;
@@ -79,7 +106,7 @@ function lowerBound(arr: number[], value: number): number {
 
 export function EEGCanvas({
   montage, settings, activeEffectsLabel,
-  theme, showAnnotations, isFrozen, setIsFrozen,
+  theme, showAnnotations, showArtifactList, isFrozen, setIsFrozen,
   dataBuffer, timeBuffer, graphHover = true
 }: EEGCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -95,6 +122,8 @@ export function EEGCanvas({
   themeRef.current = THEMES[theme];
   const annotationsRef = useRef(showAnnotations);
   annotationsRef.current = showAnnotations;
+  const artifactListRef = useRef(showArtifactList);
+  artifactListRef.current = showArtifactList;
   const frozenRef = useRef(isFrozen);
   frozenRef.current = isFrozen;
 
@@ -213,6 +242,7 @@ export function EEGCanvas({
           }
           // `next()` reuses its return object, so keep a copy.
           rawFrames.current.push({ ...allV });
+          liveArtifacts.current = simSource.groundTruth.live;
           for (let i = 0; i < montage.channels.length; i++) {
             if (!dataBuffer.current[i]) dataBuffer.current[i] = [];
             dataBuffer.current[i].push(computeChannelVoltage(montage.channels[i], lastT, allV, avgRef));
@@ -365,7 +395,8 @@ export function EEGCanvas({
         const ch      = montage.channels[i];
         const data    = dataBuffer.current[i] ?? [];
         const centerY = row.centerFrac * h;
-        const isECG   = ch.active === 'ECG';
+        // ECG and Resp: recorded channels in display units, not microvolts (isAux).
+        const isECG   = isAux(ch);
         const isHighlighted = highlightedChannels.has(i);
         const dimmed  = anyHighlight && !isHighlighted;
 
@@ -660,6 +691,36 @@ export function EEGCanvas({
           ctx.fillStyle = currentTheme.overlayText;
           ctx.fillText(text, w - 12, py);
           py += 19;
+        }
+        // The artifacts switched on, each with a dot: solid while it is active now,
+        // hollow while a recording level rests it (a muscle episode over, a quiet
+        // stretch, the tubing just suctioned), and what it is doing where that moves.
+        if (artifactListRef.current) {
+          const live = liveArtifacts.current;
+          py += pageLabels.length ? 4 : 0;
+          for (const id of ARTIFACT_IDS) {
+            if (!currentSettings.activePatterns.has(id)) continue;
+            if (py > h - 40) break;
+            const on = isLiveOn(id, live);
+            const detail = liveDetail(id, live, currentSettings);
+            const text = `${PATTERN_BY_ID[id]?.name ?? id}${detail ? ` — ${detail}` : ''}`;
+            ctx.font = '11px sans-serif';
+            const textW = ctx.measureText(text).width;
+            const x1 = w - 12, x0 = x1 - textW - 22;
+            ctx.fillStyle = currentTheme.overlayBg;
+            ctx.fillRect(x0, py - 2, textW + 22, 16);
+            ctx.fillStyle = PATTERN_COLOR[id] ?? currentTheme.overlayText;
+            ctx.strokeStyle = PATTERN_COLOR[id] ?? currentTheme.overlayText;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.arc(x0 + 9, py + 6, 3.6, 0, Math.PI * 2);
+            if (on) ctx.fill(); else ctx.stroke();
+            ctx.globalAlpha = on ? 1 : 0.55;
+            ctx.fillStyle = currentTheme.overlayText;
+            ctx.fillText(text, x1, py);
+            ctx.globalAlpha = 1;
+            py += 18;
+          }
         }
       }
 

@@ -140,6 +140,14 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
     summary: 'Rare, very large broadband transients from head or body movement, 0.2-1 s, frontally predominant, often driving several channels off-scale at once, with no consistent shape and no smooth field.',
     seenIn: 'Wakefulness and arousals from sleep. Its size, chaos and lack of a field mark it as artifact; a video or technologist note confirms it.',
   },
+  'respiration': {
+    summary: 'Slow waves in time with breathing, from the breathing movements changing the impedance of usually one electrode: one smooth wave per breath on that electrode, a little on its neighbours, and nothing elsewhere. A second kind is a sharp wave at each inspiration on the electrodes the patient is lying on. It is confirmed against a respiration channel (the Resp row), as cardiac artifact is confirmed against the ECG.',
+    seenIn: 'Any state, most often in a patient lying still in bed — an intensive care patient, a sleeper. Re-securing the electrode or moving the head off it removes it.',
+  },
+  'ventilator': {
+    summary: 'On a mechanical ventilator, breathing is exactly regular at the set rate, and water condensed in the tubing can give a burst at every breath: about a second long, identical in shape each time, often waxing then waning, larger on the side the ventilator and its tubing are on. It can look like epileptiform bursts or periodic discharges.',
+    seenIn: 'Intubated, ventilated patients in intensive care. Its perfect regularity, identical shape and lock to the ventilator breaths (the Resp row) mark it as artifact; suctioning the tubing takes it away until water builds up again.',
+  },
   '50hz': {
     summary: 'Mains (AC line) interference: very fast, monotonous activity at the mains frequency — 50 Hz in India, Britain and most of the world, 60 Hz in the Americas. It shows where a contact is poor: as a solid band on the two rows that share one poorly connected electrode, or, with many poor contacts (a hastily applied or dry-electrode cap), as fuzz that grows towards the back of the head. The notch filter in the top bar removes it.',
     seenIn: 'Any state, near electrical equipment or with high electrode impedance. It is not biological. Re-gelling the electrode is the fix; the notch is kept off by default and used only when that fails, because it can distort or blunt spikes.',

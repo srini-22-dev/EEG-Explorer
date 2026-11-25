@@ -28,6 +28,10 @@ import {
 import { defectLineMultiplier, type ChannelDefect, type RecordingChain } from './chain';
 import { deriveSeed } from './rng';
 import { ConditionsDirector } from './conditions';
+import {
+  BreathingArtifact, WaterInTubing, contactCoupling, tubingCoupling, BREATHING_WAVE_UV, BREATHING_SHARP_UV,
+  WAVE_S, BURST_S, WATER_UV, type RespirationGenerator,
+} from './breathing';
 import type { VigilanceGains } from './state';
 import type { SubjectParams } from './subject';
 import { NO_FIELDS, type MarkBook, type MarkFields } from './marks';
@@ -46,6 +50,31 @@ import { POP_TARGET_ANY } from '../utils/simTypes';
  * existing construction, including `validateEngine.ts` — sees the engine's
  * previous always-on artifact behaviour unchanged.
  */
+/**
+ * The artifacts as they are this moment, for the controls to follow (owner,
+ * 2026-11-25: "visually see artifacts being turned on and off, and options turning
+ * on and off, and sliders moving around"). Under a recording level the director
+ * moves these; under Custom they are the settings. Read, never written, by the app.
+ */
+export type LiveArtifacts = {
+  /** A recording level is driving the artifacts (not Custom). */
+  level: boolean;
+  /** A muscle episode is under way. */
+  emgOn: boolean;
+  /** The muscles this episode contracts, or null between episodes. */
+  emgRegions: EmgRegion[] | null;
+  /** Muscle severity in effect: the setting times this episode's strength. */
+  emgSeverity: number;
+  /** Blink and saccade rates in effect, a minute. */
+  blinkRate: number;
+  saccadeRate: number;
+  /** An activity stretch is under way (movement comes now), and the movement rate in effect. */
+  movementActive: boolean;
+  movementRate: number;
+  /** Water in the ventilator tubing, 0 (just suctioned) to 1. */
+  tubingWater: number;
+};
+
 export type ArtifactGates = {
   /** Corneo-retinal blink deflection at the ocular sources. */
   blink: boolean;
@@ -88,6 +117,10 @@ export type ArtifactGates = {
   ecgScalp: boolean;
   /** Large, rare mechanical movement transients. */
   movement: boolean;
+  /** Breathing artifact at a contact, in time with the Resp row (IK-049). */
+  respiration: boolean;
+  /** On a mechanical ventilator: breathing exactly regular, and water in the tubing (IK-050). */
+  ventilator: boolean;
 };
 
 // Orbicularis oculi EMG during a blink, microvolts of shot noise (RMS) at each orbit
@@ -148,6 +181,8 @@ type LayerOptions = {
   defects: ChannelDefect[];
   /** The one heart; its rate is an artifact setting (ecgBpm). */
   ecg: EcgGenerator;
+  /** The breathing; the ventilator sets its rate (setVentilator). */
+  resp: RespirationGenerator;
   /** The scalp field of weighted leadfield columns (EegEngine.fieldOf). */
   fieldOf: (sources: [index: number, weight: number][]) => Record<string, number>;
   /** One unit field per electrode, for a mark on a single channel. */
@@ -164,6 +199,7 @@ export class ArtifactLayer {
   private readonly chain: RecordingChain | null;
   private readonly defects: ChannelDefect[];
   private readonly ecg: EcgGenerator;
+  private readonly resp: RespirationGenerator;
   private readonly fieldOf: LayerOptions['fieldOf'];
   private readonly marks: MarkBook;
 
@@ -181,6 +217,8 @@ export class ArtifactLayer {
   private sweat: SweatGenerator | null = null;
   private line: LineNoiseGenerator | null = null;
   private movement: MovementGenerator | null = null;
+  private breathing: BreathingArtifact | null = null;
+  private water: WaterInTubing | null = null;
 
   // Defaults for a standalone engine (validation, scripts). The app never relies on
   // them: SimulationSource sets every gate from the toggles on every sample.
@@ -191,6 +229,9 @@ export class ArtifactLayer {
   gates: ArtifactGates = {
     blink: true, eyeOpening: false, saccade: true, flutter: false, emg: true, pop: true, defects: true,
     sweat: true, line: true, ecgScalp: true, movement: true,
+    // Off unless asked for: added after every check had been written against a record
+    // without them, which stays the record a standalone engine draws.
+    respiration: false, ventilator: false,
   };
   // Whether setGates has been called yet (see there).
   private gatesSet = false;
@@ -234,6 +275,7 @@ export class ArtifactLayer {
     this.chain = o.chain;
     this.defects = o.defects;
     this.ecg = o.ecg;
+    this.resp = o.resp;
     this.fieldOf = o.fieldOf;
     this.marks = o.marks;
     const S = this.subject;
@@ -254,6 +296,9 @@ export class ArtifactLayer {
       this.sweat = new SweatGenerator(A.sweat, this.dt);
       this.line = new LineNoiseGenerator(A.line, this.dt, S.lineFreq);
       this.movement = new MovementGenerator(A.movement, this.dt, 90 / b);
+      // Own streams, so adding them left every subject's other artifacts unchanged.
+      this.breathing = new BreathingArtifact(deriveSeed(o.seed, 'breathingArtifact'), this.dt);
+      this.water = new WaterInTubing(deriveSeed(o.seed, 'waterInTubing'), this.dt);
     }
 
     // What each artifact looks like across the head, for the annotation arrows.
@@ -296,6 +341,11 @@ export class ArtifactLayer {
   // Recording conditions (top bar): what the patient does over time. Null for `none`
   // (Custom), which leaves every generator exactly as it was before levels existed.
   private director: ConditionsDirector | null = null;
+  /** What the artifacts are doing now (see LiveArtifacts); updated in place every sample. */
+  readonly live: LiveArtifacts = {
+    level: false, emgOn: false, emgRegions: null, emgSeverity: 1, blinkRate: 16, saccadeRate: 25,
+    movementActive: true, movementRate: 0.7, tubingWater: 1,
+  };
   private conditionLevel: ConditionLevel = 'none';
   // The muscles of the current episode that the Muscle toggle's own region choice
   // allows, cached on both references so the mark's field is not rebuilt per sample.
@@ -388,7 +438,7 @@ export class ArtifactLayer {
     // Under a recording level, muscle comes in episodes, each contracting its own
     // muscles — those of them the toggle's region choice allows.
     const regions = dir?.emgRegions ? this.regionsOfEpisode(dir.emgRegions, p.emgRegions) : p.emgRegions;
-    const emgEnv = dir ? dir.emg : 1;
+    const emgEnv = dir ? dir.emg * dir.emgIntensity : 1;
     const on = (r: EmgRegion) => regions == null || regions.includes(r);
     const atonia = STATE_EMG_SCALE[state];
     const emgLV = this.emgL!.next(gains.emg) * 9 * gains.emg * emgSev * atonia;
@@ -409,6 +459,22 @@ export class ArtifactLayer {
     if (g.movement) eyes(mv);
     const lineRaw = this.line!.next();
     lineVal = g.line ? lineRaw : 0;
+
+    if (dir) {
+      // What the level is doing now, for the controls to show (LiveArtifacts).
+      const L = this.live;
+      L.level = true;
+      L.emgOn = dir.emg > 0;
+      L.emgRegions = regions ?? null;
+      L.emgSeverity = emgSev * dir.emgIntensity;
+      L.blinkRate = (p.blinkRatePerMin ?? 16) * dir.ocularRate;
+      L.saccadeRate = (p.saccadeRatePerMin ?? 25) * dir.ocularRate;
+      L.movementActive = !dir.hasActivity || dir.activityOn;
+      L.movementRate = (p.movementRatePerMin ?? 0.7) * dir.movementScale;
+    } else {
+      this.live.level = false;
+    }
+    this.live.tubingWater = this.water?.waterLevel ?? 1;
 
     if (marking) {
       const F = this.markField;
@@ -463,6 +529,48 @@ export class ArtifactLayer {
       const fresh = this.gates.pop && c >= 0 && c < out.length && Math.abs(popV) > Math.abs(this.prevPopV) + 1;
       this.marks.mark('electrode-pop', fresh, this.markField.pop[fresh ? c : 0], 0.3);
       this.prevPopV = popV;
+    }
+  }
+
+  // Lead couplings of the two contact artifacts, rebuilt when their settings change.
+  private breathKey = '';
+  private breathK: number[] = [];
+  private tubeKey = '';
+  private tubeK: number[] = [];
+  private lastSuctionNonce = 0;
+
+  /**
+   * Breathing artifact and water in the ventilator tubing (breathing.ts): at the
+   * contacts and leads, past the leadfield, like a pop. `inspiration` is true on the
+   * sample a breath begins (RespirationGenerator).
+   */
+  addContact(out: Float64Array, inspiration: boolean, marking: boolean) {
+    if (!this.breathing) return;
+    const g = this.gates, p = this.aparams;
+    this.resp.setVentilator(g.ventilator ? (p.ventRatePerMin ?? 16) : null);
+    const form = p.respirationForm ?? 'electrode';
+    const centre = form === 'lying' ? ['O1', 'O2'] : [p.respirationElectrode ?? 'P4'];
+    const bk = centre.join();
+    if (bk !== this.breathKey) { this.breathK = contactCoupling(this.electrodes, centre); this.breathKey = bk; }
+    const side = p.ventSide ?? 'left';
+    if (side !== this.tubeKey) { this.tubeK = tubingCoupling(this.seed, this.electrodes, side); this.tubeKey = side; }
+
+    const w = this.breathing.next(inspiration, form);
+    if (g.respiration && w !== 0) for (let c = 0; c < out.length; c++) out[c] += w * this.breathK[c];
+    const b = this.water!.next(inspiration && g.ventilator);
+    if (g.ventilator && b !== 0) for (let c = 0; c < out.length; c++) out[c] += b * this.tubeK[c];
+
+    if (marking) {
+      const uv = (k: number[], amp: number) => [Object.fromEntries(this.electrodes.map((e, c) => [e, k[c] * amp]))];
+      if (g.respiration && this.breathing.started) {
+        this.marks.push({
+          id: 'respiration', inUv: true, dur: form === 'lying' ? 0.16 : WAVE_S,
+          fields: uv(this.breathK, form === 'lying' ? BREATHING_SHARP_UV : BREATHING_WAVE_UV),
+        });
+      }
+      if (g.ventilator && this.water!.started) {
+        this.marks.push({ id: 'ventilator', inUv: true, dur: 0, span: BURST_S, fields: uv(this.tubeK, WATER_UV) });
+      }
     }
   }
 
@@ -583,6 +691,12 @@ export class ArtifactLayer {
       this.lastManualPopNonce = p.manualPopNonce;
       const ch = !p.popTarget || p.popTarget === POP_TARGET_ANY ? -1 : indexOf(p.popTarget);
       this.pop?.trigger(ch);
+    }
+
+    // "Suction the tubing": a moment, like a manual pop, delivered as a rising counter.
+    if (p.suctionNonce != null && p.suctionNonce !== this.lastSuctionNonce) {
+      this.lastSuctionNonce = p.suctionNonce;
+      this.water?.suction();
     }
 
     // Detachment is declarative: this list is the set of electrodes currently

@@ -12,8 +12,10 @@
 import React from 'react';
 import { Label } from '@/components/ui/label';
 import type { ArtifactParams, EmgRegion } from '../utils/simTypes';
+import type { LiveArtifacts } from '../engine/engine';
 import { POP_TARGET_ANY } from '../utils/simTypes';
 import { electrodePositions3D } from '../utils/electrodePositions3D';
+import { ALL_ELECTRODES } from '../utils/montages';
 
 /** Same list the leadfield is built from, so every selectable electrode exists in the engine. */
 const ELECTRODES = Object.keys(electrodePositions3D);
@@ -28,22 +30,26 @@ const EMG_REGIONS: { id: EmgRegion; label: string; hint: string }[] = [
 const LABEL_CLASS = 'text-[10px] text-slate-500 uppercase tracking-wider';
 
 function Slider({
-  label, value, min, max, step, unit, onChange, disabled = false, offAtMin = false,
+  label, value, min, max, step, unit, onChange, disabled = false, offAtMin = false, live,
 }: {
   label: string; value: number; min: number; max: number; step: number;
   unit: string; onChange: (v: number) => void; disabled?: boolean; offAtMin?: boolean;
+  /** The value in effect now, when a recording level moves it: the thumb follows it, and the setting is shown beside it. */
+  live?: number;
 }) {
+  const fmt = (v: number) => `${step < 1 ? v.toFixed(step < 0.1 ? 2 : 1) : Math.round(v)}${unit}`;
+  const shown = live != null ? Math.min(max, Math.max(min, live)) : value;
   return (
     <div className={`space-y-1 ${disabled ? 'opacity-40' : ''}`}>
       <div className="flex justify-between items-center">
         <Label className={LABEL_CLASS}>{label}</Label>
         <span className="text-[10px] font-mono text-orange-400">
           {offAtMin && value <= min ? 'off'
-            : `${step < 1 ? value.toFixed(step < 0.1 ? 2 : 1) : Math.round(value)}${unit}`}
+            : live != null ? <>{fmt(live)} <span className="text-slate-500">now · set {fmt(value)}</span></> : fmt(value)}
         </span>
       </div>
       <input
-        type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+        type="range" min={min} max={max} step={step} value={shown} disabled={disabled}
         onChange={e => onChange(parseFloat(e.target.value))}
         className="w-full accent-orange-500 disabled:cursor-not-allowed"
       />
@@ -53,16 +59,22 @@ function Slider({
 
 /** A small pressed/unpressed button, used for the multi-select and enum controls. */
 function Chip({
-  on, label, title, onClick,
-}: { on: boolean; label: string; title?: string; onClick: () => void }) {
+  on, label, title, onClick, resting = false,
+}: {
+  on: boolean; label: string; title?: string; onClick: () => void;
+  /** Selected, but not active this moment (a recording level's muscle episode uses others, or none). */
+  resting?: boolean;
+}) {
   return (
     <button
       onClick={onClick}
       title={title}
-      className={`flex-1 py-1 px-1 rounded text-[10px] font-mono border transition-colors ${
-        on
-          ? 'bg-orange-800/40 border-orange-600 text-orange-300'
-          : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+      className={`flex-1 py-1 px-1 rounded text-[10px] font-mono border transition-colors duration-300 ${
+        on && resting
+          ? 'border-orange-800 border-dashed text-orange-300/50'
+          : on
+            ? 'bg-orange-800/40 border-orange-600 text-orange-300'
+            : 'border-slate-700 text-slate-500 hover:bg-slate-800'
       }`}
     >
       {label}
@@ -71,12 +83,15 @@ function Chip({
 }
 
 export function ArtifactControls({
-  id, params, update,
+  id, params, update, live = null,
 }: {
   id: string;
   params: ArtifactParams;
   update: (patch: Partial<ArtifactParams>) => void;
+  /** What the artifacts are doing now; under a recording level the controls follow it. */
+  live?: LiveArtifacts | null;
 }) {
+  const lv = live?.level ? live : null;
   const wrap = (children: React.ReactNode) => (
     <div className="pt-2 pb-1 pl-1 space-y-2">{children}</div>
   );
@@ -86,6 +101,7 @@ export function ArtifactControls({
       return wrap(
         <Slider
           label="Blink rate" value={params.blinkRatePerMin} min={2} max={40} step={1} unit="/min"
+          live={lv?.blinkRate}
           onChange={v => update({ blinkRatePerMin: v })}
         />,
       );
@@ -94,6 +110,7 @@ export function ArtifactControls({
       return wrap(
         <Slider
           label="Saccade rate" value={params.saccadeRatePerMin} min={4} max={60} step={1} unit="/min"
+          live={lv?.saccadeRate}
           onChange={v => update({ saccadeRatePerMin: v })}
         />,
       );
@@ -112,6 +129,7 @@ export function ArtifactControls({
               {EMG_REGIONS.map(r => (
                 <Chip
                   key={r.id} on={regions.includes(r.id)} label={r.label} title={r.hint}
+                  resting={!!lv && !(lv.emgOn && !!lv.emgRegions?.includes(r.id))}
                   onClick={() => toggleRegion(r.id)}
                 />
               ))}
@@ -119,6 +137,7 @@ export function ArtifactControls({
           </div>
           <Slider
             label="Severity" value={params.emgSeverity} min={0.25} max={3} step={0.05} unit="×"
+            live={lv ? (lv.emgOn ? lv.emgSeverity : 0.25) : undefined}
             onChange={v => update({ emgSeverity: v })}
           />
           {regions.length === 0 && (
@@ -253,12 +272,70 @@ export function ArtifactControls({
         <>
           <Slider
             label="Rate" value={params.movementRatePerMin} min={0.1} max={4} step={0.1} unit="/min"
+            live={lv?.movementRate}
             onChange={v => update({ movementRatePerMin: v })}
           />
           <Slider
             label="Severity" value={params.movementSeverity} min={0.25} max={3} step={0.05} unit="×"
             onChange={v => update({ movementSeverity: v })}
           />
+        </>,
+      );
+
+    case 'respiration':
+      return wrap(
+        <>
+          <div className="space-y-1">
+            <Label className={LABEL_CLASS}>Form</Label>
+            <div className="flex gap-1">
+              {(['electrode', 'lying'] as const).map(f => (
+                <Chip
+                  key={f} on={params.respirationForm === f} label={f === 'electrode' ? 'One electrode' : 'Lying on'}
+                  title={f === 'electrode'
+                    ? 'A smooth wave per breath on one electrode whose contact the breathing moves'
+                    : 'A sharp wave at each inspiration on the electrodes the head rests on (O1/O2, supine)'}
+                  onClick={() => update({ respirationForm: f })}
+                />
+              ))}
+            </div>
+          </div>
+          {params.respirationForm === 'electrode' && (
+            <div className="space-y-1">
+              <Label className={LABEL_CLASS}>Electrode</Label>
+              <select
+                value={params.respirationElectrode}
+                onChange={e => update({ respirationElectrode: e.target.value })}
+                className="w-full py-1 px-1.5 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-slate-200">
+                {ALL_ELECTRODES.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
+          )}
+        </>,
+      );
+
+    case 'ventilator':
+      return wrap(
+        <>
+          <Slider
+            label="Ventilator rate" value={params.ventRatePerMin} min={8} max={30} step={1} unit="/min"
+            onChange={v => update({ ventRatePerMin: v })}
+          />
+          <div className="space-y-1">
+            <Label className={LABEL_CLASS}>Ventilator side</Label>
+            <div className="flex gap-1">
+              {(['left', 'right'] as const).map(sd => (
+                <Chip key={sd} on={params.ventSide === sd} label={sd === 'left' ? 'Left' : 'Right'}
+                  title={`Ventilator and tubing on the patient's ${sd}: the bursts are larger on that side`}
+                  onClick={() => update({ ventSide: sd })} />
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={() => update({ suctionNonce: params.suctionNonce + 1 })}
+            title="Suction the water out of the tubing: the bursts stop until it builds up again"
+            className="w-full py-1 rounded text-[11px] font-semibold border border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700">
+            Suction the tubing
+          </button>
         </>,
       );
 

@@ -7,7 +7,7 @@ This file is not documentation of how the code works — the engine source (`src
 that. This is a list of things that must remain **true of the output**, whatever the
 implementation happens to be.
 
-> **48 entries · highest ID `IK-048` · 45 enforced by an automated check, 3 unverified in code.**
+> **50 entries · highest ID `IK-050` · 45 enforced by an automated check, 5 unverified in code.**
 
 ---
 
@@ -1056,6 +1056,74 @@ sleep laboratory, "Filter characteristics": "Notch filter for 50-Hz-rejection ..
 41 and 59 Hz"); refreshed 2026-11-25 when the notch was widened to it from an unsourced Q 30.
 Approved by the user 2026-11-23; the
 many-contacts addition approved 2026-11-25.
+
+### IK-049 — Breathing artifact keeps time with the respiration channel
+
+**Claim.** Breathing gives slow, rhythmic waves in time with respiration, usually on one electrode,
+one smooth wave per breath. A second kind gives sharp waves at each inspiration on the electrodes
+the patient is lying on. Either kind lines up breath for breath with a respiration channel, which
+is how it is confirmed, as cardiac artifact is confirmed against the ECG.
+
+**Observable.** Toggle `respiration`, Resp row on, `reference-car`, three subjects. *One
+electrode* (the default, on P4): one wave per breath, each starting within 0.3 s of an inspiration
+onset on the Resp row; its channel's wave at least 3× that of any channel not next to it; the wave
+about twice its own channel's background, peak to peak (1.2–3; eegpedia figure about 2). *Lying
+on*: the two largest channels are O1 and O2. In both, the artifact's rate matches the Resp row's
+within 2%.
+
+**Mechanism.** *(non-binding)* Breathing moves the electrode or its lead and changes the contact's
+impedance; lying on an electrode presses it with each breath.
+
+**Check.** `validateEngine.ts` Step 29 — `check('respiration, one electrode: waves starting within
+0.3 s of a Resp-row inspiration, share, worst of 3', …)`, `check('respiration, one electrode: its
+channel / largest channel not next to it, smallest of 3', …)`, `check('respiration, one electrode:
+wave / its channel's own background, peak to peak, median of 3 (eegpedia figure: about 2)', …)`,
+`check('respiration, lying on: subjects whose two largest channels are O1 and O2', …)`,
+`check('respiration: artifact rate / Resp-row rate, worst of 3', …)`.
+
+**Status.** unverified in code · **Source.** eegpedia, "Breathing artifact" ("2 kinds of
+artifacts: Slow and rhythmic activity, synchronous with the body movements of respiration, due to
+mechanically affecting the impedance of usually one electrode. Sharp waves synchronously with
+inhalation or exhalation and involve the electrodes on which the patient is lying"), and its
+figure "Breathing artifact in P4 in a intubated comatose patient", read 2026-11-25: one smooth
+upward wave per breath on P4, a smaller one on T6, about twice the P4 row's own background; one
+figure, so a reading, not a range. The breathing rates (12–18 a minute), the I:E ratio of 1:2 and
+the breath-to-breath variation are the owner's settings. Approved by the user 2026-11-25.
+
+### IK-050 — Ventilator artifact is perfectly regular, and water in the tubing gives identical bursts
+
+**Claim.** On a mechanical ventilator, breathing artifact is exactly regular, at the ventilator's
+set rate. Water condensed in the tubing gives a burst at every ventilator breath, each of identical
+shape and length (about 1 s), often waxing then waning, larger on the side of the ventilator and
+its tubing. Suctioning the tubing takes them away for a while.
+
+**Observable.** Toggle `ventilator` (ventilator on the left), Resp row on, three subjects. The
+burst interval varies by under 1% and equals the set period; bursts last 0.7–1.3 s; successive
+bursts correlate at 0.9 or more on the channel they are largest on; the left channels are larger
+than the right; after *Suction the tubing*, no bursts for at least 30 s. The Resp row's breaths are
+as regular as the bursts.
+
+**Mechanism.** *(non-binding)* Water moving in the tubing makes a charge potential that couples
+into the electrode leads.
+
+**Check.** `validateEngine.ts` Step 29 — `check('ventilator: burst interval CV, worst of 3', …)`,
+`check('ventilator: mean burst interval / the set period, worst of 3', …)`, `check('ventilator:
+burst duration, median of 3', …)`, `check('ventilator: correlation of successive bursts on the
+largest channel, smallest of 3', …)`, `check('ventilator: left / right channels, ventilator on the
+left, smallest of 3', …)`, `check('ventilator: bursts in the 30 s after suctioning', …)`,
+`check('ventilator: Resp-row breath interval CV, worst of 3', …)`.
+
+**Status.** unverified in code · **Source.** Villamar & Albuja, "'Water in the Tube' Artifact
+Mimicking Epileptiform Abnormalities on Point-of-Care EEG", Neurohospitalist 2022;12(3):581
+(PMC9214931): bursts "had identical morphology and duration, and occurred at regular intervals",
+"every ∼2.5 seconds", each "approximately 1 second", "higher amplitude over the left hemisphere"
+with the ventilator on the patient's left; clues are "its regularity and monomorphic appearance,
+which often follows a crescendo-and-decrescendo pattern"; it "typically improves or disappears
+after suctioning". NeuroWiki, "Continuous EEG in the ICU": ventilator artifact is "rhythmic at
+ventilator rate". The burst's size against the background and its inner rhythm (sharp activity
+at 10–15 Hz; the source says only "polysharp/polyspike" and "paroxysmal fast activity") are the
+owner's choice, as are the default rate (16 a minute) and the 90 s for the water to come back.
+Approved by the user 2026-11-25.
 
 ## 5. Normal variants
 

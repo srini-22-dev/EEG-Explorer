@@ -21,7 +21,7 @@ import { defaultArtifactParams, type ArtifactParams, type ConditionLevel } from 
 /** The toggles a level decides. Eye flutter and eye opening are left to the reader: a finding and a command manoeuvre, not the setting. */
 export const CONDITION_TOGGLES = [
   'blink', 'eye-movement', 'muscle', 'chewing', 'ecg-artifact', 'electrode-pop', 'bad-electrodes',
-  'sweat', 'movement', '50hz',
+  'sweat', 'movement', '50hz', 'respiration', 'ventilator',
 ] as const;
 
 export type ConditionScope = {
@@ -38,6 +38,8 @@ type Recipe = {
   toggles: (typeof CONDITION_TOGGLES)[number][];
   params: Partial<ArtifactParams>;
   scope: ConditionScope;
+  /** Show the Resp row (IK-049) when the level is chosen; omitted leaves it as it is. */
+  showResp?: boolean;
 };
 
 export const CONDITION_LEVELS: ConditionLevel[] = ['none', 'ideal', 'controlled', 'routine', 'ambulatory', 'icu', 'worst'];
@@ -114,14 +116,16 @@ export const RECIPES: Record<ConditionLevel, Recipe> = {
   // and the point of this level is a background the notch has to rescue (Step 29).
   icu: {
     name: 'ICU bedside',
-    toggles: ['muscle', 'ecg-artifact', 'electrode-pop', 'bad-electrodes', '50hz', 'sweat', 'movement'],
+    toggles: ['muscle', 'ecg-artifact', 'electrode-pop', 'bad-electrodes', '50hz', 'sweat', 'movement', 'respiration', 'ventilator'],
+    showResp: true,
     params: {
+      respirationForm: 'electrode', respirationElectrode: 'P4', ventRatePerMin: 16, ventSide: 'left',
       emgSeverity: 1.3, emgRegions: ['temporalisL', 'temporalisR', 'frontalis', 'nuchal'],
       ecgBpm: 96, popRatePerMin: 1.5, lineAmpUv: 15, mainsContacts: 'many', sweatSeverity: 1.5, movementRatePerMin: 0.6,
     },
     scope: {
       setting: 'Continuous monitoring at the ICU bedside: a sedated, ventilated patient, surrounded by equipment, with electrodes on for days.',
-      appears: 'Mains over many contacts, worst at the back of the head, large enough to bury the background (try the 50 Hz notch). A prominent ECG, bad and popping electrodes, sweat, and stretches of movement during nursing care. Muscle only in brief bouts of agitation; no blinks.',
+      appears: 'Mains over many contacts, worst at the back of the head, large enough to bury the background (try the 50 Hz notch). The ventilator: breathing locked to its rate on the Resp row, a slow wave per breath at one contact, and bursts from water in the tubing (try suctioning it). A prominent ECG, bad and popping electrodes, sweat, and stretches of movement during nursing care. Muscle only in brief bouts of agitation; no blinks.',
       learn: 'Why the notch filter exists, and how much of an ICU record is the room rather than the brain.',
     },
   },
@@ -158,7 +162,7 @@ function fits(s: ToggleState, id: string): boolean {
  * deliberate actions — electrodes detached, the manual-pop counter — are kept.
  */
 export function applyLevel(level: ConditionLevel, s: ToggleState, params: ArtifactParams):
-  { toggles: ToggleState; params: ArtifactParams; applied: AppliedLevel } {
+  { toggles: ToggleState; params: ArtifactParams; applied: AppliedLevel; showResp?: boolean } {
   const recipe = RECIPES[level];
   let t = s;
   if (level !== 'none') {
@@ -167,9 +171,9 @@ export function applyLevel(level: ConditionLevel, s: ToggleState, params: Artifa
   }
   const next: ArtifactParams = level === 'none' ? params : {
     ...defaultArtifactParams(), ...recipe.params,
-    manualPopNonce: params.manualPopNonce, detachedElectrodes: params.detachedElectrodes,
+    manualPopNonce: params.manualPopNonce, suctionNonce: params.suctionNonce, detachedElectrodes: params.detachedElectrodes,
   };
-  return { toggles: t, params: next, applied: { level, on: onConditionToggles(t), params: recipe.params } };
+  return { toggles: t, params: next, applied: { level, on: onConditionToggles(t), params: recipe.params }, showResp: recipe.showResp };
 }
 
 const onConditionToggles = (s: ToggleState) => CONDITION_TOGGLES.filter(id => effective(s).has(id));

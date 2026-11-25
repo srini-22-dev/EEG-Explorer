@@ -2,7 +2,7 @@ import React, { useMemo, useEffect, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { Montage, GROUP_COLORS } from '../utils/montages';
+import { Montage, GROUP_COLORS, isAux } from '../utils/montages';
 import { electrodePositions3D } from '../utils/electrodePositions3D';
 import {
   subscribe,
@@ -283,7 +283,7 @@ function ElectrodeMarkers({
     const m = new Map<string, string>();
     montage.channels.forEach(ch => {
       const color = GROUP_COLORS[ch.group] || '#4ade80';
-      if (ch.active && ch.active !== 'ECG' && !m.has(ch.active)) m.set(ch.active, color);
+      if (ch.active && !isAux(ch) && !m.has(ch.active)) m.set(ch.active, color);
       if (ch.reference && ch.reference !== 'AVG' && ch.reference !== 'CONTRA' && ch.reference !== 'IPSI' && !m.has(ch.reference)) {
         m.set(ch.reference, color);
       }
@@ -357,7 +357,7 @@ function MontageEdges({
   return (
     <group>
       {montage.channels.map((ch, i) => {
-        if (!ch.active || ch.active === 'ECG') return null;
+        if (!ch.active || isAux(ch)) return null;
 
         const isChannelActive = activeChannels.has(i);
         const isElectrodeActive = (ch.active && activeElectrodes.has(ch.active as string)) || (ch.reference && activeElectrodes.has(ch.reference as string));

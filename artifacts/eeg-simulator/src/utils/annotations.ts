@@ -64,6 +64,8 @@ export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   'sweat':        { patternId: 'sweat',        targetRegion: 'all',          text: 'Sweat: very slow (<0.5 Hz) frontal baseline drift' },
   'ecg-artifact': { patternId: 'ecg-artifact', targetRegion: 'all',          text: 'ECG: regular QRS ~1 Hz; line it up against the ECG trace' },
   'movement':     { patternId: 'movement',     targetRegion: 'all',          text: 'Movement: large broadband transients, frontal, often off-scale' },
+  'respiration':  { patternId: 'respiration',  targetRegion: 'all',          text: 'Breathing: one slow wave per breath at one contact; line it up against the Resp row' },
+  'ventilator':   { patternId: 'ventilator',   targetRegion: 'all',          text: 'Ventilator: identical ~1 s bursts at every breath, perfectly regular (water in the tubing)' },
   '50hz':         { patternId: '50hz',         targetRegion: 'all',          text: 'Mains: very fast monotonous 50/60 Hz, worst on rows of a poor contact' },
 
   // ── Non-epileptiform abnormalities ──────────────────────────────────────

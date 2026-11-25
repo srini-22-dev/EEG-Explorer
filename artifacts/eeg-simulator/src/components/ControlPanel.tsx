@@ -10,6 +10,8 @@ import { POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } from '../utils/simTypes
 import { ICTAL_TOGGLE_IDS } from '../utils/simTypes';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { ArtifactControls } from './ArtifactControls';
+import { isLiveOn } from '../utils/liveArtifacts';
+import type { LiveArtifacts } from '../engine/engine';
 import { INFO_TRIGGER_ATTR } from './InfoPanel';
 import { EEGTheme } from '../utils/themes';
 import { exportCSV, exportScreenshot } from '../utils/exportUtils';
@@ -37,6 +39,9 @@ type Props = {
   theme: EEGTheme;
   setTheme: (t: EEGTheme) => void;
   showAnnotations: boolean;
+  showArtifactList: boolean; setShowArtifactList: (v: boolean) => void;
+  /** What the artifacts are doing now (a recording level moves the controls with it), or null. */
+  live: LiveArtifacts | null;
   setShowAnnotations: (b: boolean) => void;
   graphHover: boolean;
   setGraphHover: (b: boolean) => void;
@@ -81,7 +86,7 @@ export function ControlPanel({
   headOpacity = 0.3, setHeadOpacity,
   brainOpacity = 0.8, setBrainOpacity,
   theme, setTheme,
-  showAnnotations, setShowAnnotations,
+  showAnnotations, setShowAnnotations, showArtifactList, setShowArtifactList, live,
   graphHover, setGraphHover,
   showSpectrum, setShowSpectrum,
   showRightSpectrum, setShowRightSpectrum,
@@ -255,9 +260,11 @@ export function ControlPanel({
                             <div className="flex items-center gap-2 min-w-0">
                               <Switch
                                 id={`pat-${p.id}`}
-                                checked={on}
+                                checked={on && isLiveOn(p.id, live)}
                                 onCheckedChange={() => togglePattern(p.id)}
-                                className="data-[state=checked]:bg-emerald-600 flex-shrink-0 scale-90"
+                                title={on && !isLiveOn(p.id, live) ? 'On, resting now: the recording level brings it back' : undefined}
+                                className={`data-[state=checked]:bg-emerald-600 flex-shrink-0 scale-90 transition-colors duration-300 ${
+                                  on && !isLiveOn(p.id, live) ? 'ring-1 ring-emerald-600' : ''}`}
                               />
                               <Label
                                 htmlFor={`pat-${p.id}`}
@@ -476,6 +483,7 @@ export function ControlPanel({
                               id={p.id}
                               params={artifactParams}
                               update={updateArtifactParams}
+                              live={live}
                             />
                           )}
                         </div>
@@ -553,8 +561,13 @@ export function ControlPanel({
           </div>
 
           <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Show Annotations</Label>
+            <Label className="text-xs text-slate-300">Annotations on the trace</Label>
             <Switch checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Artifact list (top right)</Label>
+            <Switch checked={showArtifactList} onCheckedChange={setShowArtifactList} className="scale-90 data-[state=checked]:bg-emerald-600" />
           </div>
 
           <div className="flex items-center justify-between">

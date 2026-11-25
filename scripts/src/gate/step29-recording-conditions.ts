@@ -6,6 +6,7 @@ import { commonAverage, computeChannelVoltage } from '../../../artifacts/eeg-sim
 import { markRowSizes, markRows } from '../../../artifacts/eeg-simulator/src/utils/markRows';
 import { initialToggles, effective, switchOff, switchOn, type ToggleState } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { applyLevel, CONDITION_LEVELS, CONDITION_TOGGLES, RECIPES } from '../../../artifacts/eeg-simulator/src/utils/recordingConditions';
+import { contactCoupling } from '../../../artifacts/eeg-simulator/src/engine/breathing';
 import { FS, check, section, step } from './harness';
 
 // ===========================================================================
@@ -146,11 +147,15 @@ section('\nICU bedside: mains buries the back of the head, and the notch gives i
     const on = run('icu', effective(toggles), params, SECS, seed), off = run('icu', without, params, SECS, seed);
     const onN = run('icu', effective(toggles), params, SECS, seed, 'bipolar-ap', true);
     const offN = run('icu', without, params, SECS, seed, 'bipolar-ap', true);
+    // The background the mains buries is the patient's own record, not the other
+    // artifacts: since the ventilator's bursts (2026-11-25) sit on the left occipital
+    // rows, measuring against everything else made the bursts the "background".
+    const clean = run('icu', effective(CONDITION_TOGGLES.reduce((t, id) => switchOff(t, id), toggles)), params, SECS, seed);
     const skip = 3 * FS; // the filters settled
     const rowsB: number[] = [], rowsL: number[] = [];
     on.chans.forEach((l, k) => {
       if (!occipital(l)) return;
-      const bg = p2p(off.data[k].slice(skip));
+      const bg = p2p(clean.data[k].slice(skip));
       rowsB.push(p2p(on.data[k].slice(skip).map((v, i) => v - off.data[k][i + skip])) / bg);
       rowsL.push(p2p(onN.data[k].slice(skip).map((v, i) => v - offN.data[k][i + skip])) / bg);
     });
@@ -173,8 +178,11 @@ section('\nEvery level annotates what it draws (each artifact\'s events under an
     let unmarked = 0, events = 0;
     for (const id of CONDITION_TOGGLES.filter((x) => page.has(x)) as string[]) {
       const on = run(level, page, params, SECS, 3), off = run(level, effective(switchOff(toggles, id)), params, SECS, 3);
-      const ids = new Set([id]);
-      const marks = on.marks.filter((m) => ids.has(m.id));
+      // The ventilator sets the breathing's timing, so switching it off moves every breath:
+      // the breathing artifact's waves, annotated under their own toggle in either run,
+      // are part of its difference too.
+      const ids = new Set(id === 'ventilator' ? [id, 'respiration'] : [id]);
+      const marks = [...on.marks, ...(id === 'ventilator' ? off.marks : [])].filter((m) => ids.has(m.id));
       const n = SECS * FS;
       // Stretches where this artifact moves any row by 2 mm (14 uV at 7 uV/mm), joined across 0.4 s gaps.
       const out: [number, number][] = [];
@@ -193,4 +201,140 @@ section('\nEvery level annotates what it draws (each artifact\'s events under an
     console.log(`  ${RECIPES[level].name}: ${events} events`);
     check(`by design, ${RECIPES[level].name}: artifact events with no arrow or box`, unmarked, 0, 0);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Breathing artifact (IK-049) and the ventilator (IK-050), against the Resp row.
+// ---------------------------------------------------------------------------
+
+/** A Custom page with these toggles: each referential channel, the Resp row, and the marks. */
+function runAux(patterns: string[], params: ArtifactParams, secs: number, seed: number,
+  atS?: { t: number; params: ArtifactParams }, montageId = 'reference-car') {
+  const montage = MONTAGES[montageId];
+  const chans = montage.channels.filter((c) => c.active !== 'ECG');
+  const key = (c: (typeof chans)[number]) => (montageId === 'reference-car' ? c.active : c.label);
+  let settings: SimSettings = {
+    speed: 30, sensitivity: 7, patientState: 'awake', activePatterns: new Set(patterns),
+    ictalParams: defaultIctalParamsMap(), artifactParams: params, filters: DEFAULT_FILTERS,
+  };
+  const src = new SimulationSource(seed, FS);
+  src.useAppMode();
+  const n = secs * FS;
+  const data: Record<string, Float64Array> = {};
+  for (const c of chans) data[key(c)] = new Float64Array(n);
+  const resp = new Float64Array(n);
+  const marks: { id: string; t: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    if (atS && i === atS.t * FS) settings = { ...settings, artifactParams: atS.params };
+    const v = src.next(settings);
+    const avg = commonAverage(v);
+    for (const c of chans) data[key(c)][i] = computeChannelVoltage(c, src.t, v, avg);
+    resp[i] = v['Resp'];
+    for (const m of src.groundTruth.marks) marks.push({ id: m.id, t: i / FS - (m.ago ?? 0) });
+  }
+  return { data, resp, marks };
+}
+
+/** Inspiration onsets on the Resp row, seconds: where the trace turns from falling to rising. */
+function inspirations(resp: Float64Array): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < resp.length - 1; i++) if (resp[i] <= resp[i - 1] && resp[i + 1] > resp[i]) out.push(i / FS);
+  return out;
+}
+const cv = (x: number[]) => {
+  const m = x.reduce((a, b) => a + b, 0) / x.length;
+  return Math.sqrt(x.reduce((a, b) => a + (b - m) ** 2, 0) / x.length) / m;
+};
+const diffs = (t: number[]) => t.slice(1).map((v, i) => v - t[i]);
+const pearson = (a: number[], b: number[]) => {
+  const ma = a.reduce((x, y) => x + y, 0) / a.length, mb = b.reduce((x, y) => x + y, 0) / b.length;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < a.length; i++) { sab += (a[i] - ma) * (b[i] - mb); saa += (a[i] - ma) ** 2; sbb += (b[i] - mb) ** 2; }
+  return sab / Math.sqrt(saa * sbb);
+};
+// The furthest from 1 of several ratios.
+const worstOf1 = (x: number[]) => x.reduce((w, r) => (Math.abs(r - 1) > Math.abs(w - 1) ? r : w), 1);
+
+section('\nBreathing artifact (IK-049): a wave per breath at one contact, on the Resp row inspirations:', () => {
+  const SECS = 60, skip = 3;
+  const base = defaultArtifactParams();
+  const matched: number[] = [], isolation: number[] = [], size: number[] = [], rate: number[] = [];
+  let lyingOk = 0;
+  for (const seed of SEEDS) {
+    const on = runAux(['respiration'], base, SECS, seed), off = runAux([], base, SECS, seed);
+    const tail = (e: string, x: { data: Record<string, Float64Array> }) => Array.from(x.data[e]).slice(skip * FS);
+    const contrib = (e: string) => tail(e, on).map((v, i) => v - tail(e, off)[i]);
+    // Wave onsets: the contribution passing a fifth of its largest, at least a second apart.
+    const d = contrib('P4');
+    const peak = Math.max(...d.map(Math.abs));
+    const onsets: number[] = [];
+    for (let i = 0; i < d.length; i++) {
+      const t = skip + i / FS;
+      if (Math.abs(d[i]) > 0.2 * peak && (onsets.length === 0 || t - onsets[onsets.length - 1] > 1)) onsets.push(t);
+    }
+    const insp = inspirations(on.resp);
+    matched.push(onsets.filter((t) => insp.some((s) => t - s >= 0 && t - s <= 0.3)).length / onsets.length);
+    const names = Object.keys(on.data);
+    const coupling = contactCoupling(names, ['P4']);
+    const far = names.filter((_, k) => coupling[k] === 0);
+    isolation.push(p2p(d) / Math.max(...far.map((e) => p2p(contrib(e)))));
+    size.push(p2p(d) / p2p(tail('P4', off)));
+    rate.push(onsets.length / insp.filter((t) => t >= skip).length);
+    // The second kind: on the electrodes lain on.
+    const lyingParams = { ...base, respirationForm: 'lying' as const };
+    const onL = runAux(['respiration'], lyingParams, 20, seed), offL = runAux([], lyingParams, 20, seed);
+    const sizes = names.map((e) => [e, p2p(Array.from(onL.data[e]).map((v, i) => v - offL.data[e][i]))] as const)
+      .sort((a, b) => b[1] - a[1]);
+    if (['O1', 'O2'].includes(sizes[0][0]) && ['O1', 'O2'].includes(sizes[1][0])) lyingOk++;
+  }
+  check('respiration, one electrode: waves starting within 0.3 s of a Resp-row inspiration, share, worst of 3', Math.min(...matched), 1, 1);
+  check('respiration, one electrode: its channel / largest channel not next to it, smallest of 3', Math.min(...isolation), 3, Infinity);
+  check("respiration, one electrode: wave / its channel's own background, peak to peak, median of 3 (eegpedia figure: about 2)", median(size), 1.2, 3);
+  check('respiration, lying on: subjects whose two largest channels are O1 and O2', lyingOk, 3, 3);
+  check('respiration: artifact rate / Resp-row rate, worst of 3', worstOf1(rate), 0.98, 1.02);
+});
+
+section('\nVentilator (IK-050): identical bursts at every breath, larger on its side, gone after suctioning:', () => {
+  const SECS = 60, skip = 3;
+  const base = { ...defaultArtifactParams(), ventSide: 'left' as const, ventRatePerMin: 16 };
+  const intervalCv: number[] = [], period: number[] = [], durations: number[] = [], corr: number[] = [], lr: number[] = [], respCv: number[] = [];
+  // Left and right chains on the double banana, as the source read it (a bipolar
+  // montage): on an average reference the field the leads share is taken out, and the
+  // left side's excess shows as an equal and opposite deflection on the right.
+  const LEFT = ['Fp1-F3', 'F3-C3', 'C3-P3', 'P3-O1', 'Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1'];
+  const RIGHT = ['Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2'];
+  for (const seed of SEEDS) {
+    const on = runAux(['ventilator'], base, SECS, seed), off = runAux([], base, SECS, seed);
+    const starts = on.marks.filter((m) => m.id === 'ventilator').map((m) => m.t).filter((t) => t >= skip);
+    const iv = diffs(starts);
+    intervalCv.push(cv(iv));
+    period.push((iv.reduce((a, b) => a + b, 0) / iv.length) / (60 / base.ventRatePerMin));
+    respCv.push(cv(diffs(inspirations(on.resp).filter((t) => t >= skip))));
+    const contrib = (e: string) => Array.from(on.data[e]).map((v, i) => v - off.data[e][i]);
+    const p = (e: string) => p2p(contrib(e).slice(skip * FS));
+    const largest = Object.keys(on.data).reduce((a, b) => (p(b) > p(a) ? b : a));
+    const d = contrib(largest);
+    const segs = starts.filter((t) => t + 1.5 < SECS).map((t) => d.slice(Math.round(t * FS), Math.round((t + 1.5) * FS)));
+    for (const s of segs) {
+      const pk = Math.max(...s.map(Math.abs));
+      const idx = s.map((v, i) => (Math.abs(v) > 0.1 * pk ? i : -1)).filter((i) => i >= 0);
+      durations.push((idx[idx.length - 1] - idx[0]) / FS);
+    }
+    corr.push(Math.min(...segs.slice(1).map((s, i) => pearson(segs[i], s))));
+    const onB = runAux(['ventilator'], base, 20, seed, undefined, 'bipolar-ap');
+    const offB = runAux([], base, 20, seed, undefined, 'bipolar-ap');
+    const pB = (row: string) => p2p(Array.from(onB.data[row]).slice(skip * FS).map((v, i) => v - offB.data[row][i + skip * FS]));
+    const mean = (rows: string[]) => rows.map(pB).reduce((a, b) => a + b, 0) / rows.length;
+    lr.push(mean(LEFT) / mean(RIGHT));
+  }
+  check('ventilator: burst interval CV, worst of 3', Math.max(...intervalCv), 0, 0.01);
+  check('ventilator: mean burst interval / the set period, worst of 3', worstOf1(period), 0.99, 1.01);
+  check('ventilator: burst duration, median of 3', median(durations), 0.7, 1.3, 's');
+  check('ventilator: correlation of successive bursts on the largest channel, smallest of 3', Math.min(...corr), 0.9, 1);
+  check('ventilator: left / right channels, ventilator on the left, smallest of 3', Math.min(...lr), 1, Infinity);
+  // Suction at 20 s: nothing for the next 30 s.
+  const sucked = runAux(['ventilator'], base, 55, 3, { t: 20, params: { ...base, suctionNonce: 1 } });
+  check('ventilator: bursts in the 30 s after suctioning',
+    sucked.marks.filter((m) => m.id === 'ventilator' && m.t > 20.01 && m.t < 50).length, 0, 0);
+  check('ventilator: Resp-row breath interval CV, worst of 3', Math.max(...respCv), 0, 0.01);
 });

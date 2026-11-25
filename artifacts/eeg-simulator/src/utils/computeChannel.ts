@@ -30,7 +30,7 @@ export function computeChannelVoltage(
 ): number {
   // ECG is supplied by the engine as a dedicated display channel (adapter writes
   // it into allVoltages['ECG']), not derived here from a separate morphology.
-  if (channel.active === 'ECG') return allVoltages['ECG'] ?? 0;
+  if (channel.active === 'ECG' || channel.active === 'Resp') return allVoltages[channel.active] ?? 0;
 
   const vActive = allVoltages[channel.active] ?? 0;
   let vRef = 0;

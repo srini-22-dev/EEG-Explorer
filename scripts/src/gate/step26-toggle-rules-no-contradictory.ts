@@ -40,7 +40,7 @@ section(null, () => {
       const said = /(?:switches|moves) Background State to (\w+)/.exec(p.desc)?.[1];
       return (said ? STATE_WORD[said] : undefined) !== TOGGLE_RULES[p.id]?.target;
     }).length, 0, 0);
-  const ENGINE_ARTIFACT_IDS = ['blink', 'eye-opening', 'eye-movement', 'eye-flutter', 'muscle', 'electrode-pop', 'bad-electrodes', 'sweat', '50hz', 'ecg-artifact', 'movement'];
+  const ENGINE_ARTIFACT_IDS = ['blink', 'eye-opening', 'eye-movement', 'eye-flutter', 'muscle', 'electrode-pop', 'bad-electrodes', 'sweat', '50hz', 'ecg-artifact', 'movement', 'respiration', 'ventilator'];
   check('registries: toggles allowed in a state where none of their sources draws (dead there)',
     pats.filter(p => {
       const ds = PATTERN_SOURCES.filter(d => d.toggles.includes(p.id));

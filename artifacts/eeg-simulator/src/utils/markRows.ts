@@ -1,4 +1,4 @@
-import type { Montage } from './montages';
+import { isAux, type Montage } from './montages';
 import { commonAverage, computeChannelVoltage } from './computeChannel';
 
 /**
@@ -34,7 +34,7 @@ export function markRowSizes(fields: readonly Field[], montage: Montage): number
     const field = f as Record<string, number>;
     const avg = commonAverage(field);
     montage.channels.forEach((ch, c) => {
-      if (ch.active === 'ECG') return;
+      if (isAux(ch)) return;
       sizes[c] += Math.abs(computeChannelVoltage(ch, 0, field, avg)) || 0;
     });
   }
@@ -73,7 +73,7 @@ export function markRowSigns(fields: readonly Field[], montage: Montage): number
   const field = fields[0] as Record<string, number>;
   const avg = commonAverage(field);
   return montage.channels.map((ch) =>
-    (ch.active === 'ECG' ? 0 : Math.sign(computeChannelVoltage(ch, 0, field, avg)) || 0));
+    (isAux(ch) ? 0 : Math.sign(computeChannelVoltage(ch, 0, field, avg)) || 0));
 }
 
 /**

@@ -26,7 +26,8 @@ import {
   type SourceSpec, type Leadfield,
 } from './forward';
 import { ARTIFACT_SOURCES, EcgGenerator } from './artifacts';
-import { ArtifactLayer, type ArtifactGates } from './artifactLayer';
+import { RespirationGenerator } from './breathing';
+import { ArtifactLayer, type ArtifactGates, type LiveArtifacts } from './artifactLayer';
 import { MarkBook, NO_FIELDS, type ArtifactMark, type MarkFields } from './marks';
 import { sampleSubject, type SubjectParams } from './subject';
 import {
@@ -55,6 +56,7 @@ import { defaultIctalParamsMap, POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } 
 // The engine's public surface, wherever its parts now live.
 export { sampleSubject, type SubjectParams } from './subject';
 export type { ArtifactMark } from './marks';
+export type { LiveArtifacts } from './artifactLayer';
 export { BLINK_DRIVE_UV, type ArtifactGates } from './artifactLayer';
 export * from './tuning';
 
@@ -92,6 +94,8 @@ export type GroundTruth = {
    * so a consumer copies what it wants to keep.
    */
   marks: ArtifactMark[];
+  /** What the artifacts are doing now, for the controls (LiveArtifacts); the layer's own object, updated in place. */
+  live: LiveArtifacts;
 };
 
 export type { PatientState };
@@ -151,6 +155,10 @@ export class EegEngine {
   // exactly the check a reader is taught to make to confirm ECG artifact.
   private ecgChannel!: EcgGenerator;
   ecgChannelValue = 0;
+  // The breathing, as a respiration belt records it: the Resp row's trace (IK-049).
+  // Like the heart, a recorded channel, so it exists with artifacts off.
+  private resp!: RespirationGenerator;
+  respChannelValue = 0;
   /** This sample's raw cardiac waveform, shared by the display channel and the scalp artifact. */
   private ecgRaw = 0;
 
@@ -492,15 +500,16 @@ export class EegEngine {
     // recorded trace, not an artifact, so it exists even when scalp artifacts are off.
     // The scalp cardiac artifact reads this same generator (see `ecgRaw`).
     this.ecgChannel = new EcgGenerator(deriveSeed(seed, 'ecgChannel'), this.dt);
+    this.resp = new RespirationGenerator(deriveSeed(seed, 'respiration'), this.dt);
 
     this.marks = new MarkBook(this.dt, () => this.sampleIndex, mk => this.groundTruth.marks.push(mk));
     this.artifactLayer = new ArtifactLayer({
       seed, dt: this.dt, subject: S, electrodes: this.electrodes, artifactIndex: this.artifactIndex,
-      artifacts, chain: this.chain, defects: this.defects, ecg: this.ecgChannel,
+      artifacts, chain: this.chain, defects: this.defects, ecg: this.ecgChannel, resp: this.resp,
       fieldOf: sources => this.fieldOf(sources), electrodeFields: this.electrodeFields, marks: this.marks,
     });
 
-    this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: 0, marks: [] };
+    this.groundTruth = { t: 0, vigilance: 0.5, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: 0, marks: [], live: this.artifactLayer.live };
 
     // Warm-up. The recording chain's high-passes start cold (prevIn=prevOut=0) with
     // a 0.25 Hz corner (time constant ~0.64 s), so without this the first ~2 s of
@@ -525,7 +534,7 @@ export class EegEngine {
       for (let i = 0; i < warmupSamples; i++) this.next(scratch);
       this.artifactLayer.gates = savedGates;
       this.sampleIndex = 0;
-      this.groundTruth = { t: 0, vigilance: this.vigilance.value, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: this.alphaBlock, marks: [] };
+      this.groundTruth = { t: 0, vigilance: this.vigilance.value, blinking: false, betaBursting: false, popChannel: -1, eyesOpen: this.alphaBlock, marks: [], live: this.artifactLayer.live };
     }
   }
 
@@ -648,6 +657,7 @@ export class EegEngine {
     // One cardiac cycle per sample, advanced before the artifact block so the
     // scalp contamination and the ECG display channel are the same heartbeat.
     this.ecgRaw = this.ecgChannel.next();
+    this.resp.next(this.patientState);
 
     const lineVal = this.artifactLayer.addSources(V, gains, this.patientState, this.ecgRaw, marking);
 
@@ -681,6 +691,7 @@ export class EegEngine {
     // A pop is on one channel, past the leadfield; a detached contact goes flat once
     // its pop has rung out (artifactLayer.ts).
     this.artifactLayer.addPop(out, marking);
+    this.artifactLayer.addContact(out, this.resp.inspirationStarted, marking);
     this.artifactLayer.tickDetach();
 
     if (this.chain) this.chain.process(out, lineVal, this.artifactLayer.lineAmp);
@@ -689,6 +700,9 @@ export class EegEngine {
     // above, at the amplitude a real ECG lead records rather than the fraction
     // that reaches the scalp.
     this.ecgChannelValue = this.ecgRaw * 500;
+    // Lung volume, centred, in the display units the ECG row uses (ecgScale: 1000 to
+    // 10 mm): a breath is 6 mm peak to peak, inspiration upward as a belt records it.
+    this.respChannelValue = (this.resp.volume - 0.5) * 600;
 
     this.sampleIndex++;
     this.groundTruth.t = this.sampleIndex * this.dt;

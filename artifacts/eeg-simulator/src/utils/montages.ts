@@ -27,7 +27,7 @@ const CENTRAL_ELECTRODES: Electrode[] = ['Fz','Cz','Pz'];
 
 export type ChannelDef = {
   label: string;
-  active: Electrode | 'ECG';
+  active: Electrode | 'ECG' | 'Resp';
   reference?: Electrode | 'AVG' | 'CONTRA' | 'IPSI';
   group: ChannelGroup;
 };
@@ -37,6 +37,23 @@ export type Montage = {
   name: string;
   channels: ChannelDef[];
 };
+
+/**
+ * The recorded non-EEG rows at the bottom of the page — ECG, and Resp when shown — in
+ * the 'ecg' group, so every group-based rule (no gap above, no spectrum, no field)
+ * covers both. Their values come straight from the engine, not from a derivation.
+ */
+export const isAux = (ch: { active: ChannelDef['active'] }): ch is ChannelDef & { active: 'ECG' | 'Resp' } =>
+  ch.active === 'ECG' || ch.active === 'Resp';
+
+/**
+ * The montage with a respiration row under the ECG (IK-049): the trace a respiration
+ * belt records, what a breathing or ventilator artifact is checked against, as cardiac
+ * artifact is checked against the ECG. Shown only when asked for.
+ */
+export function withResp(m: Montage): Montage {
+  return { ...m, channels: [...m.channels, { label: 'Resp', active: 'Resp', group: 'ecg' }] };
+}
 
 export const GROUP_COLORS: Record<ChannelGroup, string> = {
   'left-paramedian':  '#1a4fa0',

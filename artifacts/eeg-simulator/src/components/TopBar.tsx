@@ -37,7 +37,7 @@ function WheelSelect<T extends string | number>({
     return () => el.removeEventListener('wheel', onWheel);
   }, [value, options, onChange]);
   return (
-    <label className="flex flex-col gap-0.5 min-w-0">
+    <label className="flex flex-col gap-0.5 shrink-0">
       <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-widest">{label}</span>
       <select
         ref={ref}
@@ -63,7 +63,7 @@ function InfoButton({ id, about, infoId, onShowInfo }: {
       onClick={() => onShowInfo(infoId === id ? null : id)}
       aria-label={`About ${about}`}
       title={`About ${about}`}
-      className={`self-end mb-1.5 rounded p-0.5 transition-colors ${
+      className={`shrink-0 self-end mb-1.5 rounded p-0.5 transition-colors ${
         infoId === id ? 'text-emerald-300 bg-emerald-800/50' : 'text-slate-500 hover:text-slate-300'
       }`}>
       <Info className="w-3 h-3" />
@@ -80,17 +80,23 @@ type Props = {
   /** The page has been changed by hand since the level was chosen. */
   conditionsEdited: boolean;
   infoId: string | null; onShowInfo: (id: string | null) => void;
+  showResp: boolean; setShowResp: (v: boolean) => void;
 };
 
 export function TopBar({
   montageId, setMontageId, sensitivity, setSensitivity, speed, setSpeed, filters, setFilters,
-  conditions, setConditions, conditionsEdited, infoId, onShowInfo,
+  conditions, setConditions, conditionsEdited, infoId, onShowInfo, showResp, setShowResp,
 }: Props) {
   const divider = <div className="w-px self-stretch bg-[#2e4a2e]" />;
   return (
     <div className="flex items-end gap-3 px-3 py-1.5 bg-[#1e2a1e] border-b border-[#2e4a2e] text-slate-200 overflow-x-auto flex-shrink-0">
       <WheelSelect label="Montage" value={montageId} options={MONTAGE_IDS} wide
         format={id => MONTAGES[id].name} onChange={setMontageId} />
+      <label className="flex items-center gap-1.5 pb-1 cursor-pointer select-none shrink-0" title="A respiration row under the ECG, to check breathing and ventilator artifact against">
+        <input type="checkbox" checked={showResp} onChange={e => setShowResp(e.target.checked)}
+          className="accent-emerald-600 w-3.5 h-3.5 cursor-pointer" />
+        <span className="text-[11px] font-mono text-emerald-300 whitespace-nowrap">Resp row</span>
+      </label>
       {divider}
       <WheelSelect label="Sensitivity" value={sensitivity} options={SENSITIVITY_VALUES}
         format={v => `${v} µV/mm`} onChange={setSensitivity} />
@@ -101,7 +107,7 @@ export function TopBar({
         format={hz} onChange={v => setFilters({ ...filters, lowCutHz: v })} />
       <WheelSelect label="High cut" value={filters.highCutHz} options={HIGH_CUT_VALUES}
         format={hz} onChange={v => setFilters({ ...filters, highCutHz: v })} />
-      <label className="flex items-center gap-1.5 pb-1 cursor-pointer select-none">
+      <label className="flex items-center gap-1.5 pb-1 cursor-pointer select-none shrink-0">
         <input
           type="checkbox"
           checked={filters.notchHz != null}
