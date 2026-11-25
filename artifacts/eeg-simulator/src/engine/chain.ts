@@ -13,7 +13,7 @@
  */
 
 import { Gaussian, deriveSeed } from './rng';
-import type { FilterSettings } from '../utils/simTypes';
+import type { FilterSettings, MainsContacts } from '../utils/simTypes';
 
 /**
  * Amplifier low-frequency-filter corner, in Hz — equivalently a time constant of
@@ -179,6 +179,40 @@ export type ChannelDefect =
  */
 export const MAINS_CONTACT_COUPLING = 7;
 
+/**
+ * Many poor contacts (ArtifactParams.mainsContacts 'many', owner 2026-11-23): the
+ * picture of a hastily applied or dry-electrode cap, where contact is worst through
+ * hair and best on the bare forehead. Each scalp electrode picks up extra mains in
+ * proportion to its region's weight, times its own scatter of 0.6-1.4; the ears keep
+ * good contact, so an ear-referenced page shows each electrode's excess.
+ *
+ * Read off the owner's reference (Zeto, "Impact of Digital EEG Filter on EEG Signal
+ * Morphology": one referential page, unfiltered and filtered). Fast activity on each row
+ * of the unfiltered page, measured as the vertical extent over three pixel columns
+ * (about two mains cycles) less the same on the filtered page, over the filtered page's
+ * median row peak to peak: frontopolar 0.2, frontal 0.3, central and mid-temporal 0.8
+ * (median; C4 1.6, C3 0.8), parietal and posterior temporal 1.2, occipital 2.2 or more
+ * (the two occipital rows merge, so that is a floor). The weights are those ratios over
+ * the occipital one. Limits of that source: a 674 px image with no stated filters or
+ * reference, at a resolution where mains cannot be told from muscle; read as mains on
+ * many poor contacts by the owner's choice.
+ *
+ * MAINS_MANY_GAIN puts the occipital channels' 50 Hz at about 2.2 times the median row,
+ * peak to peak, of the engine's awake ear-referenced page, at the default 5 uV.
+ */
+export const MAINS_MANY_WEIGHT = { Fp: 0.09, F: 0.14, C: 0.36, P: 0.55, O: 1 } as const;
+export const MAINS_MANY_GAIN = 2.6;
+
+/** The region an electrode's mains weight comes from, or null for an ear reference. */
+export function mainsManyRegion(electrode: string): keyof typeof MAINS_MANY_WEIGHT | null {
+  if (/^A[12]$/.test(electrode)) return null;
+  if (electrode.startsWith('Fp')) return 'Fp';
+  if (electrode.startsWith('O')) return 'O';
+  if (electrode.startsWith('P') || electrode === 'T5' || electrode === 'T6') return 'P';
+  if (electrode.startsWith('C') || electrode === 'T3' || electrode === 'T4') return 'C';
+  return 'F';
+}
+
 export function defectLineMultiplier(d: ChannelDefect): number {
   return d.kind === 'noisy' ? d.lineMultiplier : d.kind === 'flat' ? 0.2 : 1;
 }
@@ -304,9 +338,26 @@ export class RecordingChain {
     return this.lineCoupling[c];
   }
 
-  /** Make electrode `c` the poorly connected one the mains shows on (MAINS_CONTACT_COUPLING). */
-  setMainsContact(c: number) {
-    this.lineCoupling[c] = MAINS_CONTACT_COUPLING;
+  // The two ways the mains can reach the page (ArtifactParams.mainsContacts): one
+  // poorly connected electrode, or many. `lineCoupling` is whichever is in use.
+  private mainsOne: Float64Array | null = null;
+  private mainsMany: Float64Array | null = null;
+
+  /**
+   * The poor contacts the mains shows on: electrode `contact` for one
+   * (MAINS_CONTACT_COUPLING), and each electrode's extra pickup for many
+   * (MAINS_MANY_WEIGHT). Starts with one.
+   */
+  setMainsContacts(contact: number, manyExtra: number[]) {
+    this.mainsOne = Float64Array.from(this.lineCoupling);
+    this.mainsOne[contact] = MAINS_CONTACT_COUPLING;
+    this.mainsMany = this.lineCoupling.map((k, c) => k + manyExtra[c]);
+    this.lineCoupling = this.mainsOne;
+  }
+
+  setMainsMode(mode: MainsContacts) {
+    const next = mode === 'many' ? this.mainsMany : this.mainsOne;
+    if (next) this.lineCoupling = next;
   }
 
   /**

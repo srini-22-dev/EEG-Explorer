@@ -37,7 +37,7 @@ import {
   SLEEP_THETA_RMS, SLOW_WAVE_SYNC_RMS, SLOW_WAVE_LOCAL_RMS, SLOW_WAVE_LOCAL_TILT, SLOW_WAVE_LOWPASS_HZ,
   MU_MAX_RMS, STATE_VIGILANCE,
 } from './tuning';
-import { RecordingChain, sampleDefects, type ChannelDefect } from './chain';
+import { RecordingChain, sampleDefects, mainsManyRegion, MAINS_MANY_WEIGHT, MAINS_MANY_GAIN, type ChannelDefect } from './chain';
 import type { FilterSettings } from '../utils/simTypes';
 import { Gaussian, deriveSeed } from './rng';
 import {
@@ -468,11 +468,18 @@ export class EegEngine {
     if (recordingChain) {
       this.defects = sampleDefects(seed, this.electrodes.length, S.artifactBurden);
       this.chain = new RecordingChain(seed, this.dt, this.electrodes.length, this.defects);
-      // The one scalp contact that picks up the mains (chain.ts MAINS_CONTACT_COUPLING),
-      // never an ear reference, from its own stream so no other draw moves.
+      // The poor contacts the mains shows on (chain.ts MAINS_CONTACT_COUPLING and
+      // MAINS_MANY_WEIGHT): one scalp electrode, or many graded front to back; never an
+      // ear reference. Each from its own stream, so no other draw moves.
       const scalp = this.electrodes.flatMap((e, c) => (/^A[12]$/.test(e) ? [] : [c]));
       const gContact = new Gaussian(deriveSeed(seed, 'mainsContact'));
-      this.chain.setMainsContact(scalp[Math.floor(gContact.uniform() * scalp.length)]);
+      const contact = scalp[Math.floor(gContact.uniform() * scalp.length)];
+      const gMany = new Gaussian(deriveSeed(seed, 'mainsContactsMany'));
+      const manyExtra = this.electrodes.map(e => {
+        const region = mainsManyRegion(e);
+        return region == null ? 0 : MAINS_MANY_GAIN * MAINS_MANY_WEIGHT[region] * gMany.range(0.6, 1.4);
+      });
+      this.chain.setMainsContacts(contact, manyExtra);
     }
 
     // One unit field per electrode: a mark on a single channel (a pop, the breach).

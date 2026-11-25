@@ -1005,7 +1005,9 @@ source. Approved by the user 2026-11-20.
 India and most of the world, 60 Hz in the Americas). It appears as a dense band on the derivations
 that include one poorly connected electrode and little or nothing elsewhere. A notch filter at the
 mains frequency much reduces it. The notch is off by default and used only when other measures
-fail, because it can distort or attenuate spikes.
+fail, because it can distort or attenuate spikes. With many poor contacts (a hastily applied or
+dry-electrode cap) it is spread instead: little over the bare forehead, growing towards the back of
+the head, where contact through hair is poorest.
 
 **Observable.** Montage `bipolar-ap`, state `awake`, toggle `50hz`, the app's 1/70 Hz filters at
 the default 5 µV, three subjects. The two largest rows share one electrode (currently 3 of 3). The
@@ -1013,7 +1015,11 @@ band divided by the N3 page's median row, peak to peak, is 0.6–1.2 (currently 
 figure 0.88). The largest other row is at most 0.2 of the band (currently 0.156). With a 50 Hz
 notch on, at most 0.25 of the band remains (currently 0.127). The mains box is open with the notch
 off, closed under a matching notch, and open under a mismatched one (60 Hz mains, 50 Hz notch). The
-app opens with the notch off.
+app opens with the notch off. With *Poor contacts: Many*, on `reference-ipsi`, against the page's
+median row, peak to peak: occipital channels 1.5–3.5 (currently 2.26; reference 2.2 or more);
+frontopolar channels at most 0.5 (currently 0.40; reference 0.2); occipital at least 3× the
+frontopolar and frontal (currently 6.9 at the smallest; reference about 9); the notch leaves at most
+0.25 (currently 0.13). *Poor contacts* defaults to *One*.
 
 **Mechanism.** *(non-binding)* The amplifier rejects interference common to both inputs; a contact's
 impedance imbalance turns part of it into a difference between them.
@@ -1025,7 +1031,12 @@ other row / the band, worst of 3 (learningeeg figure: nothing on the other rows)
 `check('notch 50 Hz: the band with the notch on / off, worst row of 3 subjects (learningeeg: "much
 reduced")', …)`, `check('mains boxes open, 50 Hz mains, notch off', …)`, `check('mains boxes open,
 50 Hz mains under a 50 Hz notch (nothing left to box)', …)`, `check('mains boxes open, 60 Hz mains
-under a 50 Hz notch (the notch misses it)', …)`; Step 27 — `check('boxes: 50hz rows boxed,
+under a 50 Hz notch (the notch misses it)', …)`, `check('mains, many contacts: occipital channels /
+the page's median row, peak to peak, median of 3 (reference: 2.2 or more)', …)`, `check('mains, many
+contacts: frontopolar channels / the page's median row, worst of 3 (reference: 0.2)', …)`,
+`check('mains, many contacts: occipital / frontopolar and frontal, smallest of 3 (reference: about
+9)', …)`, `check('notch 50 Hz, many contacts: channel with the notch on / off, worst of 3 subjects',
+…)`; Step 27 — `check('boxes: 50hz rows boxed,
 bipolar-ap at 7 uV/mm (the two rows of its poor contact)', …)`.
 
 **Status.** unverified in code · **Source.** learningeeg, Artifacts — its one mains figure, "60 Hz
@@ -1035,8 +1046,12 @@ Guideline One (Epstein 2009) §3.6 ("The 60-Hz notch filter can distort or atten
 therefore should be used only when other measures against 60 Hz interference fail"). The figure was
 measured against its own background on 2026-11-23: a 37 px band against a 42 px median background
 row on its slow-wave-sleep page. One figure, so the ratio is a reading of it, not a range. The
-notch-off default and the poor-contact model are the owner's choice (2026-11-23). Approved by the
-user 2026-11-23.
+notch-off default and the poor-contact model are the owner's choice (2026-11-23). Many poor
+contacts: the owner's reference image (Zeto, "Impact of Digital EEG Filter on EEG Signal
+Morphology"), read row by row against its own filtered panel on 2026-11-23. Its limits: a 674 px
+image with no stated filters or reference, at a resolution where mains can't be told from muscle;
+read as mains on many poor contacts by the owner's choice. Approved by the user 2026-11-23; the
+many-contacts addition approved 2026-11-25.
 
 ## 5. Normal variants
 

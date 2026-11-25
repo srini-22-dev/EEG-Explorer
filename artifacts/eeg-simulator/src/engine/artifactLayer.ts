@@ -30,7 +30,7 @@ import { deriveSeed } from './rng';
 import type { VigilanceGains } from './state';
 import type { SubjectParams } from './subject';
 import { NO_FIELDS, type MarkBook, type MarkFields } from './marks';
-import type { ArtifactParams, EmgRegion, PatientState } from '../utils/simTypes';
+import type { ArtifactParams, EmgRegion, MainsContacts, PatientState } from '../utils/simTypes';
 import { POP_TARGET_ANY } from '../utils/simTypes';
 
 /**
@@ -218,6 +218,7 @@ export class ArtifactLayer {
   private muscleFieldRegions: unknown = null;
   private muscleFieldCache: MarkFields = [];
   private lineCoupling: Record<string, number> = {};
+  private mainsContacts: MainsContacts = 'one';
   private lineFieldAmp = NaN;
   private lineFieldCache: MarkFields = [];
   private lineFieldDefects = false;
@@ -508,6 +509,13 @@ export class ArtifactLayer {
     if (p.popRatePerMin != null) this.pop?.setMeanInterval(p.popRatePerMin > 0 ? 60 / p.popRatePerMin : Infinity);
     if (p.movementRatePerMin != null) this.movement?.setMeanInterval(60 / Math.max(p.movementRatePerMin, 0.05));
     if (p.lineFreq != null) this.line?.setFreq(p.lineFreq);
+    if (p.mainsContacts != null && p.mainsContacts !== this.mainsContacts) {
+      this.mainsContacts = p.mainsContacts;
+      this.chain?.setMainsMode(p.mainsContacts);
+      // The mains box follows the contacts now picking it up.
+      this.lineCoupling = Object.fromEntries(this.electrodes.map((e, c) => [e, this.chain?.lineCouplingAt(c) ?? 1]));
+      this.lineFieldAmp = NaN;
+    }
     if (p.ecgBpm != null) this.ecg.setBpm(p.ecgBpm);
     if (p.popTarget != null) {
       this.pop?.setTarget(p.popTarget === POP_TARGET_ANY ? -1 : indexOf(p.popTarget));

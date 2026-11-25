@@ -190,6 +190,64 @@ section('\nMains: a band on the rows of one poorly connected electrode, much red
   check('mains boxes open, 60 Hz mains under a 50 Hz notch (the notch misses it)', boxesOpen(true, 60), 1, 1);
 });
 
+// Source: the owner's reference (Zeto, "Impact of Digital EEG Filter on EEG Signal
+// Morphology"), one referential page unfiltered and filtered, read against its filtered
+// page's median row (chain.ts MAINS_MANY_WEIGHT has the measurements): frontopolar 0.2
+// (its one-pixel floor), frontal 0.3, central 0.8, parietal 1.2, occipital 2.2 or more.
+// Read on an ear reference, whose good contacts leave each electrode's own excess.
+
+section('\nMains, many poor contacts: worst over the back of the head, much reduced by the notch:', () => {
+  const run = (patterns: string[], notch: boolean, seed: number) => {
+    const montage = MONTAGES['reference-ipsi'];
+    const settings: SimSettings = {
+      speed: 30, sensitivity: 7, patientState: 'awake', activePatterns: new Set(patterns),
+      ictalParams: defaultIctalParamsMap(), artifactParams: { ...defaultArtifactParams(), mainsContacts: 'many' },
+      filters: { ...DEFAULT_FILTERS, notchHz: notch ? 50 : null },
+    };
+    const src = new SimulationSource(seed, FS);
+    src.useAppMode();
+    const chans = montage.channels.filter((c) => c.group !== 'ecg');
+    const rows: Record<string, number[]> = {};
+    for (const c of chans) rows[c.label] = [];
+    for (let i = 0; i < 15 * FS; i++) {
+      const v = src.next(settings);
+      const avg = commonAverage(v);
+      if (i >= 5 * FS) for (const c of chans) rows[c.label].push(computeChannelVoltage(c, src.t, v, avg));
+    }
+    return rows;
+  };
+  const p2p = (x: number[]) => {
+    const s = [...x].sort((a, b) => a - b);
+    return s[Math.floor(0.99 * (s.length - 1))] - s[Math.floor(0.01 * (s.length - 1))];
+  };
+  const median = (a: number[]) => [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)];
+  const region = (label: string) => {
+    const e = label.split('-')[0];
+    return e.startsWith('Fp') ? 'Fp' : e.startsWith('O') ? 'O' : e[0] === 'F' ? 'F' : 'other';
+  };
+  const occ: number[] = [], fp: number[] = [], gradient: number[] = [];
+  let worstNotch = 0;
+  for (const seed of [20, 7, 3]) {
+    const on = run(['50hz'], false, seed), off = run([], false, seed);
+    const onN = run(['50hz'], true, seed), offN = run([], true, seed);
+    const bg = median(Object.values(off).map(p2p));
+    const by: Record<string, number[]> = { Fp: [], F: [], O: [], other: [] };
+    for (const k of Object.keys(on)) {
+      const band = p2p(on[k].map((v, i) => v - off[k][i]));
+      by[region(k)].push(band / bg);
+      if (band / bg > 1) worstNotch = Math.max(worstNotch, p2p(onN[k].map((v, i) => v - offN[k][i])) / band);
+    }
+    occ.push(median(by.O));
+    fp.push(median(by.Fp));
+    gradient.push(median(by.O) / median([...by.Fp, ...by.F]));
+  }
+  check('mains, many contacts: occipital channels / the page\'s median row, peak to peak, median of 3 (reference: 2.2 or more)',
+    median(occ), 1.5, 3.5);
+  check('mains, many contacts: frontopolar channels / the page\'s median row, worst of 3 (reference: 0.2)', Math.max(...fp), 0, 0.5);
+  check('mains, many contacts: occipital / frontopolar and frontal, smallest of 3 (reference: about 9)', Math.min(...gradient), 3, Infinity);
+  check('notch 50 Hz, many contacts: channel with the notch on / off, worst of 3 subjects', worstNotch, 0, 0.25);
+});
+
 // Sources: eegpedia (ECG artifact) — "most prominent in referential montages using
 // earlobe electrodes"; learningeeg (Artifacts) — "usually relatively low
 // amplitude", "more prominent or solely seen on the left side". The floor is one

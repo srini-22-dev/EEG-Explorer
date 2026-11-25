@@ -277,6 +277,20 @@ export function ArtifactControls({
               ))}
             </div>
           </div>
+          <div className="space-y-1">
+            <Label className={LABEL_CLASS}>Poor contacts</Label>
+            <div className="flex gap-1">
+              {(['one', 'many'] as const).map(m => (
+                <Chip
+                  key={m} on={params.mainsContacts === m} label={m === 'one' ? 'One' : 'Many'}
+                  title={m === 'one'
+                    ? 'One poorly connected electrode: a band on the two rows that share it'
+                    : 'Many poor contacts, worst over the back of the head, as on a hastily applied or dry-electrode cap'}
+                  onClick={() => update({ mainsContacts: m })}
+                />
+              ))}
+            </div>
+          </div>
           <Slider
             label="Amplitude" value={params.lineAmpUv} min={0} max={15} step={0.5} unit=" µV"
             onChange={v => update({ lineAmpUv: v })}

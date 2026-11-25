@@ -141,7 +141,7 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
     seenIn: 'Wakefulness and arousals from sleep. Its size, chaos and lack of a field mark it as artifact; a video or technologist note confirms it.',
   },
   '50hz': {
-    summary: 'Mains (AC line) interference: very fast, monotonous activity at the mains frequency — 50 Hz in India, Britain and most of the world, 60 Hz in the Americas. It is uneven across the page and worst on the rows of a poorly connected electrode. The notch filter in the top bar removes it.',
+    summary: 'Mains (AC line) interference: very fast, monotonous activity at the mains frequency — 50 Hz in India, Britain and most of the world, 60 Hz in the Americas. It shows where a contact is poor: as a solid band on the two rows that share one poorly connected electrode, or, with many poor contacts (a hastily applied or dry-electrode cap), as fuzz that grows towards the back of the head. The notch filter in the top bar removes it.',
     seenIn: 'Any state, near electrical equipment or with high electrode impedance. It is not biological. Re-gelling the electrode is the fix; the notch is kept off by default and used only when that fails, because it can distort or blunt spikes.',
   },
 

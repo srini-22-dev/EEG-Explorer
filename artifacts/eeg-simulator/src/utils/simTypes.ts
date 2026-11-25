@@ -100,7 +100,15 @@ export type ArtifactParams = {
   lineFreq: 50 | 60;
   /** Mains amplitude in microvolts. */
   lineAmpUv: number;
+  /**
+   * Which contacts pick the mains up: one poorly connected electrode (the textbook
+   * picture), or many, worst over the back of the head (a hastily applied or dry-
+   * electrode cap). See chain.ts MAINS_CONTACT_COUPLING and MAINS_MANY_WEIGHT.
+   */
+  mainsContacts: MainsContacts;
 };
+
+export type MainsContacts = 'one' | 'many';
 
 export function defaultArtifactParams(): ArtifactParams {
   return {
@@ -118,6 +126,7 @@ export function defaultArtifactParams(): ArtifactParams {
     movementSeverity: 1,
     lineFreq: 50,
     lineAmpUv: 5,
+    mainsContacts: 'one',
   };
 }
 
