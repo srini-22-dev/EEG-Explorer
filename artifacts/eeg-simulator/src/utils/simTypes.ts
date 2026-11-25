@@ -251,6 +251,12 @@ export type FocalPlacement = 'under' | 'between';
 export type PatternOptions = {
   postsForm?: PostsForm; focalPlacement?: FocalPlacement; seizureMuscle?: boolean; kcSpindle?: KcSpindle;
   sixHzForm?: SixHzForm; breachSite?: BreachSite; pos146Sides?: Pos146Sides;
+  /**
+   * The electrodes over skull defects, when there is more than one (owner's inbox,
+   * 2026-11-25: "in case the defect is in multiple places"). Takes precedence over
+   * `breachSite`, which scripts still use for one.
+   */
+  breachSites?: BreachSite[];
   postsSmallerPct?: number; postsOneSidePct?: number;
 };
 

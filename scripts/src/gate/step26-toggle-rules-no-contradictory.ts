@@ -137,6 +137,12 @@ section(null, () => {
   check('toggle rules: Hyperventilation and an absence seizure can be on together (it provokes one)',
     yes(has(c, 'absence-ictal', 'hyperventilation')), 1, 1);
 
+  // Slow-Wave Sleep off leaves N3 (owner's inbox, 2026-11-25: "when i turned it off,
+  // the signals were still from the slow-wave (n3)"): it lightens to N2.
+  c = toggle(toggle(initialToggles(), 'slow-waves'), 'slow-waves');
+  check('toggle rules: Slow-Wave Sleep switched on and off again leaves N3 for N2',
+    yes(c.patientState === 'n2' && !effective(c).has('slow-waves')), 1, 1);
+
   // What already worked must still work.
   c = toggle(initialToggles(), 'posts');
   check('toggle rules: POSTS switched on from Awake arrives in N1 alone', yes(c.patientState === 'n1' && [...effective(c)].join() === 'posts'), 1, 1);

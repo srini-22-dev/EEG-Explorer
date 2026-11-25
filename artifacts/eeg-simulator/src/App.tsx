@@ -90,7 +90,7 @@ export default function App() {
   // The controls follow what the level is doing (and the tubing's water after a suction).
   const live = useLiveArtifacts(conditions !== 'none' || effectivePatterns.has('ventilator'));
 
-  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', pos146Sides: 'shifting', postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT });
+  const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', breachSites: ['C4'], pos146Sides: 'shifting', postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
     setPatternOptions(prev => ({ ...prev, ...patch }));
 

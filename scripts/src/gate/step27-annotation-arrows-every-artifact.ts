@@ -241,6 +241,10 @@ section(null, () => {
       const page = setPage(state, list), on = effective(page);
       const onRun = runEl(page.patientState, on);
       for (const id of on) {
+        // A toggle whose switch-off moves the state (Slow-Wave Sleep: N3 to N2, since
+        // 2026-11-25) has no contribution of its own to isolate: the difference would be
+        // the whole change of background.
+        if (switchOff(page, id).patientState !== page.patientState) continue;
         const offPage = effective(switchOff(page, id));
         const ids = [id, ...[...on].filter((x) => x !== id && !offPage.has(x))];
         const mine = (m: ArtifactMark) => ids.includes(m.id) || (ids.includes('eye-opening') && m.id === 'eye-closing');
@@ -373,12 +377,15 @@ section(null, () => {
     check(`arrows: ${toggle} rows moved by half its largest row or more and never pointed at`, r.rowsLeftOut.length, 0, 0);
   }
 
-  console.log('\nECG under a millimetre on this montage, so on one row and not ten; mains on the two rows of its poor contact:');
+  console.log('\nECG on the left posterior rows it is on, and no others (IK-053); mains on the two rows of its poor contact:');
   {
     const ecg = survey('awake', ['ecg-artifact'], 'ecg-artifact');
     check('arrows: ecg-artifact longest stretch with no arrow (one a beat)', ecg.longestGap, 0, 2, ' s');
-    check('arrows: ecg-artifact most rows pointed at for one occurrence, bipolar-ap at 7 uV/mm',
-      Math.max(...ecg.marks.map((m) => m.rows.length)), 1, 1);
+    // It was held to one row while the artifact was under a millimetre everywhere; with
+    // the field on the left posterior chains (IK-053) it is pointed at there, and only there.
+    const LEFT_POSTERIOR = ['C3-P3', 'P3-O1', 'T3-T5', 'T5-O1'];
+    check('arrows: ecg-artifact rows pointed at outside the left posterior chains, bipolar-ap at 7 uV/mm',
+      new Set(ecg.marks.flatMap((m) => m.rows).filter((r) => !LEFT_POSTERIOR.includes(r))).size, 0, 0);
     const mains = survey('awake', ['50hz'], '50hz');
     check('boxes: 50hz boxes over the whole run (one)', wholeRun(mains), 1, 1);
     check('boxes: 50hz rows boxed, bipolar-ap at 7 uV/mm (the two rows of its poor contact)', Math.max(...mains.marks.map((m) => m.rows.length)), 2, 2);

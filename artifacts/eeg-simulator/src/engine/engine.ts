@@ -190,11 +190,14 @@ export class EegEngine {
   private kcSpindle: KcSpindle = 'sometimes';
   private sixHzForm: SixHzForm = 'fold';
   private pos146Sides: Pos146Sides = 'shifting';
-  private breachSite: BreachSite = 'C4';
-  // The breach rhythm's high-pass state at the electrode it is applied to (see BREACH_*).
-  private breachAt = -1;
-  private breachHp = 0;
-  private breachPrev = NaN;
+  // The electrodes over skull defects, and the breach rhythm's high-pass state at
+  // each (see BREACH_*). Several defects are independent: each electrode has its own.
+  private breachIdx: number[] = [];
+  private breachKey = '';
+  private breachOn = false;
+  private breachHp: number[] = [];
+  private breachPrev: number[] = [];
+  private breachFields: MarkFields = [];
   private breachA = 0;
   // Leadfield columns of sources outside the skull: the artifact block and the
   // extracranial pattern sources (PatternSourceDescriptor.extracranial).
@@ -494,6 +497,7 @@ export class EegEngine {
     const perElectrode = (at: (c: number) => number): Record<string, number> =>
       Object.fromEntries(this.electrodes.map((e, c) => [e, at(c)]));
     this.electrodeFields = this.electrodes.map((_, c) => [perElectrode(k => (k === c ? 1 : 0))]);
+    this.setBreachSites(['C4']);
     this.pdrField = ['pdrL', 'pdrR'].map(id => this.fieldOf([[allSpecs.findIndex(sp => sp.id === id), 1]]));
 
     // Independent of the `artifacts` flag: the ECG display channel is a first-class
@@ -673,20 +677,27 @@ export class EegEngine {
 
     // Breach rhythm: the intracranial part of the potential at the electrode over the
     // skull defect, amplified more the faster it is (constants and sources at BREACH_*).
-    const bc = this.activePatterns.has('breach') ? this.electrodes.indexOf(this.breachSite) : -1;
-    if (bc !== this.breachAt) { this.breachAt = bc; this.breachHp = 0; this.breachPrev = NaN; }
-    if (bc >= 0) {
-      let extra = 0;
-      const row = bc * nS;
-      for (const s of this.extracranialIdx) extra += G[row + s] * V[s];
-      const x = out[bc] - extra;
-      // A fresh start takes the current level as its own, so switching on is not a step.
-      if (Number.isNaN(this.breachPrev)) this.breachPrev = x;
-      this.breachHp = this.breachA * (this.breachHp + x - this.breachPrev);
-      this.breachPrev = x;
-      out[bc] += (BREACH_GAIN_LOW - 1) * x + (BREACH_GAIN_HIGH - BREACH_GAIN_LOW) * this.breachHp;
+    const breachOn = this.activePatterns.has('breach');
+    if (breachOn !== this.breachOn) {
+      this.breachOn = breachOn;
+      this.breachHp = this.breachIdx.map(() => 0);
+      this.breachPrev = this.breachIdx.map(() => NaN);
     }
-    if (marking) this.marks.markWhile('breach', bc >= 0, bc >= 0 ? this.electrodeFields[bc] : NO_FIELDS);
+    if (breachOn) {
+      for (let k = 0; k < this.breachIdx.length; k++) {
+        const bc = this.breachIdx[k];
+        let extra = 0;
+        const row = bc * nS;
+        for (const s of this.extracranialIdx) extra += G[row + s] * V[s];
+        const x = out[bc] - extra;
+        // A fresh start takes the current level as its own, so switching on is not a step.
+        if (Number.isNaN(this.breachPrev[k])) this.breachPrev[k] = x;
+        this.breachHp[k] = this.breachA * (this.breachHp[k] + x - this.breachPrev[k]);
+        this.breachPrev[k] = x;
+        out[bc] += (BREACH_GAIN_LOW - 1) * x + (BREACH_GAIN_HIGH - BREACH_GAIN_LOW) * this.breachHp[k];
+      }
+    }
+    if (marking) this.marks.markWhile('breach', breachOn && this.breachIdx.length > 0, breachOn ? this.breachFields : NO_FIELDS);
 
     // A pop is on one channel, past the leadfield; a detached contact goes flat once
     // its pop has rung out (artifactLayer.ts).
@@ -753,7 +764,19 @@ export class EegEngine {
     this.kcSpindle = o?.kcSpindle ?? 'sometimes';
     this.sixHzForm = o?.sixHzForm ?? 'fold';
     this.pos146Sides = o?.pos146Sides ?? 'shifting';
-    this.breachSite = o?.breachSite ?? 'C4';
+    this.setBreachSites(o?.breachSites ?? [o?.breachSite ?? 'C4']);
+  }
+
+  /** The electrodes over skull defects (breach rhythm); C4 until told otherwise. */
+  private setBreachSites(sites: BreachSite[]) {
+    const key = sites.join();
+    if (key === this.breachKey) return;
+    this.breachKey = key;
+    this.breachIdx = sites.map(e => this.electrodes.indexOf(e)).filter(c => c >= 0);
+    this.breachHp = this.breachIdx.map(() => 0);
+    this.breachPrev = this.breachIdx.map(() => NaN);
+    // One part per defect: each is its own electrode's change.
+    this.breachFields = this.breachIdx.flatMap(c => this.electrodeFields[c]);
   }
 
   /**

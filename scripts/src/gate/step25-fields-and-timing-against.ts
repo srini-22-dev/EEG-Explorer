@@ -5,7 +5,7 @@ import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import { commonAverage, computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
 import { welch, spectralPeak } from '../dsp';
 import { toggle, quizPage, effective } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { ANTERIOR_SITES, FS, IPSI_EAR, POSTERIOR_SITES, SLEEP_OPTS, absPeak, check, displayContribAll, eventIntervals, largestSideDifference, largestStep, meanPeakAt, rmsOf, runEngineState, section, step } from './harness';
+import { ANTERIOR_SITES, FS, IPSI_EAR, POSTERIOR_SITES, SLEEP_OPTS, absPeak, check, displayContribAll, eventIntervals, largestSideDifference, largestStep, meanPeakAt, rmsOf, runEngineState, section, step, runDisplay } from './harness';
 
 // ===========================================================================
 // Step 25 — fields and timing against learningeeg.com (audit of 2026-10-12)
@@ -250,18 +250,50 @@ section('\nMains, many poor contacts: worst over the back of the head, much redu
 
 // Sources: eegpedia (ECG artifact) — "most prominent in referential montages using
 // earlobe electrodes"; learningeeg (Artifacts) — "usually relatively low
-// amplitude", "more prominent or solely seen on the left side". The floor is one
-// millimetre of pen at 7 uV/mm.
+// amplitude", "more prominent or solely seen on the left side", and its figure, boxed
+// on the left posterior chains only (IK-053). The floor is one millimetre of pen at
+// 7 uV/mm. The left/right ceiling was 3, with no source; "solely seen on the left"
+// allows any ratio over 1 (2026-11-25). The largest double-banana row was held to
+// 1-10 uV, a ceiling with no source either; it is now read against the row's own
+// background, as the figure gives it.
 
 section('\nECG artifact: visible against the ear, low on the double banana, larger on the left:', () => {
   const ear = displayContribAll('reference-ipsi', 'awake', 'ecg-artifact', 30, 20);
   check('ecg-artifact R wave at Cz-A1, reference-ipsi (measured 4 uV before the fix)', absPeak(ear['Cz-A1']), 7, 40, ' uV');
   const side = (els: string[], ref: string) => els.reduce((a, e) => a + absPeak(ear[`${e}-${ref}`]), 0);
   check('ecg-artifact left / right, reference-ipsi (LEARNINGEEG: more prominent on the left)',
-    side(['F3', 'C3', 'P3'], 'A1') / side(['F4', 'C4', 'P4'], 'A2'), 1, 3);
-  const bip = displayContribAll('bipolar-ap', 'awake', 'ecg-artifact', 30, 20);
-  check('ecg-artifact largest double-banana row (LEARNINGEEG: "usually relatively low amplitude")',
-    Math.max(...Object.values(bip).map(absPeak)), 1, 10, ' uV');
+    side(['F3', 'C3', 'P3'], 'A1') / side(['F4', 'C4', 'P4'], 'A2'), 1, Infinity);
+});
+
+section('\nECG artifact on the double banana (IK-053): the left posterior chains, about half their background:', () => {
+  const LEFT_POSTERIOR = ['C3-P3', 'P3-O1', 'T3-T5', 'T5-O1'];
+  const FRONTAL = ['Fp1-F3', 'Fp2-F4', 'Fp1-F7', 'Fp2-F8', 'F3-C3', 'F4-C4', 'Fz-Cz'];
+  const p2p = (x: Float64Array) => {
+    const s = Array.from(x).sort((a, b) => a - b);
+    return s[Math.floor(0.99 * (s.length - 1))] - s[Math.floor(0.01 * (s.length - 1))];
+  };
+  const median = (a: number[]) => [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)];
+  let leftPosterior = 0;
+  const lr: number[] = [], frontal: number[] = [], size: number[] = [], earOverBip: number[] = [];
+  for (const seed of [3, 7, 20]) {
+    const bip = displayContribAll('bipolar-ap', 'awake', 'ecg-artifact', 20, seed);
+    const ear = displayContribAll('reference-ipsi', 'awake', 'ecg-artifact', 20, seed);
+    const bg = runDisplay('bipolar-ap', 'awake', [], 20, seed);
+    const amp: Record<string, number> = Object.fromEntries(Object.entries(bip).map(([l, x]) => [l, p2p(x)]));
+    const ranked = Object.entries(amp).sort((a, b) => b[1] - a[1]);
+    if (ranked.slice(0, 3).every(([l]) => LEFT_POSTERIOR.includes(l))) leftPosterior++;
+    lr.push(Math.min(amp['P3-O1'] / amp['P4-O2'], amp['T5-O1'] / amp['T6-O2'], amp['T3-T5'] / amp['T4-T6']));
+    const [topLabel, topAmp] = ranked[0];
+    frontal.push(Math.max(...FRONTAL.map((l) => amp[l])) / topAmp);
+    const row = bg.montage.channels.findIndex((c) => c.label === topLabel);
+    size.push(topAmp / p2p(bg.data[row]));
+    earOverBip.push(Math.max(...Object.values(ear).map(p2p)) / topAmp);
+  }
+  check('ecg-artifact: subjects whose three largest double-banana rows are left posterior (C3-P3, P3-O1, T3-T5, T5-O1)', leftPosterior, 3, 3);
+  check('ecg-artifact: left / right double-banana rows (P3-O1, T5-O1, T3-T5 over the right), smallest of 3', Math.min(...lr), 1.5, Infinity);
+  check('ecg-artifact: frontal double-banana rows / the largest row, worst of 3', Math.max(...frontal), 0, 0.35);
+  check('ecg-artifact: largest double-banana row / its own background, peak to peak, median of 3 (learningeeg figure: about 0.5)', median(size), 0.25, 1);
+  check('ecg-artifact: largest ear-referenced channel / largest double-banana row, smallest of 3 (eegpedia: most prominent with earlobe references)', Math.min(...earOverBip), 1.5, Infinity);
 });
 
 // Source: learningeeg (Artifacts) — myogenic artifact is "most commonly found in the

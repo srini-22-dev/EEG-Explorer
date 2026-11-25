@@ -130,9 +130,29 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
   // nasion (y = -0.540, from build1020's mesh-derived fiducials) and Fp1/Fp2
   // (y = -0.222): y = -0.38 is mid-forehead, z = 0.90 just inside the skin.
   frontalis:   { id: 'frontalis',   pos: [ 0.00,-0.38, 0.90], orientation: { kind: 'radial' }, extent: 0.45 },
-  // The heart is far enough away that its field across the scalp is broad and
-  // shallow, with the mild lateralisation §8 notes. It sits left of midline.
-  heart:       { id: 'heart',       pos: [ 0.55, -2.60, 0.20], orientation: { kind: 'radial' }, extent: 3.2 },
+  // The heart's field on the scalp, in two parts that fire together on every QRS
+  // (IK-053). It was one source far below and in front ([0.55, -2.60, 0.20], extent
+  // 3.2): a vertical gradient over the whole head, so on the double banana it was
+  // largest on Fp2-F4 and Fp1-F3, right about equal to left, where learningeeg's
+  // figure has it only on the left posterior chains ("the sharp waveforms in the left
+  // posterior region", boxed on C3-P3/P3-O1 and T3-T5/T5-O1) and its text says "more
+  // prominent or solely seen on the left side" (owner, 2026-11-25: "why is the ecg
+  // cardiac annotation in fp2-f4?").
+  //   - The field arriving through the neck: left, at ear level, behind (the left
+  //     suboccipital region). It gives the left posterior gradient the double banana
+  //     shows. Placed by search through this forward model.
+  //   - The broad field of the heart itself, the old source at a fifth of the weight.
+  //     Alone, the neck part left the right ear-referenced channels with almost
+  //     nothing (left/right 22x); with this, the right keeps a smaller share (about
+  //     6x) and the ear-referenced channels stay about twice any bipolar row (eegpedia:
+  //     "most prominent in referential montages using earlobe electrodes").
+  heart: {
+    id: 'heart', pos: [0.70, -0.80, -0.90], orientation: { kind: 'radial' }, extent: 0.5,
+    patches: [
+      { spec: { id: 'heart:neck', pos: [0.70, -0.80, -0.90], orientation: { kind: 'radial' }, extent: 0.5 }, weight: 1 },
+      { spec: { id: 'heart:far', pos: [0.55, -2.60, 0.20], orientation: { kind: 'radial' }, extent: 3.2 }, weight: 0.2 },
+    ],
+  },
   // Sweat artifact is a skin-potential shift in frontal scalp skin, so it shares
   // the forehead with frontalis and was misplaced at the vertex the same way.
   // Slightly deeper and broader: it is a diffuse skin phenomenon, not a compact

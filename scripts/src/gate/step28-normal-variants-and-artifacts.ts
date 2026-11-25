@@ -158,6 +158,14 @@ section('\nBreach rhythm: larger, faster, at one electrode only (IFCN "usually b
   check('breach at F8: Fp2-F4 unchanged', pctP2pOf(f8.data['Fp2-F4']) / pctP2pOf(f80.data['Fp2-F4']), 0.999, 1.001);
   const boxes = f8.marks.filter(({ m }) => m.id === 'breach');
   check('breach: one box while on', boxes.filter(({ m }) => m.span === Infinity).length, 1, 1);
+  // Two defects at once (owner's inbox, 2026-11-25: "in case the defect is in multiple
+  // places"): each changes the two rows of its own electrode, and nothing else moves.
+  const two = runApp('bipolar-ap', 'awake', ['breach'], 60, 3, { breachSites: ['C4', 'F7'] });
+  const rise = (row: string) => pctP2pOf(two.data[row]) / pctP2pOf(f80.data[row]);
+  const theirs = ['F4-C4', 'C4-P4', 'Fp1-F7', 'F7-T3'];
+  check('breach at C4 and F7: their four rows against the same subject without it, smallest', Math.min(...theirs.map(rise)), 1.3, 4.5);
+  const others = Object.keys(two.data).filter((r) => r !== 'ECG' && !theirs.includes(r));
+  check('breach at C4 and F7: largest change on any other row', Math.max(...others.map((r) => Math.abs(rise(r) - 1))), 0, 0.001);
 });
 
 // ── Eye flutter ──
@@ -435,12 +443,21 @@ section('\n14 & 6 Hz positive bursts: sides shifting, R>L, 0.5-1 s (eegpedia; SC
 section('\nSmall sharp spikes: mono- or diphasic, steep fall, sometimes a small slow wave (SCORE; eegpedia; IFCN):', () => {
   const { d, marks } = isoApp('bipolar-ap', 'drowsy', ['bets'], 400, 8);
   let di = 0, sl = 0, n = 0, steep = 0, slowMax = 0;
-  for (const { i } of marks.filter(({ m }) => m.id === 'bets')) {
-    for (const row of ['T3-T5', 'T4-T6']) {
+  const spikeAt = marks.filter(({ m }) => m.id === 'bets').map(({ i }) => i);
+  for (const i of spikeAt) {
+    // One spike at a time, on its own side. Both rows used to be read for every spike,
+    // which held only while a spike stayed on one side and spikes never overlapped:
+    // with the broad field and four sources (2026-11-25) the far side's echo passed the
+    // 3 uV floor and a second spike inside the slow-wave window read as a "slow wave"
+    // 12.7 times its spike. Now the larger row only, and none with another spike within
+    // 0.3 s.
+    if (spikeAt.some((j) => j !== i && Math.abs(j - i) < 0.3 * FS)) continue;
+    const peakIn = (x: Float64Array) => { let pk = 0, pi = i; for (let k = i; k < Math.min(x.length, i + 20); k++) if (Math.abs(x[k]) > Math.abs(pk)) { pk = x[k]; pi = k; } return { pk, pi }; };
+    const own = Math.abs(peakIn(d['T3-T5']).pk) >= Math.abs(peakIn(d['T4-T6']).pk) ? 'T3-T5' : 'T4-T6';
+    for (const row of [own]) {
       const x = d[row];
-      let pk = 0, pi = i;
-      for (let k = i; k < Math.min(x.length, i + 20); k++) if (Math.abs(x[k]) > Math.abs(pk)) { pk = x[k]; pi = k; }
-      if (Math.abs(pk) < 3) continue;  // the spike is on the other side
+      const { pk, pi } = peakIn(x);
+      if (Math.abs(pk) < 3) continue;
       n++;
       let lo = pi; while (lo > 0 && Math.abs(x[lo]) >= 0.1 * Math.abs(pk)) lo--;
       let hi = pi; while (hi < x.length - 1 && Math.abs(x[hi]) >= 0.1 * Math.abs(pk) && Math.sign(x[hi]) === Math.sign(pk)) hi++;
@@ -500,4 +517,99 @@ section('\nPosterior slow waves of youth and slow-fused transients (IFCN; learni
   }
   check('slow-fused: fused pairs measured', n, 5, 1e6);
   check('slow-fused: fused pairs with the sharp wave first and both UP', ok / n, 0.9, 1);
+});
+
+// ── Owner's inbox, 2026-11-25 ──
+
+/** Power at f Hz in a segment (one Fourier coefficient). */
+const powerAt = (x: ArrayLike<number>, f: number) => {
+  let re = 0, im = 0;
+  for (let n = 0; n < x.length; n++) { re += x[n] * Math.cos(2 * Math.PI * f * n / FS); im -= x[n] * Math.sin(2 * Math.PI * f * n / FS); }
+  return (re * re + im * im) / x.length;
+};
+const bandOf = (x: ArrayLike<number>, lo: number, hi: number) => { let p = 0; for (let f = lo; f <= hi; f += 0.5) p += powerAt(x, f); return p; };
+
+section('\n14 & 6 Hz positive bursts: each burst 14 Hz, 6 Hz or both, and the same on every row (learningeeg; owner):', () => {
+  const r = isoApp('bipolar-ap', 'drowsy', ['14-6-pos'], 300, 20);
+  const bursts = events(r.marks, '14-6-pos');
+  let only14 = 0, only6 = 0, mixed = 0, spread = 0;
+  for (const { i, ms } of bursts) {
+    const span = ms[0].span ?? 0;
+    const a = i, z = Math.min(i + Math.round(span * FS), r.d['T5-O1'].length);
+    const balances: number[] = [];
+    for (const [row, x] of Object.entries(r.d)) {
+      if (row === 'ECG') continue;
+      const seg = x.slice(a, z);
+      if (absPeak(seg) < 3) continue;
+      const p14 = bandOf(seg, 13, 17), p6 = bandOf(seg, 5, 7);
+      balances.push(p14 / (p14 + p6));
+    }
+    if (!balances.length) continue;
+    spread = Math.max(spread, Math.max(...balances) - Math.min(...balances));
+    const b = median(balances);
+    if (b > 0.9) only14++; else if (b < 0.1) only6++; else mixed++;
+  }
+  const n = only14 + only6 + mixed;
+  check('14-6-pos: bursts measured', n, 20, 1e6);
+  check('14-6-pos: share of bursts at 14 Hz alone (learningeeg: "either 14 Hz ... or 6 Hz ... or an admixture")', only14 / n, 0.15, 0.55);
+  check('14-6-pos: share of bursts at 6 Hz alone', only6 / n, 0.15, 0.55);
+  check('14-6-pos: share of bursts mixing both', mixed / n, 0.15, 0.55);
+  check('14-6-pos: largest spread of one burst\'s 14:6 balance across the rows it is on (one frequency on every row at once)', spread, 0, 0.05);
+});
+
+section('\nRMTD: intermittent trains with the background between them (eegpedia "trains"; learningeeg "a few seconds"; owner):', () => {
+  const SECS = 600;
+  const r = runApp('bipolar-ap', 'drowsy', ['rmtd'], SECS, 20);
+  const on = new Uint8Array(SECS * FS);
+  for (const { i, m } of r.marks) {
+    if (m.id !== 'rmtd' || m.span == null || !isFinite(m.span)) continue;
+    for (let k = i; k < Math.min(on.length, i + Math.round(m.span * FS)); k++) on[k] = 1;
+  }
+  let busy = 0, gap = 0, longestGap = 0;
+  for (let k = 0; k < on.length; k++) {
+    busy += on[k];
+    gap = on[k] ? 0 : gap + 1;
+    longestGap = Math.max(longestGap, gap);
+  }
+  check('RMTD share of the record with a train on either side (intermittent)', busy / on.length, 0.1, 0.55);
+  check('RMTD longest stretch with no train (background between trains)', longestGap / FS, 8, Infinity, ' s');
+});
+
+section('\n6 Hz phantom spike-and-wave: runs at 5-7 Hz, FOLD\'s wave as tiny as its spike (eegpedia "6Hz (5-7Hz)"; learningeeg):', () => {
+  const r = isoApp('reference-ipsi', 'drowsy', ['6hz-sw'], 300, 20);
+  const runs = events(r.marks, '6hz-sw');
+  const freqs: number[] = [];
+  for (const { i, ms } of runs) {
+    const span = ms[0].span ?? 0;
+    const seg = r.d['O1-A1'].slice(i, Math.min(i + Math.round(span * FS), r.d['O1-A1'].length));
+    if (seg.length < FS / 2) continue;
+    let best = 0, bestF = 0;
+    for (let f = 4.5; f <= 7.5; f += 0.05) { const p = powerAt(seg, f); if (p > best) { best = p; bestF = f; } }
+    freqs.push(bestF);
+  }
+  check('6hz-sw runs measured', freqs.length, 10, 1e6);
+  check('6hz-sw lowest run frequency (eegpedia: 5-7 Hz)', Math.min(...freqs), 4.8, 5.6, ' Hz');
+  check('6hz-sw highest run frequency', Math.max(...freqs), 6.4, 7.2, ' Hz');
+});
+
+section('\nSmall sharp spikes: not every one reverses phase on the double banana (owner; eegpedia figure: largest at A2/T4):', () => {
+  const r = isoApp('bipolar-ap', 'drowsy', ['bets'], 600, 20);
+  const spikes = r.marks.filter(({ m }) => m.id === 'bets').map(({ i }) => i);
+  let reversed = 0, counted = 0;
+  for (const i of spikes) {
+    // The side it is on: the larger of the two temporal chains around the spike.
+    const win = (row: string) => r.d[row].slice(Math.max(0, i - 5), i + 25);
+    const peak = (row: string) => { const w = win(row); return w.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0); };
+    const left = Math.abs(peak('F7-T3')) + Math.abs(peak('T3-T5'));
+    const right = Math.abs(peak('F8-T4')) + Math.abs(peak('T4-T6'));
+    const [a, b] = left >= right ? ['F7-T3', 'T3-T5'] : ['F8-T4', 'T4-T6'];
+    if (Math.max(Math.abs(peak(a)), Math.abs(peak(b))) < 3) continue;
+    counted++;
+    // A phase reversal: the two links sharing the temporal electrode deflect against each other,
+    // each by at least a third of the larger.
+    const pa = peak(a), pb = peak(b), big = Math.max(Math.abs(pa), Math.abs(pb));
+    if (Math.sign(pa) !== Math.sign(pb) && Math.min(Math.abs(pa), Math.abs(pb)) >= big / 3) reversed++;
+  }
+  check('small sharp spikes measured', counted, 20, 1e6);
+  check('small sharp spikes with a phase reversal at T3/T4 on the double banana, share (owner: "not necessarily ... each time")', reversed / counted, 0.2, 0.8);
 });

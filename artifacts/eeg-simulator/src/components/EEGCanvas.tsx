@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Montage, ALL_ELECTRODES, isAux } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
@@ -57,6 +57,9 @@ function liveDetail(id: string, live: LiveArtifacts | null, s: SimSettings): str
   }
 }
 
+/** Seconds as m:ss. */
+const fmtBack = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+
 type EEGCanvasProps = {
   montage: Montage;
   settings: SimSettings;
@@ -87,7 +90,10 @@ type EEGCanvasProps = {
  * and the eviction below also never discards anything still visible, so the
  * behaviour holds on any canvas at any speed.
  */
-const HISTORY_SEC = 60;
+// Five minutes, so a paused record can be paged back through (owner's inbox,
+// 2026-11-25: "add a few minutes of memory ... to scroll back in time"). At 250 Hz
+// that is 75,000 samples a channel, a few megabytes in all.
+const HISTORY_SEC = 300;
 
 /**
  * Samples of expired history tolerated before compacting the buffers.
@@ -131,6 +137,62 @@ export function EEGCanvas({
   artifactListRef.current = showArtifactList;
   const frozenRef = useRef(isFrozen);
   frozenRef.current = isFrozen;
+
+  // Scroll-back while paused: how far the page's right edge sits behind the newest
+  // sample, seconds. The render loop reads the ref; the slider shows the state.
+  const backRef = useRef(0);
+  const [back, setBack] = useState(0);
+  const [backMax, setBackMax] = useState(0);
+  // How far back the retained history reaches, and one page, at this width and speed.
+  const historyGeometry = () => {
+    const tb = timeBuffer.current;
+    const canvas = canvasRef.current;
+    const page = canvas ? canvas.width / (settingsRef.current.speed * PX_PER_MM_X) : 10;
+    const span = tb.length > 1 ? tb[tb.length - 1] - tb[0] : 0;
+    return { page, max: Math.max(0, span - page) };
+  };
+  const scrollBack = (sec: number) => {
+    const { max } = historyGeometry();
+    const v = Math.min(max, Math.max(0, sec));
+    backRef.current = v;
+    setBack(v);
+    setBackMax(max);
+  };
+  // Resuming returns to the newest sample; pausing measures what there is to page through.
+  useEffect(() => {
+    if (!isFrozen) { backRef.current = 0; setBack(0); }
+    else setBackMax(historyGeometry().max);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFrozen]);
+  // Paging while paused: the arrow and Page keys a page at a time (as a review station
+  // pages), Home to the oldest, End to the newest; the wheel over the trace a second a notch.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!frozenRef.current) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      const { page, max } = historyGeometry();
+      const to = e.key === 'ArrowLeft' || e.key === 'PageUp' ? backRef.current + page
+        : e.key === 'ArrowRight' || e.key === 'PageDown' ? backRef.current - page
+        : e.key === 'Home' ? max : e.key === 'End' ? 0 : null;
+      if (to == null) return;
+      e.preventDefault();
+      scrollBack(to);
+    };
+    window.addEventListener('keydown', onKey);
+    const canvas = canvasRef.current;
+    const onWheel = (e: WheelEvent) => {
+      if (!frozenRef.current) return;
+      e.preventDefault();
+      scrollBack(backRef.current + Math.sign(e.deltaY) * 1);
+    };
+    canvas?.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      canvas?.removeEventListener('wheel', onWheel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Highlight store state, mirrored into a ref (not React state) so the rAF
   // render loop can read it every frame without triggering re-renders.
@@ -277,6 +339,8 @@ export function EEGCanvas({
       }
 
       // ── RENDER ──────────────────────────────────────────────────────────────
+      // The page's right edge: the newest sample, or earlier while paging back.
+      const tRight = currentT - backRef.current;
       const w = canvas.width;
       const h = canvas.height;
 
@@ -295,7 +359,7 @@ export function EEGCanvas({
 
       // 2. Alternating 1-second tinted bands (even seconds slightly darker)
       {
-        const rightT = currentT;
+        const rightT = tRight;
         const leftT  = rightT - winSec;
         for (let s = Math.floor(leftT); s <= Math.ceil(rightT); s++) {
           if (s % 2 !== 0) continue;
@@ -344,7 +408,7 @@ export function EEGCanvas({
       {
         const secW   = pxPerSec;
         const minorW = MINOR_GRID_PX;
-        const pxOff  = (currentT % 1) * secW;
+        const pxOff  = (tRight % 1) * secW;
         const isMajor = (x: number) => Math.abs((w - x + pxOff) % secW) < 1.8;
 
         ctx.beginPath();
@@ -368,7 +432,7 @@ export function EEGCanvas({
       // channel at 0 and discarding the misses would walk several times more
       // samples than it draws. Sample times are monotonic, so one binary search
       // finds the left edge and all channels share it.
-      const firstVisible = lowerBound(timeBuffer.current, currentT - winSec);
+      const firstVisible = lowerBound(timeBuffer.current, tRight - winSec);
 
       // Cross-highlight: a channel is highlighted if it's directly hovered/clicked
       // (from the canvas side) or if either of its electrodes is highlighted from
@@ -430,7 +494,7 @@ export function EEGCanvas({
         let started = false;
 
         for (let j = firstVisible; j < data.length; j++) {
-          const tDist = currentT - timeBuffer.current[j];
+          const tDist = tRight - timeBuffer.current[j];
           const x = w - tDist * pxPerSec;
           const v = data[j];
           // Real EEG paper and clinical review systems never clip: a
@@ -485,7 +549,7 @@ export function EEGCanvas({
         const drawnLabels: { x0: number; y0: number; x1: number; y1: number; text: string }[] = [];
         for (const m of marksRef.current) {
           if (m.span == null && m.t + m.dur > tEnd) continue; // still developing: its peak is not drawn yet
-          if (m.t + (m.span ?? 0) < currentT - winSec) continue; // scrolled off
+          if (m.t + (m.span ?? 0) < tRight - winSec) continue; // scrolled off
           if (m.page) {
             // Named while it lasts at the page's right edge, the moment being drawn.
             const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
@@ -523,8 +587,8 @@ export function EEGCanvas({
           if (m.span != null) {
             // An event with extent: a box from its start to its end (or to now, for a
             // seizure's phase still running) around each chain block it is on.
-            const xa = Math.max(lblW, w - (currentT - m.t) * pxPerSec);
-            const xb = Math.min(w, w - (currentT - Math.min(m.t + m.span, tEnd)) * pxPerSec);
+            const xa = Math.max(lblW, w - (tRight - m.t) * pxPerSec);
+            const xb = Math.min(w, w - (tRight - Math.min(m.t + m.span, tEnd)) * pxPerSec);
             if (xb - xa < 2) continue;
             for (const block of markBlocks(channels, montage)) {
               const first = rowOfChannel.get(block[0]);
@@ -576,7 +640,7 @@ export function EEGCanvas({
               const d = data[j] - data[j0], best = data[jp] - data[j0];
               if (want === 0 ? Math.abs(d) > Math.abs(best) : want * d > want * best) jp = j;
             }
-            const x = w - (currentT - tb[jp]) * pxPerSec;
+            const x = w - (tRight - tb[jp]) * pxPerSec;
             if (x < lblW + 6 || x > w - 4) continue;
             const centerY = row.centerFrac * h;
             const y = traceY(centerY, data[jp], pxPerUV);
@@ -792,10 +856,23 @@ export function EEGCanvas({
             spelled out while frozen — that is the only time it applies. */}
         {isFrozen && (
           <div className="flex items-center h-8 px-2 rounded bg-black/70 text-[11px] text-amber-200 whitespace-nowrap pointer-events-none">
-            Click two points or drag a box to measure · Esc clears · Space resumes
+            Click two points or drag a box to measure · ← → page back and forward · Esc clears · Space resumes
           </div>
         )}
       </div>
+      {/* Scroll-back: the retained history, oldest at the left, the newest at the right. */}
+      {isFrozen && backMax > 0 && (
+        <div className="absolute bottom-6 left-[74px] right-24 z-10 flex items-center gap-2 px-2 py-1 rounded bg-black/70 text-[11px] text-amber-200">
+          <span className="whitespace-nowrap font-mono">{back > 0 ? `−${fmtBack(back)}` : 'newest'}</span>
+          <input
+            type="range" min={0} max={backMax} step={0.1} value={backMax - back}
+            onChange={e => scrollBack(backMax - parseFloat(e.target.value))}
+            aria-label="Scroll back in time"
+            className="flex-1 accent-amber-500 cursor-pointer"
+          />
+          <span className="whitespace-nowrap font-mono text-amber-200/60">oldest −{fmtBack(backMax)}</span>
+        </div>
+      )}
     </div>
   );
 }

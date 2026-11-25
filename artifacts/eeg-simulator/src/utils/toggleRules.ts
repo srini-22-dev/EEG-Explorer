@@ -246,6 +246,12 @@ export function switchOn(s: ToggleState, id: string): ToggleState {
 }
 
 export function switchOff(s: ToggleState, id: string): ToggleState {
+  // Slow-Wave Sleep is not a transient laid over the background: it IS N3's background
+  // (its toggle only moves the state there). Switching it off used to leave the record
+  // in N3, still drawing slow waves under a toggle that read off (owner's inbox,
+  // 2026-11-25). Without its slow waves deep sleep is N2, so that is where it goes,
+  // with N2's own graphoelements.
+  if (id === 'slow-waves' && s.patientState === 'n3') return enterState(s, 'n2');
   const d = copy(s);
   off(d, id);
   return settle(d);

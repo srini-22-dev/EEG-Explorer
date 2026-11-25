@@ -55,7 +55,7 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
     seenIn: 'Mostly drowsiness and light sleep, also relaxed wakefulness, in adults over about 30. A single wicket is the classic mimic of a temporal spike: the absence of a following slow wave, and its resemblance to the sharper waves of a run on the same record, mark it as benign.',
   },
   'rmtd': {
-    summary: 'Rhythmic mid-temporal theta of drowsiness: trains of 5-7 Hz theta at one frequency, arch-shaped and often notched, lasting 2-10 s over T3/T4, on one side or on both out of step. It does not evolve in frequency, amplitude or field.',
+    summary: 'Rhythmic mid-temporal theta of drowsiness: intermittent trains of 5-7 Hz theta at one frequency, arch-shaped and often notched, lasting 2-10 s over T3/T4, on one side or on both out of step, with the ordinary background between trains. It does not evolve in frequency, amplitude or field.',
     seenIn: 'Drowsiness and light sleep, occasionally relaxed wakefulness, in adolescents and adults. The lack of evolution is what separates it from a temporal lobe seizure; it is benign.',
   },
   'lambda': {
@@ -71,16 +71,16 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
     seenIn: 'Young people awake with the eyes closed, alongside ordinary posterior slow waves of youth. Seeing the two parts separately on the page is how it is told from a real occipital discharge.',
   },
   '6hz-sw': {
-    summary: 'Brief (1-2 s) bilateral, synchronous runs of 5-7 Hz spike-and-wave. In the FOLD form (female, occipital, low-amplitude, drowsy) the spike is tiny and easy to miss, hence "phantom". The WHAM form (waking, high-amplitude, anterior, male) has a larger anterior spike.',
+    summary: 'Brief (1-2 s) bilateral, synchronous runs of 5-7 Hz spike-and-wave. In the FOLD form (female, occipital, low-amplitude, drowsy) the spike is tiny and easy to miss, hence "phantom", and the slow wave after it is as small. The WHAM form (waking, high-amplitude, anterior, male) has a larger anterior spike.',
     seenIn: 'FOLD in drowsiness, and benign. WHAM in relaxed wakefulness as well as drowsiness, and associated with epilepsy, so the form matters. Both disappear in deeper sleep.',
   },
   '14-6-pos': {
-    summary: 'Arch-shaped bursts at 14 Hz and/or 6 Hz with pointed surface-positive peaks over the posterior temporal region, lasting about half a second to two seconds. The side can shift from burst to burst or be bilateral, depending on the source the toggle follows.',
+    summary: 'Arch-shaped bursts at 14 Hz, at 6 Hz, or a mix of both, with pointed surface-positive peaks over the posterior temporal region; whichever a burst is, it is that on every channel it reaches at once. They last about half a second to two seconds. The side can shift from burst to burst or be bilateral, depending on the source the toggle follows.',
     seenIn: 'Drowsiness and light sleep, mostly in adolescents. Benign; once linked to autonomic symptoms and behaviour problems, an association no longer accepted. Best seen on ear-referenced montages.',
   },
   'bets': {
-    summary: 'Small sharp spikes (benign epileptiform transients of sleep): very brief (under 50 ms), low-amplitude (under 50 µV) temporal spikes, mono- or diphasic with a steep descending limb, sometimes followed by a small slow wave, leaving the background undisturbed.',
-    seenIn: 'Drowsiness and light sleep in adults; they disappear in deeper sleep. Benign: their small size, brevity and lack of a disturbed background distinguish them from interictal spikes.',
+    summary: 'Small sharp spikes (benign epileptiform transients of sleep): very brief (under 50 ms) and low in amplitude (under 50 µV), usually monophasic, occasionally diphasic, with a steep descending limb. Largest over the temporal region, on one side or both, with a broad field that reaches the other leads; not every one reverses phase on a bipolar montage. Usually no slow wave follows, at most a small one, and the background is undisturbed.',
+    seenIn: 'Drowsiness and light sleep (N1 and N2). Benign and not associated with epilepsy. The usual tell: very low amplitude, seen only once or a few times, and only in sleep.',
   },
   'midline-theta': {
     summary: 'Trains of 4-7 Hz arch-shaped or sinusoidal theta over the vertex (Cz, with Fz), lasting from a moment to several seconds (Cigánek rhythm).',

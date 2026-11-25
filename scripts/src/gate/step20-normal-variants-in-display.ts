@@ -1,5 +1,5 @@
 import { spikeSlowWave } from '../../../artifacts/eeg-simulator/src/engine/sources/morphology';
-import { FS, bandPower, base, check, displayContrib, section, step } from './harness';
+import { FS, bandPower, base, check, displayContrib, section, step, displayContribAll } from './harness';
 
 step('\n=== Step 20: normal variants in DISPLAY space (A4 audit) ===\n');
 
@@ -40,6 +40,18 @@ section('\nBETS (<50 ms, <50 uV, temporal, drowsy/N1/N2 only, no slow wave), bip
   for (let k = peakAt; k < end; k++) if (diff[k] > slow) slow = diff[k];
   check('BETS T3-T5 base width (site/patterns.ts: <50 ms)', widthMs, 5, 50, ' ms');
   check('BETS T3-T5 peak amplitude (patterns.ts: <50 uV)', Math.abs(peak), 3, 50, ' uV');
+  // A broad field, largest temporally (owner's inbox, 2026-11-25: "across all the
+  // leads"; IFCN, eegpedia, learningeeg: temporal, with a field), on the average
+  // reference, where a broad field shows as a broad field (IK-042).
+  const car = displayContribAll('reference-car', 'drowsy', 'bets', 120, 20);
+  const sizes = Object.entries(car).map(([l, x]) => [l, Math.max(...Array.from(x).map(Math.abs))] as const);
+  const top = Math.max(...sizes.map(([, v]) => v));
+  check('BETS field: average-referenced channels carrying a fifth of the largest or more (owner: across all the leads)',
+    sizes.filter(([, v]) => v >= 0.2 * top).length / sizes.length, 0.6, 1);
+  // Temporal: the temporal chain's electrodes. A tangential spike (variants.ts) peaks at
+  // F7 or T5 rather than T3, still in the temporal region the sources name.
+  check('BETS field: largest average-referenced channel is temporal (F7, T3, T5 or their right homologues)',
+    ['F7-AVG', 'T3-AVG', 'T5-AVG', 'F8-AVG', 'T4-AVG', 'T6-AVG'].includes(sizes.reduce((a, b) => (b[1] > a[1] ? b : a))[0]) ? 1 : 0, 1, 1);
   // Until 2026-10-27 this also held the largest positive excursion after the largest
   // spike under 0.15 of it ("no after-going slow wave"). The sources allow a diphasic
   // spike and a small slow wave (SCORE, eegpedia, IFCN), so each spike is now read on

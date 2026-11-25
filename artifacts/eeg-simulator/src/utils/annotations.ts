@@ -47,7 +47,7 @@ export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   'slow-fused': { patternId: 'slow-fused', targetRegion: 'left-paramedian', text: 'Slow-fused transient: sharp alpha wave + PSWY mimics spike-wave; apart elsewhere' },
   '6hz-sw':     { patternId: '6hz-sw',     targetRegion: 'all',            text: '6 Hz phantom spike-wave: brief runs; FOLD posterior, tiny spike; WHAM anterior, large spike' },
   '14-6-pos':   { patternId: '14-6-pos',   targetRegion: 'right-temporal', text: '14 & 6 Hz positive bursts, posterior-temporal, light sleep; one side or both (Sides)' },
-  'bets':       { patternId: 'bets',       targetRegion: 'left-temporal',  text: 'BETS: tiny (<50 ms) temporal spikes, steep fall, background undisturbed' },
+  'bets':       { patternId: 'bets',       targetRegion: 'left-temporal',  text: 'BETS: tiny (<50 ms) spikes, temporal maximum, broad field, steep fall, background undisturbed' },
   'midline-theta': { patternId: 'midline-theta', targetRegion: 'central', text: 'Midline theta: 4–7 Hz trains at Cz/Fz, awake or drowsy, benign' },
   'breach':     { patternId: 'breach',     targetRegion: 'all',            text: 'Breach: larger, spikier fast activity at one electrode over a skull defect' },
   'eyes-open':  { patternId: 'eyes-open',  targetRegion: 'all',            text: 'Eyes open: posterior alpha attenuates (Berger effect)' },

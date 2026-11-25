@@ -355,18 +355,28 @@ export function ControlPanel({
                           )}
                           {p.id === 'breach' && on && (
                             <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Defect over</Label>
+                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Defects over (one or more)</Label>
                               <div className="flex gap-1">
-                                {(['C4', 'C3', 'F8', 'F7'] as const).map(e => (
-                                  <button key={e} onClick={() => updatePatternOptions({ breachSite: e })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                      (patternOptions.breachSite ?? 'C4') === e
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {e}
-                                  </button>
-                                ))}
+                                {(['C4', 'C3', 'F8', 'F7'] as const).map(e => {
+                                  const sites = patternOptions.breachSites ?? [patternOptions.breachSite ?? 'C4'];
+                                  const on = sites.includes(e);
+                                  return (
+                                    <button key={e}
+                                      // Several can be chosen; the last one stays, since a breach rhythm needs a defect.
+                                      onClick={() => {
+                                        const next = on ? sites.filter(x => x !== e) : [...sites, e];
+                                        if (next.length) updatePatternOptions({ breachSites: next });
+                                      }}
+                                      role="checkbox" aria-checked={on}
+                                      className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
+                                        on
+                                          ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
+                                          : 'border-slate-700 text-slate-500 hover:bg-slate-800'
+                                      }`}>
+                                      {on ? '☑' : '☐'} {e}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}

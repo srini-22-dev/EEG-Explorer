@@ -25,7 +25,7 @@
  * decorrelate for free without any extra bookkeeping here.
  */
 
-import { sourceUnder, synchronousPatches } from '../forward';
+import { sourceUnder, synchronousPatches, tangentialAt } from '../forward';
 import {
   GENERALIZED_POSTERIOR, MU_FIELD, OCCIPITAL, POSTERIOR_TEMPORAL, mirrored,
 } from './fields';
@@ -389,8 +389,15 @@ function rmtdSide(id: string, field: Record<string, number>): PatternSourceDescr
     spec: synchronousPatches(id, field, { extent: 0.3 }),
     make(seed, dt) {
       const ts = new TransientSource<RmtdEvent>(seed, dt, {
-        // The gap after each train; the event itself lasts its drawn length.
-        schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 },
+        // The gap after each train; the event itself lasts its drawn length. RMTD comes
+        // in trains (eegpedia "Trains of rhythmic theta"; learningeeg "usually lasting a
+        // few seconds"), with the background between them. The gap was 3-6 s, so with
+        // 2-10 s trains on two independent sides a train was running about 80% of the
+        // time and the pattern read as continuous (owner's inbox, 2026-11-25: "RMTD is
+        // currently continuous, but it should be intermittent"). 10-30 s now: about 40%
+        // with a train on either side, and quiet stretches of tens of seconds. No source
+        // gives the spacing; it is the owner's call.
+        schedule: { kind: 'periodic', period: 20, jitterFrac: 0.5 },
         duration: RMTD_DUR_S[1],
         onset: (g) => ({
           amp: jit(g, 1, 0.1),
@@ -590,7 +597,7 @@ const sftR = youthSide('slow-fused-r', 'slow-fused', 'right', [['fused', 0.4], [
 // size it stays under SCORE's 25 uV (it was 25, reaching 30). One source per form, both
 // on the toggle; the one the option does not name stays silent.
 // ---------------------------------------------------------------------------
-type SixHzEvent = { amp: number; dur: number };
+type SixHzEvent = { amp: number; dur: number; f: number };
 
 function sixHzForm(
   id: string, form: SixHzForm, field: Record<string, number>, spikeUv: number, waveUv: number,
@@ -605,17 +612,25 @@ function sixHzForm(
       const ts = new TransientSource<SixHzEvent>(seed, dt, {
         schedule: { kind: 'periodic', period: 4.5, jitterFrac: 0.33 }, // legacy 3-6 s
         duration: 2.0, // upper bound on the per-burst length drawn below
-        // 1-2 s, as a whole number of 6 Hz cycles (6 to 12) so the run ends between
-        // complexes rather than being cut off part-way through a wave.
-        onset: (g) => ({ amp: jit(g, 1, 0.2), dur: Math.round(g.range(6, 12)) / 6 }),
+        // 1-2 s, as a whole number of cycles so the run ends between complexes rather
+        // than being cut off part-way through a wave. Each run at its own frequency in
+        // 5-7 Hz (eegpedia "6Hz (5-7Hz)"; learningeeg "5-7 Hz"); it was exactly 6 Hz
+        // every time (owner's inbox, 2026-11-25: "a little wrong").
+        onset: (g) => {
+          const f = g.range(5, 7);
+          return { amp: jit(g, 1, 0.2), f, dur: Math.round(g.range(f, 2 * f)) / f };
+        },
         mark: (e) => ({ span: e.dur }),
         morphology: (t, e) => {
           if (t >= e.dur) return 0;
-          const cyc = t % (1 / 6);
+          // The complex keeps its place in the cycle at any frequency: the spike at 0.12
+          // of the period, the wave at 0.6 (at 6 Hz: 20 ms and 100 ms, as before).
+          const period = 1 / e.f;
+          const cyc = t % period;
           // Surface-negative spike and a wave of the same polarity — the convention
           // of spikeSlowWave (see morphology.ts), of which this is the 6 Hz case.
-          const spike = -spikeUv * e.amp * gaussian(cyc, 0.02, 0.006);
-          const wave = -waveUv * e.amp * gaussian(cyc, 0.1, 0.035);
+          const spike = -spikeUv * e.amp * gaussian(cyc, 0.12 * period, 0.006);
+          const wave = -waveUv * e.amp * gaussian(cyc, 0.6 * period, 0.21 * period);
           return spike + wave;
         },
       });
@@ -624,7 +639,10 @@ function sixHzForm(
   };
 }
 
-const sixHzFold = sixHzForm('6hz-sw', 'fold', GENERALIZED_POSTERIOR, 20, 45, ['drowsy', 'n1']);
+// FOLD's wave was 45 uV on a 20 uV spike, more than twice it; learningeeg has the spikes
+// followed by "an equally tiny slow wave", and the wave must still be at least the spike
+// (StatPearls, Step 13): 24 on 20 (2026-11-25).
+const sixHzFold = sixHzForm('6hz-sw', 'fold', GENERALIZED_POSTERIOR, 20, 24, ['drowsy', 'n1']);
 const WHAM_FIELD: Record<string, number> = {
   Fz: 1, F3: 0.85, F4: 0.85, Fp1: 0.55, Fp2: 0.55, F7: 0.5, F8: 0.5, Cz: 0.55, C3: 0.4, C4: 0.4,
   T3: 0.15, T4: 0.15, Pz: 0.2, P3: 0.15, P4: 0.15,
@@ -689,7 +707,12 @@ function pos1406Side(id: string, side: 'left' | 'right', field: Record<string, n
         onset: (g) => {
           const u = g.uniform();
           return {
-            ratio: jit(g, 0.6, 0.4), dur: g.range(...POS_DUR_S[sides]), f14: g.range(13, 17), f6: g.range(5, 7),
+            // learningeeg: "either 14 Hz (13-17 Hz) or 6 Hz (5-7 Hz), or an admixture of
+            // both". The share of 14 Hz was drawn from 0.2-1.0, so no burst was ever 6 Hz
+            // alone (owner's inbox, 2026-11-25). A third of each (no source gives shares).
+            // One generator, so whatever a burst is, it is that on every row at once.
+            ratio: ((k) => (k < 1 / 3 ? 1 : k < 2 / 3 ? 0 : g.range(0.35, 0.65)))(g.uniform()),
+            dur: g.range(...POS_DUR_S[sides]), f14: g.range(13, 17), f6: g.range(5, 7),
             side: sides === 'bilateral' || u < 0.5 ? 'both' : u < 0.8 ? 'right' : 'left',
           };
         },
@@ -753,7 +776,8 @@ const BETS_FALL_S = 0.004;
 const BETS_PEAK_S = 3 * BETS_RISE_S;
 type BetsEvent = { amp: number; diphasic: boolean; slow: boolean };
 
-function betsSide(id: string, electrode: string): PatternSourceDescriptor {
+function betsSide(id: string, electrode: string, rateShare = 1, tangential = false): PatternSourceDescriptor {
+  const radial = sourceUnder(id, [electrode], { extent: 0.7 });
   return {
     id,
     toggles: ['bets'],
@@ -762,10 +786,17 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
     // benign variants (wicket, rmtd, 14-6-pos) rather than letting the toggle
     // fire while awake.
     states: ['drowsy', 'n1', 'n2'],
-    spec: sourceUnder(id, [electrode], { extent: 0.3 }),
+    // A broad field (owner's inbox, 2026-11-25: "BETS / Small Sharp Spikes should be
+    // across all the leads"). Still largest at the temporal electrode, as every source
+    // places them (IFCN "in the temporal regions"; eegpedia "Located temporal uni- or
+    // bilateral"; learningeeg "most often in the temporal chains", "having a field"),
+    // but reaching the rest of the head: at extent 0.7, two-thirds of the
+    // average-referenced channels carry a fifth of the spike or more, the far side
+    // included (IK-042). It was 0.3, which kept each spike to the rows of one electrode.
+    spec: tangential ? { ...radial, orientation: tangentialAt(radial.pos, [0, 0, 1]) } : radial,
     make(seed, dt) {
       const ts = new TransientSource<BetsEvent>(seed, dt, {
-        schedule: { kind: 'periodic', period: 6.5, jitterFrac: 0.38 }, // legacy 4-9 s
+        schedule: { kind: 'periodic', period: 6.5 * rateShare, jitterFrac: 0.38 }, // legacy 4-9 s, shared
         duration: 0.35,
         onset: (g) => ({ amp: jit(g, 1, 0.3), diphasic: g.uniform() < 0.25, slow: g.uniform() < 1 / 3 }),
         // The arrow's window is the spike and the phase after it.
@@ -776,7 +807,10 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
           let v = -gaussian(t, BETS_PEAK_S, sigma);
           if (e.diphasic) v += 0.33 * gaussian(t, BETS_PEAK_S + 0.016, 0.006);
           if (e.slow) v -= 0.08 * gaussian(t, BETS_PEAK_S + 0.12, 0.05);
-          return 40 * e.amp * v;
+          // A tangential spike's gradient falls whole on the two links beside it, so at
+          // the same size it read 59 uV on T3-T5 against the radial one's 28 and the
+          // sources' "<50 microV"; it is drawn at 0.55 of the size.
+          return 40 * (tangential ? 0.55 : 1) * e.amp * v;
         },
       });
       return asGenerator(ts);
@@ -784,8 +818,18 @@ function betsSide(id: string, electrode: string): PatternSourceDescriptor {
   };
 }
 
-const betsL = betsSide('bets-l', 'T3');
-const betsR = betsSide('bets-r', 'T4');
+// Not every one reverses phase on the double banana (owner's inbox, 2026-11-25: "it is
+// not necessarily a phase reversal each time"). Half are radial at T3/T4: the two links
+// sharing it deflect against each other, a phase reversal there. Half are tangential,
+// lying front to back at T3/T4: F7-T3 and T3-T5 then deflect the same way (the field
+// changes most steeply across T3, it does not peak there), with the opposite sign out at
+// Fp1-F7 and T5-O1. A source placed under the ear electrode was tried first; it sits
+// below the chain, so the chain still peaks near T3/T5 and still reverses (F7-T3 -0.46
+// against T3-T5 +0.22). Each side keeps the rate it had, shared between the two.
+const betsL = betsSide('bets-l', 'T3', 2);
+const betsR = betsSide('bets-r', 'T4', 2);
+const betsLTan = betsSide('bets-l-tan', 'T3', 2, true);
+const betsRTan = betsSide('bets-r-tan', 'T4', 2, true);
 
 // ---------------------------------------------------------------------------
 // Breach rhythm — not a generator but a change in how the brain's own activity
@@ -913,7 +957,7 @@ export const VARIANT_SOURCES: PatternSourceDescriptor[] = [
   sftL, sftR,
   sixHzFold, sixHzWham,
   pos1406L, pos1406R,
-  betsL, betsR,
+  betsL, betsR, betsLTan, betsRTan,
   eyesOpen,
   midlineTheta,
   breach,
