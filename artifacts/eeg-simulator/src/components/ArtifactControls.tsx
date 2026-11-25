@@ -313,6 +313,28 @@ export function ArtifactControls({
         </>,
       );
 
+    case 'pulse':
+      return wrap(
+        <div className="space-y-1">
+          <Label className={LABEL_CLASS}>Electrode over the artery</Label>
+          <select
+            value={params.pulseElectrode}
+            onChange={e => update({ pulseElectrode: e.target.value })}
+            title="Moving the electrode off the artery is what removes a pulse artifact"
+            className="w-full py-1 px-1.5 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-slate-200">
+            {ALL_ELECTRODES.map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>,
+      );
+
+    case 'iv-drip':
+      return wrap(
+        <Slider
+          label="Drip rate" value={params.dripRatePerMin} min={10} max={60} step={1} unit="/min"
+          onChange={v => update({ dripRatePerMin: v })}
+        />,
+      );
+
     case 'ventilator':
       return wrap(
         <>

@@ -47,6 +47,8 @@ function liveDetail(id: string, live: LiveArtifacts | null, s: SimSettings): str
     case 'movement': return lv ? (lv.movementActive ? `active, ${lv.movementRate.toFixed(1)}/min` : 'still') : `${p.movementRatePerMin.toFixed(1)}/min`;
     case 'ventilator': return live && live.tubingWater <= 0 ? 'tubing dry (suctioned)' : `${p.ventRatePerMin}/min`;
     case 'ecg-artifact': return `${p.ecgBpm} bpm`;
+    case 'pulse': return `${p.pulseElectrode}, ${p.ecgBpm} bpm`;
+    case 'iv-drip': return `${p.dripRatePerMin}/min`;
     case '50hz': return `${p.lineFreq} Hz${s.filters?.notchHz === p.lineFreq ? ', notched' : ''}`;
     default: return '';
   }

@@ -66,6 +66,8 @@ export const EDUCATIONAL_ANNOTATIONS: Record<string, AnnotationDef> = {
   'movement':     { patternId: 'movement',     targetRegion: 'all',          text: 'Movement: large broadband transients, frontal, often off-scale' },
   'respiration':  { patternId: 'respiration',  targetRegion: 'all',          text: 'Breathing: one slow wave per breath at one contact; line it up against the Resp row' },
   'ventilator':   { patternId: 'ventilator',   targetRegion: 'all',          text: 'Ventilator: identical ~1 s bursts at every breath, perfectly regular (water in the tubing)' },
+  'pulse':        { patternId: 'pulse',        targetRegion: 'all',          text: 'Pulse: slow wave on ONE electrode, 0.2-0.3 s after every QRS; line it up against the ECG' },
+  'iv-drip':      { patternId: 'iv-drip',      targetRegion: 'all',          text: 'IV drip: brief polyphasic spike at each drop, regular, one or a few electrodes, no field' },
   '50hz':         { patternId: '50hz',         targetRegion: 'all',          text: 'Mains: very fast monotonous 50/60 Hz, worst on rows of a poor contact' },
 
   // ── Non-epileptiform abnormalities ──────────────────────────────────────

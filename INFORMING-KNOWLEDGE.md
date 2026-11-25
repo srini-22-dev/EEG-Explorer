@@ -7,7 +7,7 @@ This file is not documentation of how the code works — the engine source (`src
 that. This is a list of things that must remain **true of the output**, whatever the
 implementation happens to be.
 
-> **50 entries · highest ID `IK-050` · 45 enforced by an automated check, 5 unverified in code.**
+> **52 entries · highest ID `IK-052` · 45 enforced by an automated check, 7 unverified in code.**
 
 ---
 
@@ -1124,6 +1124,64 @@ ventilator rate". The burst's size against the background and its inner rhythm (
 at 10–15 Hz; the source says only "polysharp/polyspike" and "paroxysmal fast activity") are the
 owner's choice, as are the default rate (16 a minute) and the 90 s for the water to come back.
 Approved by the user 2026-11-25.
+
+### IK-051 — Pulse artifact is a slow wave on one electrode, a fixed delay after each QRS
+
+**Claim.** An electrode lying over a scalp artery records a rhythmic slow wave with every heartbeat,
+usually on that one electrode's channel only, each wave following the QRS complex by about
+200–300 ms. Moving the electrode off the artery removes it.
+
+**Observable.** Toggle `pulse` (on F3), `reference-car`, three subjects: one wave per QRS on the ECG
+row (wave rate / heart rate 0.98–1.02); each wave starting 0.2–0.3 s after its R wave; the F3
+channel's wave at least 3× that of any other channel; its size against the neighbouring channels'
+background, peak to peak, 1.5–4 (eegpedia figure about 2.5).
+
+**Mechanism.** *(non-binding)* The artery's pulsation moves the electrode on the scalp.
+
+**Check.** `validateEngine.ts` Step 29 — `check('pulse: wave rate / heart rate, worst of 3', …)`,
+`check('pulse: waves starting 0.2-0.3 s after their R wave, share, worst of 3', …)`, `check('pulse:
+its channel / largest other channel, smallest of 3', …)`, `check('pulse: wave / the neighbouring
+channels\' background, peak to peak, median of 3 (eegpedia figure: about 2.5)', …)`.
+
+**Status.** unverified in code · **Source.** Tatum, Dworetzky & Schomer, "Artifact and Recording
+Concepts in EEG", J Clin Neurophysiol 2011;28(3): pulse artifact "usually arise[s] in a single
+channel" as "a lateralized or diffuse rhythmic slow wave after the QRS complex that is typically
+time-locked by 200 milliseconds"; an electrode "positioned over an artery ... may produce periodic
+waveforms that are time-locked to the cardiac rhythm", eliminated "by pressing or moving the
+electrode to an adjacent region on the scalp away from the artery". eegpedia, "Pulse artifact":
+"Slow waves on the EEG, with a direct relationship with the ECG. The QRS complex happens slightly
+ahead of the pulse artifact (200-300 ms)", and its figure "Pulse artifact in F3", read 2026-11-25:
+a rounded slow wave every beat on F3, about 2–3× the neighbouring rows; one figure, so a reading,
+not a range. learningeeg, "Cardioballistic artifact": "much less commonly seen". The 0.25 s delay
+(mid-range) and the wave's shape are the owner's choice. Approved by the user 2026-11-25.
+
+### IK-052 — IV drip artifact is a brief polyphasic spike at each drop, on a few electrodes, at the drip's regular rate
+
+**Claim.** With a gravity IV drip, each falling drop can give a brief, polyphasic, spike-like
+transient on one or a few electrodes, regular at the drip rate, with no physiological field and in
+time with the drops rather than with the ECG or breathing. Stopping the drip stops them.
+
+**Observable.** Toggle `iv-drip` at 30 drops a minute, `reference-car`, three subjects: interval CV
+at most 0.05; mean interval within 2% of the set period; each transient under 0.1 s with at least
+two changes of sign; at most 3 channels carrying half the largest channel's size or more.
+
+**Mechanism.** *(non-binding)* Static charge on the infusion fluid discharges into nearby leads as
+each drop falls.
+
+**Check.** `validateEngine.ts` Step 29 — `check('iv drip: interval CV, worst of 3', …)`, `check('iv
+drip: mean interval / the set period, worst of 3', …)`, `check('iv drip: transient duration,
+longest of 3', …)`, `check('iv drip: changes of sign within a transient, fewest of 3', …)`,
+`check('iv drip: channels at half the largest or more, most of 3', …)`.
+
+**Status.** unverified in code · **Source.** Redding, Wandel & Nasser, "Intravenous infusion drop
+artifacts", Electroencephalogr Clin Neurophysiol 1969 (abstract): "In 11 out of 37 EEG records done
+on patients receiving i.v. infusions, a curious polyphasic spike-like artifact occurred in one or
+more electrodes coincident with each falling droplet. These artifacts are thought to be an
+electrical effect due to a static charge on the contents of the i.v. bottle." Tatum et al. 2011:
+"the false appearance of an epileptiform-appearing spike, polyspike, sharp transient, or paroxysmal
+burst, evident in a few or in multiple channels"; "the very brief duration and regularity". The
+drip rate (30 a minute), the size and the spike's shape are the owner's choice. Approved by the
+user 2026-11-25.
 
 ## 5. Normal variants
 

@@ -21,7 +21,7 @@ import { defaultArtifactParams, type ArtifactParams, type ConditionLevel } from 
 /** The toggles a level decides. Eye flutter and eye opening are left to the reader: a finding and a command manoeuvre, not the setting. */
 export const CONDITION_TOGGLES = [
   'blink', 'eye-movement', 'muscle', 'chewing', 'ecg-artifact', 'electrode-pop', 'bad-electrodes',
-  'sweat', 'movement', '50hz', 'respiration', 'ventilator',
+  'sweat', 'movement', '50hz', 'respiration', 'ventilator', 'pulse', 'iv-drip',
 ] as const;
 
 export type ConditionScope = {
@@ -116,7 +116,7 @@ export const RECIPES: Record<ConditionLevel, Recipe> = {
   // and the point of this level is a background the notch has to rescue (Step 29).
   icu: {
     name: 'ICU bedside',
-    toggles: ['muscle', 'ecg-artifact', 'electrode-pop', 'bad-electrodes', '50hz', 'sweat', 'movement', 'respiration', 'ventilator'],
+    toggles: ['muscle', 'ecg-artifact', 'electrode-pop', 'bad-electrodes', '50hz', 'sweat', 'movement', 'respiration', 'ventilator', 'iv-drip'],
     showResp: true,
     params: {
       respirationForm: 'electrode', respirationElectrode: 'P4', ventRatePerMin: 16, ventSide: 'left',
@@ -125,14 +125,14 @@ export const RECIPES: Record<ConditionLevel, Recipe> = {
     },
     scope: {
       setting: 'Continuous monitoring at the ICU bedside: a sedated, ventilated patient, surrounded by equipment, with electrodes on for days.',
-      appears: 'Mains over many contacts, worst at the back of the head, large enough to bury the background (try the 50 Hz notch). The ventilator: breathing locked to its rate on the Resp row, a slow wave per breath at one contact, and bursts from water in the tubing (try suctioning it). A prominent ECG, bad and popping electrodes, sweat, and stretches of movement during nursing care. Muscle only in brief bouts of agitation; no blinks.',
+      appears: 'Mains over many contacts, worst at the back of the head, large enough to bury the background (try the 50 Hz notch). The ventilator: breathing locked to its rate on the Resp row, a slow wave per breath at one contact, and bursts from water in the tubing (try suctioning it). An IV drip: a brief spike on a few electrodes at every drop. A prominent ECG, bad and popping electrodes, sweat, and stretches of movement during nursing care. Muscle only in brief bouts of agitation; no blinks.',
       learn: 'Why the notch filter exists, and how much of an ICU record is the room rather than the brain.',
     },
   },
   // A restless patient and a hurried application: everything, at high severity.
   worst: {
     name: 'Worst case',
-    toggles: ['blink', 'eye-movement', 'muscle', 'chewing', 'ecg-artifact', 'electrode-pop', 'bad-electrodes', '50hz', 'sweat', 'movement'],
+    toggles: ['blink', 'eye-movement', 'muscle', 'chewing', 'ecg-artifact', 'electrode-pop', 'bad-electrodes', '50hz', 'sweat', 'movement', 'respiration', 'pulse', 'iv-drip'],
     params: {
       blinkRatePerMin: 24, saccadeRatePerMin: 40, emgSeverity: 2, emgRegions: ['temporalisL', 'temporalisR', 'frontalis', 'nuchal'],
       ecgBpm: 100, popRatePerMin: 3, lineAmpUv: 15, mainsContacts: 'many', sweatSeverity: 2.5, movementRatePerMin: 1.5,

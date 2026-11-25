@@ -32,6 +32,7 @@ import {
   BreathingArtifact, WaterInTubing, contactCoupling, tubingCoupling, BREATHING_WAVE_UV, BREATHING_SHARP_UV,
   WAVE_S, BURST_S, WATER_UV, type RespirationGenerator,
 } from './breathing';
+import { PulseArtifact, IvDrip, PULSE_UV, PULSE_S, DRIP_UV, DRIP_S } from './bedside';
 import type { VigilanceGains } from './state';
 import type { SubjectParams } from './subject';
 import { NO_FIELDS, type MarkBook, type MarkFields } from './marks';
@@ -121,6 +122,10 @@ export type ArtifactGates = {
   respiration: boolean;
   /** On a mechanical ventilator: breathing exactly regular, and water in the tubing (IK-050). */
   ventilator: boolean;
+  /** An electrode over a scalp artery: a slow wave after every QRS (IK-051). */
+  pulse: boolean;
+  /** A gravity IV drip: a brief polyphasic spike at each drop (IK-052). */
+  ivDrip: boolean;
 };
 
 // Orbicularis oculi EMG during a blink, microvolts of shot noise (RMS) at each orbit
@@ -219,6 +224,11 @@ export class ArtifactLayer {
   private movement: MovementGenerator | null = null;
   private breathing: BreathingArtifact | null = null;
   private water: WaterInTubing | null = null;
+  private pulse: PulseArtifact | null = null;
+  private drip: IvDrip | null = null;
+  // The ECG's R waves, for the pulse: the rising edge the ECG artifact's arrows use.
+  private prevEcg = 0;
+  private rWave = false;
 
   // Defaults for a standalone engine (validation, scripts). The app never relies on
   // them: SimulationSource sets every gate from the toggles on every sample.
@@ -231,7 +241,7 @@ export class ArtifactLayer {
     sweat: true, line: true, ecgScalp: true, movement: true,
     // Off unless asked for: added after every check had been written against a record
     // without them, which stays the record a standalone engine draws.
-    respiration: false, ventilator: false,
+    respiration: false, ventilator: false, pulse: false, ivDrip: false,
   };
   // Whether setGates has been called yet (see there).
   private gatesSet = false;
@@ -299,6 +309,8 @@ export class ArtifactLayer {
       // Own streams, so adding them left every subject's other artifacts unchanged.
       this.breathing = new BreathingArtifact(deriveSeed(o.seed, 'breathingArtifact'), this.dt);
       this.water = new WaterInTubing(deriveSeed(o.seed, 'waterInTubing'), this.dt);
+      this.pulse = new PulseArtifact(this.dt);
+      this.drip = new IvDrip(deriveSeed(o.seed, 'ivDrip'), this.dt, this.electrodes);
     }
 
     // What each artifact looks like across the head, for the annotation arrows.
@@ -398,6 +410,8 @@ export class ArtifactLayer {
       }
     }
     const ocularRate = dir ? gains.ocularRate * dir.ocularRate : gains.ocularRate;
+    this.rWave = ecgRaw > 0.5 && this.prevEcg <= 0.5;
+    this.prevEcg = ecgRaw;
     // The ocular EVENT generators (blink, eye-opening, saccade) take their gate
     // directly: while disabled they are silent, and re-enabling schedules the
     // first event promptly (a fresh start, not a resumed schedule) so the toggle
@@ -559,6 +573,12 @@ export class ArtifactLayer {
     if (g.respiration && w !== 0) for (let c = 0; c < out.length; c++) out[c] += w * this.breathK[c];
     const b = this.water!.next(inspiration && g.ventilator);
     if (g.ventilator && b !== 0) for (let c = 0; c < out.length; c++) out[c] += b * this.tubeK[c];
+    const pulseAt = this.electrodes.indexOf(p.pulseElectrode ?? 'F3');
+    const pv = this.pulse!.next(this.rWave);
+    if (g.pulse && pv !== 0 && pulseAt >= 0) out[pulseAt] += pv;
+    this.drip!.setRate(p.dripRatePerMin ?? 30);
+    const dv = this.drip!.next();
+    if (g.ivDrip && dv !== 0) for (let c = 0; c < out.length; c++) out[c] += dv * this.drip!.coupling[c];
 
     if (marking) {
       const uv = (k: number[], amp: number) => [Object.fromEntries(this.electrodes.map((e, c) => [e, k[c] * amp]))];
@@ -567,6 +587,15 @@ export class ArtifactLayer {
           id: 'respiration', inUv: true, dur: form === 'lying' ? 0.16 : WAVE_S,
           fields: uv(this.breathK, form === 'lying' ? BREATHING_SHARP_UV : BREATHING_WAVE_UV),
         });
+      }
+      if (g.pulse && this.pulse!.started && pulseAt >= 0) {
+        this.marks.push({
+          id: 'pulse', inUv: true, dur: PULSE_S,
+          fields: [Object.fromEntries(this.electrodes.map((e, c) => [e, c === pulseAt ? PULSE_UV : 0]))],
+        });
+      }
+      if (g.ivDrip && this.drip!.started) {
+        this.marks.push({ id: 'iv-drip', label: 'Drop', inUv: true, dur: DRIP_S, fields: uv(this.drip!.coupling, DRIP_UV) });
       }
       if (g.ventilator && this.water!.started) {
         this.marks.push({ id: 'ventilator', inUv: true, dur: 0, span: BURST_S, fields: uv(this.tubeK, WATER_UV) });

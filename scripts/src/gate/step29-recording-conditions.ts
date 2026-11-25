@@ -7,6 +7,8 @@ import { markRowSizes, markRows } from '../../../artifacts/eeg-simulator/src/uti
 import { initialToggles, effective, switchOff, switchOn, type ToggleState } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { applyLevel, CONDITION_LEVELS, CONDITION_TOGGLES, RECIPES } from '../../../artifacts/eeg-simulator/src/utils/recordingConditions';
 import { contactCoupling } from '../../../artifacts/eeg-simulator/src/engine/breathing';
+import { PULSE_DELAY_S } from '../../../artifacts/eeg-simulator/src/engine/bedside';
+import { electrodePositions3D } from '../../../artifacts/eeg-simulator/src/utils/electrodePositions3D';
 import { FS, check, section, step } from './harness';
 
 // ===========================================================================
@@ -223,6 +225,7 @@ function runAux(patterns: string[], params: ArtifactParams, secs: number, seed: 
   const data: Record<string, Float64Array> = {};
   for (const c of chans) data[key(c)] = new Float64Array(n);
   const resp = new Float64Array(n);
+  const ecg = new Float64Array(n);
   const marks: { id: string; t: number }[] = [];
   for (let i = 0; i < n; i++) {
     if (atS && i === atS.t * FS) settings = { ...settings, artifactParams: atS.params };
@@ -230,9 +233,10 @@ function runAux(patterns: string[], params: ArtifactParams, secs: number, seed: 
     const avg = commonAverage(v);
     for (const c of chans) data[key(c)][i] = computeChannelVoltage(c, src.t, v, avg);
     resp[i] = v['Resp'];
+    ecg[i] = v['ECG'];
     for (const m of src.groundTruth.marks) marks.push({ id: m.id, t: i / FS - (m.ago ?? 0) });
   }
-  return { data, resp, marks };
+  return { data, resp, ecg, marks };
 }
 
 /** Inspiration onsets on the Resp row, seconds: where the trace turns from falling to rising. */
@@ -337,4 +341,75 @@ section('\nVentilator (IK-050): identical bursts at every breath, larger on its 
   check('ventilator: bursts in the 30 s after suctioning',
     sucked.marks.filter((m) => m.id === 'ventilator' && m.t > 20.01 && m.t < 50).length, 0, 0);
   check('ventilator: Resp-row breath interval CV, worst of 3', Math.max(...respCv), 0, 0.01);
+});
+
+section('\nPulse artifact (IK-051): a slow wave on one electrode, 0.2-0.3 s after every QRS:', () => {
+  const SECS = 60, skip = 3;
+  const base = defaultArtifactParams();
+  const rate: number[] = [], delayed: number[] = [], isolation: number[] = [], size: number[] = [];
+  for (const seed of SEEDS) {
+    const on = runAux(['pulse'], base, SECS, seed), off = runAux([], base, SECS, seed);
+    const names = Object.keys(on.data);
+    const contrib = (e: string) => Array.from(on.data[e]).slice(skip * FS).map((v, i) => v - off.data[e][i + skip * FS]);
+    const d = contrib('F3');
+    // The wave's own sign: its largest excursion. Onsets: crossing 5% of that, signed (the
+    // filter's undershoot after each wave has the other sign), at least 0.3 s apart.
+    const big = d.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0);
+    const onsets: number[] = [];
+    for (let i = 1; i < d.length; i++) {
+      const t = skip + i / FS;
+      if (d[i] / big > 0.05 && d[i - 1] / big <= 0.05 && (onsets.length === 0 || t - onsets[onsets.length - 1] > 0.3)) onsets.push(t);
+    }
+    // R waves on the ECG row: its rising edge through half its peak.
+    const peakEcg = Math.max(...Array.from(on.ecg));
+    const rs: number[] = [];
+    for (let i = 1; i < on.ecg.length; i++) if (on.ecg[i] > 0.5 * peakEcg && on.ecg[i - 1] <= 0.5 * peakEcg) rs.push(i / FS);
+    rate.push(onsets.length / rs.filter((t) => t >= skip - PULSE_DELAY_S && t < SECS - PULSE_DELAY_S).length);
+    delayed.push(onsets.filter((t) => rs.some((r) => t - r >= 0.2 && t - r <= 0.3)).length / onsets.length);
+    isolation.push(p2p(d) / Math.max(...names.filter((e) => e !== 'F3').map((e) => p2p(contrib(e)))));
+    // The four electrodes nearest F3 on the scalp: the rows eegpedia's figure compares against.
+    const at = (e: string) => electrodePositions3D[e];
+    const dist = (e: string) => Math.hypot(...at(e).map((x, k) => x - at('F3')[k]));
+    const neighbours = names.filter((e) => e !== 'F3' && at(e)).sort((a, b) => dist(a) - dist(b)).slice(0, 4);
+    size.push(p2p(d) / median(neighbours.map((e) => p2p(Array.from(off.data[e]).slice(skip * FS)))));
+  }
+  check('pulse: wave rate / heart rate, worst of 3', worstOf1(rate), 0.98, 1.02);
+  check('pulse: waves starting 0.2-0.3 s after their R wave, share, worst of 3', Math.min(...delayed), 1, 1);
+  check('pulse: its channel / largest other channel, smallest of 3', Math.min(...isolation), 3, Infinity);
+  check("pulse: wave / the neighbouring channels' background, peak to peak, median of 3 (eegpedia figure: about 2.5)", median(size), 1.5, 4);
+});
+
+section('\nIV drip (IK-052): a brief polyphasic spike at each drop, on a few electrodes, regular:', () => {
+  const SECS = 60, skip = 3;
+  const base = { ...defaultArtifactParams(), dripRatePerMin: 30 };
+  const intervalCv: number[] = [], period: number[] = [], longest: number[] = [], signs: number[] = [], wide: number[] = [];
+  for (const seed of SEEDS) {
+    const on = runAux(['iv-drip'], base, SECS, seed), off = runAux([], base, SECS, seed);
+    const drops = on.marks.filter((m) => m.id === 'iv-drip').map((m) => m.t).filter((t) => t >= skip && t < SECS - 0.3);
+    const iv = diffs(drops);
+    intervalCv.push(cv(iv));
+    period.push((iv.reduce((a, b) => a + b, 0) / iv.length) / (60 / base.dripRatePerMin));
+    const names = Object.keys(on.data);
+    const contrib = (e: string) => Array.from(on.data[e]).map((v, i) => v - off.data[e][i]);
+    const sizes = names.map((e) => p2p(contrib(e).slice(skip * FS)));
+    const top = Math.max(...sizes);
+    wide.push(sizes.filter((x) => x >= 0.5 * top).length);
+    const d = contrib(names[sizes.indexOf(top)]);
+    let maxDur = 0, minSigns = Infinity;
+    for (const t of drops) {
+      const seg = d.slice(Math.round((t - 0.02) * FS), Math.round((t + 0.25) * FS));
+      const pk = Math.max(...seg.map(Math.abs));
+      const idx = seg.map((v, i) => (Math.abs(v) > 0.1 * pk ? i : -1)).filter((i) => i >= 0);
+      maxDur = Math.max(maxDur, (idx[idx.length - 1] - idx[0]) / FS);
+      const lobes = idx.map((i) => Math.sign(seg[i]));
+      minSigns = Math.min(minSigns, lobes.slice(1).filter((x, i) => x !== lobes[i]).length);
+    }
+    longest.push(maxDur);
+    signs.push(minSigns);
+  }
+  check('iv drip: interval CV, worst of 3', Math.max(...intervalCv), 0, 0.05);
+  check('iv drip: mean interval / the set period, worst of 3', worstOf1(period), 0.98, 1.02);
+  check('iv drip: transient duration, longest of 3', Math.max(...longest), 0, 0.1, 's');
+  check('iv drip: changes of sign within a transient, fewest of 3', Math.min(...signs), 2, Infinity);
+  check('iv drip: channels at half the largest or more, most of 3', Math.max(...wide), 1, 3);
 });

@@ -102,6 +102,8 @@ export class SimulationSource {
       movement: ap.has('movement'),
       respiration: ap.has('respiration'),
       ventilator: ap.has('ventilator'),
+      pulse: ap.has('pulse'),
+      ivDrip: ap.has('iv-drip'),
     });
 
     // The contextual settings behind those same toggles — which electrode pops,

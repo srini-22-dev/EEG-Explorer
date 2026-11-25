@@ -125,6 +125,10 @@ export type ArtifactParams = {
   ventSide: 'left' | 'right';
   /** Rising counter for "Suction the tubing", a moment rather than a state (like manualPopNonce). */
   suctionNonce: number;
+  /** The electrode over a scalp artery (IK-051). */
+  pulseElectrode: string;
+  /** IV drip rate, drops a minute (IK-052). */
+  dripRatePerMin: number;
 };
 
 export type MainsContacts = 'one' | 'many';
@@ -152,6 +156,9 @@ export function defaultArtifactParams(): ArtifactParams {
     ventRatePerMin: 16,
     ventSide: 'left',
     suctionNonce: 0,
+    // eegpedia's figure: "Pulse artifact in F3".
+    pulseElectrode: 'F3',
+    dripRatePerMin: 30,
   };
 }
 

@@ -148,6 +148,14 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
     summary: 'On a mechanical ventilator, breathing is exactly regular at the set rate, and water condensed in the tubing can give a burst at every breath: about a second long, identical in shape each time, often waxing then waning, larger on the side the ventilator and its tubing are on. It can look like epileptiform bursts or periodic discharges.',
     seenIn: 'Intubated, ventilated patients in intensive care. Its perfect regularity, identical shape and lock to the ventilator breaths (the Resp row) mark it as artifact; suctioning the tubing takes it away until water builds up again.',
   },
+  'pulse': {
+    summary: 'An electrode lying over a scalp artery moves with every pulse, giving a rounded slow wave on that one electrode with each heartbeat. Each wave follows the QRS on the ECG by about 200-300 ms: that fixed delay, and its slowness, separate it from ECG artifact, which is sharp, at the QRS itself and on many channels.',
+    seenIn: 'Any state, at an electrode placed over an artery (the superficial temporal artery and its branches). It is uncommon. Pressing the electrode or moving it to a nearby spot off the artery removes it.',
+  },
+  'iv-drip': {
+    summary: 'With a gravity IV drip, static charge on the fluid discharges as each drop falls: a brief, polyphasic, spike-like transient on one or a few electrodes at every drop. It can be mistaken for epileptiform spikes or polyspikes.',
+    seenIn: 'Patients on an intravenous infusion, mostly in intensive care. Its very brief duration, perfect regularity at the drip rate, lack of a field or a following slow wave, and timing with the drops (marked by the technologist) mark it as artifact; pausing the drip stops it.',
+  },
   '50hz': {
     summary: 'Mains (AC line) interference: very fast, monotonous activity at the mains frequency — 50 Hz in India, Britain and most of the world, 60 Hz in the Americas. It shows where a contact is poor: as a solid band on the two rows that share one poorly connected electrode, or, with many poor contacts (a hastily applied or dry-electrode cap), as fuzz that grows towards the back of the head. The notch filter in the top bar removes it.',
     seenIn: 'Any state, near electrical equipment or with high electrode impedance. It is not biological. Re-gelling the electrode is the fix; the notch is kept off by default and used only when that fails, because it can distort or blunt spikes.',
