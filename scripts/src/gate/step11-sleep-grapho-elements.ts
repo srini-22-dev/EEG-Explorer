@@ -1,5 +1,4 @@
 import { EegEngine } from '../../../artifacts/eeg-simulator/src/engine/engine';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { FS, SLEEP_OPTS, bandPower, base, baseCzP2p, baseCzSigma, check, contrib, contribPeak, cz, o1c, pctP2p, runEngineState, section, step } from './harness';
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,5 @@
 import { buildLeadfield } from '../../../artifacts/eeg-simulator/src/engine/forward';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { SLEEP_OPTS, bandPower, check, contrib, corr, midwaySource, pctP2p, runEngineState, section, step, win, winCar, winPower } from './harness';
+import { SLEEP_OPTS, bandPower, check, corr, midwaySource, pctP2p, runEngineState, section, step, win, winCar, winPower } from './harness';
 
 step('\n=== Step 16: ictal / seizure sources (pattern sources) ===\n');
 

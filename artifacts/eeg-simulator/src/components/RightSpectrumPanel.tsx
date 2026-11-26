@@ -179,6 +179,13 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
               </span>
             ))}
           </div>
+          {/* The strips have no axis, so say what a bar's length is: a ratio of band
+              powers (µV², utils/fftBands.ts) — unitless, 0 to 1 across the strip. */}
+          <div className="text-[9px] text-slate-500 mt-0.5">
+            {mode === 'within'
+              ? "bar = band power ÷ this channel's strongest band"
+              : 'bar = band power ÷ strongest band on any channel (ECG excluded)'}
+          </div>
         </div>
       ) : (
         <button

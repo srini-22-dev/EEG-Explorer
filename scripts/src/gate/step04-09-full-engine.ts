@@ -8,8 +8,7 @@ import type { PatientState } from '../../../artifacts/eeg-simulator/src/utils/si
 import { welch, std, kurtosis, hilbertEnvelope, spectralPeak } from '../dsp';
 import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import { commonAverage, computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { DT, FS, bandPower, base, check, contrib, corr, runDisplay, runEngine, runEngineState, section, step, win } from './harness';
+import { DT, FS, bandPower, check, corr, runDisplay, runEngine, runEngineState, section, step } from './harness';
 
 // ---------------------------------------------------------------------------
 step('\n=== Steps 4-9: full engine (sources -> leadfield -> chain) ===\n');
@@ -960,7 +959,7 @@ section('\nDisplay polarity (negative-up: v > 0 renders DOWN):', () => {
   }
 });
 
-// --- 7b. Toggle latency (SMALL-FIXES #13). A freshly-enabled event source must
+// --- 7b. Toggle latency. A freshly-enabled event source must
 // put its first graphoelement on the screen promptly rather than after a full
 // inter-event interval — a spike focus whose steady interval is 3-7 s should not
 // leave the toggle looking dead for several seconds. FIRST_EVENT_LEAD compresses

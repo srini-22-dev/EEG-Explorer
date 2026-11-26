@@ -1,8 +1,7 @@
 import type { PatientState } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
 import { welch, spectralPeak } from '../dsp';
 import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { FS, base, check, corr, cz, largestStep, runDisplay, section, step } from './harness';
+import { FS, check, corr, largestStep, runDisplay, section, step } from './harness';
 
 // ---------------------------------------------------------------------------
 step('\n=== Step 19b: sleep architecture against its sources (2026-09-11 rebuild) ===\n');

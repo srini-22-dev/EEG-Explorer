@@ -25,6 +25,7 @@ export const PATTERN_CATEGORIES: PatternCategory[] = [
     id: 'sleep-architecture',
     name: 'Sleep Architecture',
     color: '#38bdf8',     // sky blue
+    group: 'Normal Background & Variants',
     patterns: [
       { id: 'posts',      name: 'POSTS',            desc: 'Positive occipital sharp transients of sleep: triangular, "sail-like" sharp waves, 80-200 ms and 20-75 µV, one at a time at irregular intervals more than a second apart, or in trains of 4-6 per second lasting about a second — choose the form under the toggle. Surface-POSITIVE at O1/O2 — so DOWN in a referential montage, but UP on the double banana, where O1/O2 is the second input of P3-O1, T5-O1, P4-O2 and T6-O2, the rows they sit on. Begin in N1 and persist into N2 — selecting this switches Background State to N1.' },
       { id: 'v-waves',    name: 'Vertex Waves',      desc: 'Vertex sharp waves: surface-negative sharp waves (~100 ms, under 0.5 s in all) maximal at the vertex and over both central regions, so they phase-reverse at Cz on the midline chain and at C3/C4 on the parasagittal chains. Alone or in short runs of varying amplitude. Appear in N1 and persist into N2 — selecting this switches Background State to N1.' },
@@ -39,6 +40,7 @@ export const PATTERN_CATEGORIES: PatternCategory[] = [
     id: 'variants',
     name: 'Benign Variants',
     color: '#4ade80',     // green
+    group: 'Normal Background & Variants',
     patterns: [
       { id: 'mu-rhythm',    name: 'Mu Rhythm',            desc: 'Arch-shaped 8-12 Hz rhythm over central (C3/C4); normal; attenuated by contralateral hand movement. A waking rhythm: selecting this from sleep switches Background State to Awake.' },
       { id: 'wicket',       name: 'Wicket Spikes',         desc: 'Temporal 6-11 Hz arch-shaped (arciform) waves, single or in runs of up to several seconds that wax and wane, pointed on their surface-negative side; benign; NO following slow wave. Seen mostly in drowsiness, also in relaxed wakefulness and light sleep — selecting this from deeper sleep or REM switches Background State to Drowsy.' },
@@ -58,6 +60,7 @@ export const PATTERN_CATEGORIES: PatternCategory[] = [
     id: 'artifacts',
     name: 'Artifacts',
     color: '#fb923c',     // orange
+    group: 'Artifacts',
     patterns: [
       { id: 'blink',        name: 'Eye Blink',             desc: 'Large DOWNWARD deflection in every frontopolar row (Fp1-F3, Fp2-F4, Fp1-F7, Fp2-F8); rapid onset, about 0.2-0.5 s, some narrow and some broad, each with a little fast muscle activity from the orbicularis oculi. The eye is a dipole with a positive cornea, so lid closure drives Fp1/Fp2 positive — and because EEG is displayed negative-up, positive reads downward. Blinking needs an awake patient with the eyes open — selecting this switches Background State to Awake and Eyes Open on.' },
       { id: 'eye-flutter',  name: 'Eye Flutter',            desc: 'Rapid repeated fluttering of the eyelids: a run of blink-like positive deflections, about 3-4 a second, DOWN on the frontopolar rows and confined to the frontal leads, with no spike underneath — which is how it is told from frontal spike-and-wave. Awake — selecting this switches Background State to Awake.' },
@@ -128,6 +131,7 @@ export const PATTERN_CATEGORIES: PatternCategory[] = [
     id: 'activation',
     name: 'Activation Procedures',
     color: '#a78bfa',     // violet
+    group: 'Activation Procedures',
     patterns: [
       { id: 'photic',            name: 'Photic Stimulation',  desc: 'Intermittent photic stimulation: a strobe stepped through 1-30 Hz. The normal finding is the photic driving response — rhythmic activity over O1/O2, time-locked to the flashes, at the flash rate and its harmonics. Best elicited between 8 and 20 Hz, near the subject\'s own alpha frequency; little or no driving at 1-2 Hz or above 30. It must be symmetric — a persistently one-sided driving response is the abnormality. Trains here are 6 s with 3 s rests so the whole series fits in about two minutes; clinically they are ~10 s with at least 7 s between. Performed awake (drowsiness tolerated): selecting this from sleep switches Background State to Awake.' },
       { id: 'hyperventilation',  name: 'Hyperventilation',     desc: 'Three minutes of overbreathing, producing the HV "build-up": generalised rhythmic slowing that grows through the procedure, starts as theta and deepens into delta, and is frontally predominant in adults. It resolves within about a minute of stopping — persistence well beyond that is itself a finding. A build-up is a normal response, more marked in children and young adults, so it is not by itself an abnormality. Watch it grow, then watch it go: the toggle restarts the procedure from the beginning each time it is switched on. It needs a patient who can overbreathe: selecting this from sleep switches Background State to Awake.' },

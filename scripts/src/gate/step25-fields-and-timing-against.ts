@@ -4,7 +4,7 @@ import { SimulationSource } from '../../../artifacts/eeg-simulator/src/engine/ad
 import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import { commonAverage, computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
 import { welch, spectralPeak } from '../dsp';
-import { toggle, quizPage, effective } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
+import { quizPage, effective } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { ANTERIOR_SITES, FS, IPSI_EAR, POSTERIOR_SITES, SLEEP_OPTS, absPeak, check, displayContribAll, eventIntervals, largestSideDifference, largestStep, meanPeakAt, rmsOf, runEngineState, section, step, runDisplay } from './harness';
 
 // ===========================================================================

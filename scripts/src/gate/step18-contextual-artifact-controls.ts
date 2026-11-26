@@ -1,10 +1,9 @@
-import { EegEngine, sampleSubject } from '../../../artifacts/eeg-simulator/src/engine/engine';
+import { EegEngine } from '../../../artifacts/eeg-simulator/src/engine/engine';
 import type { EngineOptions, ArtifactGates } from '../../../artifacts/eeg-simulator/src/engine/engine';
 import type { ArtifactParams } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
 import { welch, std, spectralPeak } from '../dsp';
 import { ALL_ELECTRODES } from '../../../artifacts/eeg-simulator/src/utils/montages';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { FS, bandPower, check, cz, section, step } from './harness';
+import { FS, bandPower, check, section, step } from './harness';
 
 step('\n=== Step 18: contextual artifact controls (ArtifactParams) ===\n');
 // Every check below isolates one artifact by DIFFERENCE against a same-seed run

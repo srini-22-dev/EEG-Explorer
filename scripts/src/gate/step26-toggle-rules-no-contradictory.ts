@@ -1,9 +1,7 @@
 import type { PatientState } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
 import { PATTERN_CATEGORIES } from '../../../artifacts/eeg-simulator/src/utils/patterns';
-import { EDUCATIONAL_ANNOTATIONS } from '../../../artifacts/eeg-simulator/src/utils/annotations';
 import { PATTERN_SOURCES } from '../../../artifacts/eeg-simulator/src/engine/sources/registry';
 import { TOGGLE_RULES, STATE_DEFAULTS, initialToggles, effective, violations, toggle, enterState, clearToggles, setPage, quizPage } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { join } from 'node:path';
 import { check, section, step } from './harness';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +27,10 @@ section(null, () => {
     ruleIds.filter(id => ![id, ...(TOGGLE_RULES[id].requires ?? []), ...(TOGGLE_RULES[id].excludes ?? [])]
       .every(x => ids.includes(x))).length, 0, 0);
   // The registries a toggle passes through agree with one another (2026-10-23 audit:
-  // three toggles had no on-page cue though annotations.ts promises one for every
-  // pattern, and three moved the record to Awake without their description saying
-  // so, as every other state-moving description does).
+  // three moved the record to Awake without their description saying so, as every
+  // other state-moving description does). The on-page cue registry this also checked
+  // went with the top-left teaching legend it drew (owner, 2026-11-26).
   const pats = PATTERN_CATEGORIES.flatMap(c => c.patterns);
-  check('registries: toggles with no on-page cue (annotations.ts)', pats.filter(p => !EDUCATIONAL_ANNOTATIONS[p.id]).length, 0, 0);
   const STATE_WORD: Record<string, PatientState> = { Awake: 'awake', Drowsy: 'drowsy', N1: 'n1', N2: 'n2', N3: 'n3', REM: 'rem' };
   check('registries: descriptions whose "switches Background State to X" disagrees with the rule, or a rule that moves the state unsaid',
     pats.filter(p => {

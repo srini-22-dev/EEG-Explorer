@@ -71,11 +71,3 @@ export function readNifti(file: string): NiftiVolume {
 
   return { dims: [nx, ny, nz], pixdim, affine, data };
 }
-
-export function applyAffine(affine: number[][], vx: number, vy: number, vz: number): [number, number, number] {
-  return [
-    affine[0][0] * vx + affine[0][1] * vy + affine[0][2] * vz + affine[0][3],
-    affine[1][0] * vx + affine[1][1] * vy + affine[1][2] * vz + affine[1][3],
-    affine[2][0] * vx + affine[2][1] * vy + affine[2][2] * vz + affine[2][3],
-  ];
-}

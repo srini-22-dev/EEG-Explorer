@@ -1,6 +1,6 @@
 import { welch, autocorr, spectralPeak } from '../dsp';
 import { renderTrace } from '../renderTrace';
-import { ANTERIOR_SITES, FS, IPSI_EAR, POSTERIOR_SITES, SCRATCH, absPeak, bandPower, bestLag, check, corr, cz, displayContrib, displayContribAll, eventIntervals, largestSideDifference, largestStep, meanPeakAt, pctP2p, runDisplay, section, step } from './harness';
+import { ANTERIOR_SITES, FS, IPSI_EAR, POSTERIOR_SITES, SCRATCH, absPeak, bandPower, bestLag, check, corr, displayContrib, displayContribAll, eventIntervals, largestSideDifference, largestStep, meanPeakAt, pctP2p, runDisplay, section, step } from './harness';
 
 step('\n=== Step 24: non-epileptiform in DISPLAY space (A5 audit) ===\n');
 

@@ -1,5 +1,5 @@
 import { welch, spectralPeak } from '../dsp';
-import { FS, check, cz, displayContrib, pctP2p, runDisplay, section, step, win, winPower } from './harness';
+import { FS, check, displayContrib, pctP2p, runDisplay, section, step, winPower } from './harness';
 
 step('\n=== Step 22: ictal in DISPLAY space (A7 audit) ===\n');
 
@@ -25,7 +25,7 @@ section('Absence (display space, reference-car): peak frequency lands in the typ
   // less of it than Fz-AVG (frontal predominance survives the CAR transform).
   const o1 = displayContrib('reference-car', 'awake', 'absence-ictal', 'O1-AVG', 12, 7);
   const o1Win = o1.subarray(Math.floor(4.5 * FS), Math.floor(8 * FS));
-  const fzPow = winPower(fzWin, 2.5, 3.5), o1Pow = winPower(o1Win, 2.5, 3.5);
+  const o1Pow = winPower(o1Win, 2.5, 3.5);
   check('absence O1-AVG carries real 2.5-3.5 Hz power (generalised field reaches occiput)',
     o1Pow, 1, 1e6, ' uV^2');
   // Frontal predominance is read on an EAR reference, not the common average.
@@ -79,7 +79,6 @@ section('\nGTC (display space, reference-car): recruiting -> clonic slowing -> p
   // phase is t in [6,16), clonic [16,61), suppression [61,96).
   const gt = runDisplay('reference-car', 'awake', ['gtc-ictal'], 92, 11);
   const fzIdx = gt.montage.channels.findIndex((c) => c.label === 'Fz-AVG');
-  const czIdx = gt.montage.channels.findIndex((c) => c.label === 'Cz-AVG');
   const slice = (ch: number, t0: number, t1: number) =>
     gt.data[ch].subarray(Math.floor(t0 * FS), Math.floor(t1 * FS));
 

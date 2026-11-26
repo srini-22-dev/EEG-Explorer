@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Montage, ALL_ELECTRODES, isAux } from '../utils/montages';
+import { Montage, isAux } from '../utils/montages';
 import type { SimSettings } from '../utils/simTypes';
 import { commonAverage, computeChannelVoltage } from '../utils/computeChannel';
 import { markRowSizes, markRows, markRowSigns, markBlocks } from '../utils/markRows';
@@ -9,7 +9,7 @@ import { PATTERN_BY_ID, PATTERN_CATEGORIES } from '../utils/patterns';
 import { liveArtifacts, isLiveOn } from '../utils/liveArtifacts';
 import type { LiveArtifacts } from '../engine/engine';
 import { THEMES, EEGTheme } from '../utils/themes';
-import { EDUCATIONAL_ANNOTATIONS, PATTERN_COLOR, REGION_ORDER } from '../utils/annotations';
+import { PATTERN_COLOR } from '../utils/annotations';
 import { Pause, Play } from 'lucide-react';
 import { buildLayout, GAP_UNITS } from './canvasLayout';
 import { useCanvasPointer, drawMeasureTools } from './canvasPointer';
@@ -21,7 +21,6 @@ import {
 } from '../utils/highlightStore';
 import {
   PX_PER_MM_X,
-  MM_PER_ROW,
   MINOR_GRID_PX,
   pxPerMmFromHeight,
   pxPerUV as calcPxPerUV,
@@ -63,11 +62,12 @@ const fmtBack = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(se
 type EEGCanvasProps = {
   montage: Montage;
   settings: SimSettings;
-  activeEffectsLabel: string;
   theme: EEGTheme;
   showAnnotations: boolean;
   /** The list of artifacts at the top right, each marked on now or resting (separate from the trace's arrows). */
   showArtifactList: boolean;
+  /** The background-state name at the top right. Off in the quiz, where it gives the answer away. */
+  showStateLabel: boolean;
   isFrozen: boolean;
   setIsFrozen: (b: boolean) => void;
   dataBuffer: React.MutableRefObject<number[][]>;
@@ -116,8 +116,8 @@ function lowerBound(arr: number[], value: number): number {
 }
 
 export function EEGCanvas({
-  montage, settings, activeEffectsLabel,
-  theme, showAnnotations, showArtifactList, isFrozen, setIsFrozen,
+  montage, settings,
+  theme, showAnnotations, showArtifactList, showStateLabel, isFrozen, setIsFrozen,
   dataBuffer, timeBuffer, graphHover = true
 }: EEGCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -127,14 +127,14 @@ export function EEGCanvas({
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const labelRef = useRef(activeEffectsLabel);
-  labelRef.current = activeEffectsLabel;
   const themeRef = useRef(THEMES[theme]);
   themeRef.current = THEMES[theme];
   const annotationsRef = useRef(showAnnotations);
   annotationsRef.current = showAnnotations;
   const artifactListRef = useRef(showArtifactList);
   artifactListRef.current = showArtifactList;
+  const stateLabelRef = useRef(showStateLabel);
+  stateLabelRef.current = showStateLabel;
   const frozenRef = useRef(isFrozen);
   frozenRef.current = isFrozen;
 
@@ -220,6 +220,9 @@ export function EEGCanvas({
   // For an artifact's fields and a montage: its size on each channel, and which
   // way it moves each one.
   const markRowsRef = useRef(new WeakMap<object, Map<Montage, { sizes: number[]; signs: number[] }>>());
+  // Arrows and boxes drawn on the last frame, per 1000 px of trace, which sizes
+  // this frame's tags (see markScale in the render loop).
+  const markDensityRef = useRef(0);
 
   useEffect(() => {
     const frames = rawFrames.current;
@@ -526,13 +529,9 @@ export function EEGCanvas({
         ctx.restore();
       }
 
-      // 5b. Annotations — a universal teaching legend. Every active pattern that
-      // has a cue contributes one line; they are sorted so the stack runs in the
-      // same top-to-bottom order as the montage rows they describe, and stacked
-      // with a fixed pitch so no two ever overlap however many are on at once.
-      // The cue names its own channels; the arrows drawn first are for the things
-      // that come and go — artifacts and the sleep graphoelements — which are
-      // easiest to learn by being pointed at.
+      // 5b. Annotations: the per-event marks. (A top-left legend of one sentence per
+      // active pattern used to sit here; the owner removed it, 2026-11-26, since the
+      // info panel carries those explanations.)
       if (annotationsRef.current) {
         // Arrows. Every artifact and sleep graphoelement the engine reports
         // (ArtifactMark) gets one on each row it is large on in this montage, at
@@ -540,7 +539,18 @@ export function EEGCanvas({
         // sample time, so they scroll with the waves they point at.
         const tb = timeBuffer.current;
         const tEnd = tb.length ? tb[tb.length - 1] : -Infinity;
-        ctx.font = '10px sans-serif';
+        // Tag size scales with how crowded the page is, never with which rows are
+        // marked (owner, 2026-11-26: "clear where ever the artifact is ... make the
+        // annotations smaller if there are too many"). Density is last frame's
+        // arrows + boxes per 1000 px of trace: up to MARKS_FULL_SIZE they are full
+        // size (10 px text); beyond it they shrink as sqrt(MARKS_FULL_SIZE / density),
+        // so tag area falls in proportion, down to 0.6x (arrows) with text held at 8 px.
+        const MARKS_FULL_SIZE = 25;
+        const k = Math.min(1, Math.max(0.6, Math.sqrt(MARKS_FULL_SIZE / Math.max(1, markDensityRef.current))));
+        const fontPx = Math.max(8, 10 * k);
+        const tagH = fontPx + 4, padX = 4 * k;
+        let drawnMarks = 0;
+        ctx.font = `${fontPx}px sans-serif`;
         ctx.textAlign = 'center';
         const rowOfChannel = new Map(layout.filter(r => r.channelIndex >= 0).map(r => [r.channelIndex, r]));
         // Every arrow carries its artifact's name (the owner, 2026-10-14: "all arrows
@@ -575,11 +585,11 @@ export function EEGCanvas({
           const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
           const label = (x: number, ty: number) => {
             const textW = ctx.measureText(text).width;
-            const box = { x0: x - textW / 2 - 4, y0: ty - 7, x1: x + textW / 2 + 4, y1: ty + 7, text };
+            const box = { x0: x - textW / 2 - padX, y0: ty - tagH / 2, x1: x + textW / 2 + padX, y1: ty + tagH / 2, text };
             if (drawnLabels.some(b => b.text === text && b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) return;
             drawnLabels.push(box);
             ctx.fillStyle = currentTheme.overlayBg;
-            ctx.fillRect(box.x0, box.y0, textW + 8, 14);
+            ctx.fillRect(box.x0, box.y0, textW + 2 * padX, tagH);
             ctx.fillStyle = currentTheme.overlayText;
             ctx.textBaseline = 'middle';
             ctx.fillText(text, x, ty);
@@ -607,7 +617,8 @@ export function EEGCanvas({
               ctx.roundRect(xa, y0, xb - xa, y1 - y0, 5);
               ctx.stroke();
               const textW = ctx.measureText(text).width;
-              label(Math.min(xa + 6 + textW / 2, xb - textW / 2 - 4), y0 + 9);
+              drawnMarks++;
+              label(Math.min(xa + 6 + textW / 2, xb - textW / 2 - padX), y0 + tagH / 2 + 2);
             }
             continue;
           }
@@ -648,48 +659,23 @@ export function EEGCanvas({
             // deflection (and for a continuous artifact, which has no direction),
             // from below for a downward one.
             const dir = y <= traceY(centerY, data[j0], pxPerUV) ? -1 : 1;
-            const tip = y + dir * 5, tail = y + dir * 22;
+            const tip = y + dir * 5 * k, tail = y + dir * 22 * k;
+            drawnMarks++;
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
-            ctx.lineWidth = 1.6;
+            ctx.lineWidth = 1.6 * k;
             ctx.beginPath();
-            ctx.moveTo(x, tail); ctx.lineTo(x, tip + dir * 5);
+            ctx.moveTo(x, tail); ctx.lineTo(x, tip + dir * 5 * k);
             ctx.stroke();
             ctx.beginPath();
-            ctx.moveTo(x, tip); ctx.lineTo(x - 4, tip + dir * 7); ctx.lineTo(x + 4, tip + dir * 7);
+            ctx.moveTo(x, tip); ctx.lineTo(x - 4 * k, tip + dir * 7 * k); ctx.lineTo(x + 4 * k, tip + dir * 7 * k);
             ctx.closePath();
             ctx.fill();
-            label(x, tail + dir * 9);
+            label(x, tail + dir * (tagH / 2 + 2));
           }
         }
 
-        const cues = [];
-        for (const pattern of currentSettings.activePatterns) {
-          const ann = EDUCATIONAL_ANNOTATIONS[pattern];
-          const between = currentSettings.patternOptions?.focalPlacement === 'between';
-          if (ann) cues.push({ text: (between && ann.textBetween) || ann.text, color: PATTERN_COLOR[pattern] ?? currentTheme.overlayText, order: REGION_ORDER[ann.targetRegion] });
-        }
-        cues.sort((a, b) => a.order - b.order);
-
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        const x0 = lblW + 10;       // clear of the label strip
-        const pitch = 21;
-        let cy = 52;                // below the freeze button in the top-left
-        for (const cue of cues) {
-          if (cy > h - 28) break;   // ran out of vertical room; drop the rest
-          const textW = ctx.measureText(cue.text).width;
-          ctx.fillStyle = currentTheme.overlayBg;
-          ctx.fillRect(x0 - 6, cy - 9, textW + 18, 18);
-          // Category-coloured tab on the left edge ties the cue to its control-
-          // panel section at a glance.
-          ctx.fillStyle = cue.color;
-          ctx.fillRect(x0 - 6, cy - 9, 3, 18);
-          ctx.fillStyle = currentTheme.overlayText;
-          ctx.fillText(cue.text, x0 + 4, cy);
-          cy += pitch;
-        }
+        markDensityRef.current = drawnMarks * 1000 / Math.max(1, w - lblW);
       }
 
       // 6. Channel label strip
@@ -747,7 +733,7 @@ export function EEGCanvas({
         ctx.font         = '11px sans-serif';
         ctx.textAlign    = 'right';
         ctx.textBaseline = 'top';
-        ctx.fillText(`${stateLabel}   ${currentSettings.sensitivity} µV/mm · ${currentSettings.speed} mm/s`, w - 12, 6);
+        ctx.fillText(`${stateLabelRef.current ? stateLabel + '   ' : ''}${currentSettings.sensitivity} µV/mm · ${currentSettings.speed} mm/s`, w - 12, 6);
         // Whole-page patterns in force now, one line each under the state.
         let py = 24;
         for (const { text, color } of pageLabels) {
@@ -811,19 +797,7 @@ export function EEGCanvas({
         ctx.fillText('100µV', cbX - 7, cbY - calibPx / 2);
       }
 
-      // 9. Active patterns overlay bar
-      const activeLabel = labelRef.current;
-      if (activeLabel) {
-        ctx.fillStyle = currentTheme.overlayBg;
-        ctx.fillRect(lblW + 2, h - 20, w - lblW - 20, 18);
-        ctx.fillStyle    = currentTheme.overlayText;
-        ctx.font         = '10px sans-serif';
-        ctx.textAlign    = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`● ${activeLabel}`, lblW + 8, h - 11);
-      }
-      
-      // 10. Measurement Tool Render
+      // 9. Measurement Tool Render
       drawMeasureTools(ctx, pointer.tools, frozenRef.current, { pxPerSec, lblW, w, h });
 
       rafId = requestAnimationFrame(render);

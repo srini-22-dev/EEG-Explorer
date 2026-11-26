@@ -1,7 +1,6 @@
 import { EegEngine } from '../../../artifacts/eeg-simulator/src/engine/engine';
 import type { PatientState } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
 import { welch, spectralPeak } from '../dsp';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { FS, bandPower, check, corr, displayContrib, displayContribAll, pctP2p, runDisplay, section, step } from './harness';
 
 // ---------------------------------------------------------------------------

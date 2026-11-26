@@ -1,5 +1,4 @@
 import type { PatientState } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { SLEEP_OPTS, absPeak, bandPower, base, baseCzP2p, baseO1P2p, check, contrib, o1c, pctP2p, runEngineState, section, step } from './harness';
 
 step('\n=== Step 13: normal variants (pattern sources) ===\n');

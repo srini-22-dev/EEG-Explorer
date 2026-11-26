@@ -89,7 +89,9 @@ export function TopBar({
 }: Props) {
   const divider = <div className="w-px self-stretch bg-[#2e4a2e]" />;
   return (
-    <div className="flex items-end gap-3 px-3 py-1.5 bg-[#1e2a1e] border-b border-[#2e4a2e] text-slate-200 overflow-x-auto flex-shrink-0">
+    // Wraps rather than scrolls: scrolling hid Recording conditions off the right edge
+    // at 1440 px and below.
+    <div className="flex flex-wrap items-end gap-x-3 gap-y-1 px-3 py-1.5 bg-[#1e2a1e] border-b border-[#2e4a2e] text-slate-200 flex-shrink-0">
       <WheelSelect label="Montage" value={montageId} options={MONTAGE_IDS} wide
         format={id => MONTAGES[id].name} onChange={setMontageId} />
       <label className="flex items-center gap-1.5 pb-1 cursor-pointer select-none shrink-0" title="A respiration row under the ECG, to check breathing and ventilator artifact against">

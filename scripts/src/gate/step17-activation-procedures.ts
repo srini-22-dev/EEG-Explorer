@@ -1,4 +1,3 @@
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { SLEEP_OPTS, bandPower, base, check, runEngineState, section, step, win, winPower } from './harness';
 
 step('\n=== Step 17: activation procedures (pattern sources) ===\n');

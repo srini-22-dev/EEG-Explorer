@@ -37,17 +37,6 @@ export function setHoverElectrodes(electrodes: Set<string>) {
   notify();
 }
 
-export function toggleClickElectrode(electrode: string) {
-  const newSet = new Set(state.clickedElectrodes);
-  if (newSet.has(electrode)) {
-    newSet.delete(electrode);
-  } else {
-    newSet.add(electrode);
-  }
-  state = { ...state, clickedElectrodes: newSet };
-  notify();
-}
-
 export function setHoverChannels(channels: Set<number>) {
   state = { ...state, hoveredChannels: channels };
   notify();
@@ -61,16 +50,6 @@ export function toggleClickChannel(channelIndex: number) {
     newSet.add(channelIndex);
   }
   state = { ...state, clickedChannels: newSet };
-  notify();
-}
-
-export function clearAllHighlights() {
-  state = {
-    hoveredElectrodes: new Set(),
-    clickedElectrodes: new Set(),
-    hoveredChannels: new Set(),
-    clickedChannels: new Set(),
-  };
   notify();
 }
 

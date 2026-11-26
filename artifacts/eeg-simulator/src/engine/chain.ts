@@ -427,15 +427,3 @@ export function sampleDefects(seed: number, nChannels: number, burden = 1): Chan
   }
   return out;
 }
-
-/**
- * Average reference. §7 warns this is itself a distortion when electrode
- * coverage is limited — with a 19-electrode 10-20 array it is, so this is
- * applied as an explicit, inspectable stage rather than assumed away.
- */
-export function applyAverageReference(x: Float64Array) {
-  let mean = 0;
-  for (let i = 0; i < x.length; i++) mean += x[i];
-  mean /= x.length;
-  for (let i = 0; i < x.length; i++) x[i] -= mean;
-}

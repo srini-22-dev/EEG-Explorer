@@ -17,35 +17,6 @@ import { type Mesh } from './mesh';
 
 export type Dims = [number, number, number];
 
-/** Otsu's method: the threshold that maximises between-class variance of the histogram. */
-export function otsuThreshold(data: Float32Array, nBins = 256): number {
-  let min = Infinity, max = -Infinity;
-  for (const v of data) { if (v < min) min = v; if (v > max) max = v; }
-  const hist = new Float64Array(nBins);
-  const scale = nBins / (max - min || 1);
-  for (const v of data) {
-    const b = Math.min(nBins - 1, Math.floor((v - min) * scale));
-    hist[b]++;
-  }
-  const total = data.length;
-  let sumAll = 0;
-  for (let b = 0; b < nBins; b++) sumAll += b * hist[b];
-
-  let sumB = 0, wB = 0, best = -1, bestVar = -1;
-  for (let b = 0; b < nBins; b++) {
-    wB += hist[b];
-    if (wB === 0) continue;
-    const wF = total - wB;
-    if (wF === 0) break;
-    sumB += b * hist[b];
-    const meanB = sumB / wB;
-    const meanF = (sumAll - sumB) / wF;
-    const between = wB * wF * (meanB - meanF) ** 2;
-    if (between > bestVar) { bestVar = between; best = b; }
-  }
-  return min + (best + 0.5) / scale;
-}
-
 /**
  * Flood-fills air reachable from outside the volume through sub-threshold
  * voxels, then returns a mask that also fills any sub-threshold pocket the

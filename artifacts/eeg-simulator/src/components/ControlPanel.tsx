@@ -74,6 +74,17 @@ const PATIENT_STATES: { value: PatientState; label: string; desc: string; matche
   { value: 'rem',    label: 'REM',     desc: 'Paradoxical sleep: diffusely attenuated, low-voltage mixed-frequency background that resembles N1 — the background alone does not identify it. What does: rapid eye movements (sharply contoured, opposing at the lateral frontal leads, faster upslope than downslope) and near-absent muscle tone.' },
 ];
 
+// Sidebar order of the pattern groups, in the order a learner meets them: the
+// normal record first, then what is abnormal, then the procedures that provoke
+// it, then the artifacts that imitate it. Categories keep their registry order
+// within a group (Array.sort is stable); the registry order itself is untouched.
+const GROUP_ORDER = ['Normal Background & Variants', 'Abnormal / Epileptiform', 'Activation Procedures', 'Artifacts'];
+const ORDERED_CATEGORIES = [...PATTERN_CATEGORIES].sort(
+  (a, b) => GROUP_ORDER.indexOf(a.group ?? '') - GROUP_ORDER.indexOf(b.group ?? ''));
+
+// One heading style for every sidebar section.
+const SECTION_HEADING = 'text-[10px] font-semibold text-slate-400 uppercase tracking-widest';
+
 export function ControlPanel({
   montageId,
   activePatterns, togglePattern,
@@ -113,7 +124,7 @@ export function ControlPanel({
   const [patternQuery, setPatternQuery] = useState('');
   const q = patternQuery.trim().toLowerCase();
   const visibleCats = q
-    ? PATTERN_CATEGORIES
+    ? ORDERED_CATEGORIES
         .map(cat => ({
           ...cat,
           patterns: cat.patterns.filter(p =>
@@ -122,22 +133,64 @@ export function ControlPanel({
             cat.name.toLowerCase().includes(q)),
         }))
         .filter(cat => cat.patterns.length > 0)
-    : PATTERN_CATEGORIES;
+    : ORDERED_CATEGORIES;
 
   return (
-    <div className="w-72 h-full flex flex-col bg-[#1e2a1e] border-r border-[#2e4a2e] text-slate-200 overflow-y-auto flex-shrink-0 text-sm">
+    // One scroll container: the middle section. Header (with the polarity key)
+    // and footer stay pinned.
+    <div className="w-72 h-full flex flex-col bg-[#1e2a1e] border-r border-[#2e4a2e] text-slate-200 overflow-hidden flex-shrink-0 text-sm">
 
       {/* ── Header ── */}
       <div className="px-4 pt-4 pb-3 border-b border-[#2e4a2e]">
         <h1 className="text-base font-bold text-emerald-400 tracking-tight">EEG Simulator</h1>
         <p className="text-[11px] text-slate-500 mt-0.5">Clinical Teaching Workstation</p>
+
+        {/*
+          The display convention, stated on screen — pinned in the header so it
+          is in view whatever else is scrolled.
+
+          Negative-up is the single assumption a reader needs before any
+          deflection on this display means anything, and it is the one thing
+          the app had never said anywhere — which is exactly how a downward
+          blink gets read as wrong. It is not a setting: it is fixed for the
+          whole app (EEGCanvas draws y = centreY + v) and every pattern's
+          polarity is asserted against it, so this is a legend, not a control.
+        */}
+        <div className="mt-3 flex items-center gap-2 rounded border border-emerald-800/70 bg-[#192219] px-2 py-1.5">
+          <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" className="shrink-0">
+            <line x1="3" y1="13" x2="23" y2="13" stroke="#475569" strokeWidth="1" strokeDasharray="2 2" />
+            <path d="M13 13 L13 4 M13 4 L10 7.5 M13 4 L16 7.5" fill="none" stroke="#4ade80" strokeWidth="1.4" strokeLinecap="round" />
+            <path d="M13 13 L13 22 M13 22 L10 18.5 M13 22 L16 18.5" fill="none" stroke="#64748b" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <div className="text-[11px] leading-tight min-w-0">
+            <div className="text-[9px] text-slate-500 uppercase tracking-widest">Polarity</div>
+            <div className="text-emerald-300 font-mono font-semibold">up = negative (−)</div>
+            <div className="text-slate-400 font-mono">down = positive (+)</div>
+          </div>
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500 leading-tight">
+          Clinical convention: a channel whose input 1 is more positive than input 2 deflects downward.
+        </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+
+        {/* ── Learn ── */}
+        <div className="px-4 pt-4 pb-3 border-b border-[#2e4a2e]">
+          <h2 className={`${SECTION_HEADING} mb-2`}>Learn</h2>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" size="sm" className="h-9 text-xs border-slate-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/40" onClick={() => setTutorialMode(true)}>
+              <MonitorPlay className="w-3.5 h-3.5 mr-1" /> Tutorial
+            </Button>
+            <Button variant="outline" size="sm" className="h-9 text-xs border-slate-700 bg-purple-900/30 text-purple-300 hover:bg-purple-800/40" onClick={() => setQuizMode(true)}>
+              <Brain className="w-3.5 h-3.5 mr-1" /> Quiz
+            </Button>
+          </div>
+        </div>
 
         {/* ── Patient State ── */}
         <div className="px-4 pt-4 pb-3 border-b border-[#2e4a2e]">
-          <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2">
+          <h2 className={`${SECTION_HEADING} mb-2`}>
             Background State
           </h2>
           <div className="flex flex-col gap-1">
@@ -171,8 +224,8 @@ export function ControlPanel({
 
         {/* ── Pattern Library ── */}
         <div className="border-b border-[#2e4a2e]">
-          <div className="px-4 pt-3 pb-1 flex items-center justify-between">
-            <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
+          <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+            <h2 className={SECTION_HEADING}>
               Pattern Library
             </h2>
             {activeCount > 0 && (
@@ -215,19 +268,19 @@ export function ControlPanel({
             // badge keeps meaning "this many are on" while a search is active.
             const catActive  = PATTERN_CATEGORIES.find(c => c.id === cat.id)!
               .patterns.filter(p => activePatterns.has(p.id)).length;
-            // A super-group heading is drawn once, above the first category that
+            // A group heading is drawn once, above the first category that
             // carries a given `group` — so the three abnormality families read
-            // as one clinical block rather than three unrelated headings.
+            // as one clinical block, and activation procedures and artifacts
+            // each sit under a heading of their own instead of under whichever
+            // group happened to come before them.
             const showGroupHeader = !!cat.group && visibleCats[ci - 1]?.group !== cat.group;
             return (
               <React.Fragment key={cat.id}>
                 {showGroupHeader && (
-                  <div className="px-4 pt-3 pb-0.5 flex items-center gap-2">
-                    <span className="h-px flex-1 bg-[#2e4a2e]" />
-                    <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-widest whitespace-nowrap">
+                  <div className="px-4 pt-3 pb-1 mt-1 border-t border-[#2e4a2e]">
+                    <h3 className="text-[10px] font-semibold text-emerald-500/80 uppercase tracking-widest">
                       {cat.group}
-                    </span>
-                    <span className="h-px flex-1 bg-[#2e4a2e]" />
+                    </h3>
                   </div>
                 )}
                 {/* Category header */}
@@ -506,61 +559,80 @@ export function ControlPanel({
           })}
         </div>
 
-        {/* ── 3D Head Model ── */}
-        <div className="border-b border-[#2e4a2e]">
-          <div className="px-4 py-3 flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-                3D Head
-              </h2>
-              {setShow3DPanel && (
-                <Switch
-                  checked={show3DPanel}
-                  onCheckedChange={setShow3DPanel}
-                  className="data-[state=checked]:bg-emerald-600 scale-90"
-                />
-              )}
-            </div>
-            
-            {show3DPanel && setHeadOpacity && setBrainOpacity && (
-              <div className="space-y-3 mt-2 bg-[#192219] p-2 rounded">
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <Label className="text-[10px] text-slate-400">Skin Opacity</Label>
-                    <span className="text-[10px] text-slate-500">{Math.round(headOpacity * 100)}%</span>
-                  </div>
-                  <input 
-                    type="range" min="0" max="1" step="0.05" 
-                    value={headOpacity} 
-                    onChange={e => setHeadOpacity(parseFloat(e.target.value))}
-                    className="w-full accent-emerald-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <Label className="text-[10px] text-slate-400">Brain Opacity</Label>
-                    <span className="text-[10px] text-slate-500">{Math.round(brainOpacity * 100)}%</span>
-                  </div>
-                  <input 
-                    type="range" min="0" max="1" step="0.05" 
-                    value={brainOpacity} 
-                    onChange={e => setBrainOpacity(parseFloat(e.target.value))}
-                    className="w-full accent-emerald-500"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        {/* ── Display ── */}
+        <div className="px-4 pt-4 pb-3 space-y-3 border-b border-[#2e4a2e]">
+          <h2 className={SECTION_HEADING}>Display</h2>
 
-        {/* ── Tools & Export ── */}
-        <div className="px-4 py-3 space-y-3 border-b border-[#2e4a2e]">
-          <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Tools & Export</h2>
-          
+          {setShow3DPanel && (
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-slate-300">3D Head</Label>
+              <Switch
+                aria-label="3D head"
+                checked={show3DPanel}
+                onCheckedChange={setShow3DPanel}
+                className="data-[state=checked]:bg-emerald-600 scale-90"
+              />
+            </div>
+          )}
+
+          {show3DPanel && setHeadOpacity && setBrainOpacity && (
+            <div className="space-y-3 bg-[#192219] p-2 rounded">
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <Label className="text-[10px] text-slate-400">Skin Opacity</Label>
+                  <span className="text-[10px] text-slate-500">{Math.round(headOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={headOpacity}
+                  onChange={e => setHeadOpacity(parseFloat(e.target.value))}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <Label className="text-[10px] text-slate-400">Brain Opacity</Label>
+                  <span className="text-[10px] text-slate-500">{Math.round(brainOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={brainOpacity}
+                  onChange={e => setBrainOpacity(parseFloat(e.target.value))}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">FFT Spectrum</Label>
+            <Switch aria-label="FFT spectrum" checked={showSpectrum} onCheckedChange={setShowSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Per-channel Bands</Label>
+            <Switch aria-label="Per-channel bands" checked={showRightSpectrum} onCheckedChange={setShowRightSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Annotations on the trace</Label>
+            <Switch aria-label="Annotations on the trace" checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Artifact list (top right)</Label>
+            <Switch aria-label="Artifact list (top right)" checked={showArtifactList} onCheckedChange={setShowArtifactList} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-slate-300">Graph Hover Highlight</Label>
+            <Switch aria-label="Graph hover highlight" checked={graphHover} onCheckedChange={setGraphHover} className="scale-90 data-[state=checked]:bg-emerald-600" />
+          </div>
+
           <div className="flex items-center justify-between">
             <Label className="text-xs text-slate-300">Theme</Label>
-            <select 
-              value={theme} 
+            <select
+              value={theme}
               onChange={(e) => setTheme(e.target.value as EEGTheme)}
               className="bg-slate-800 text-xs border border-slate-700 rounded p-1 text-slate-200"
             >
@@ -569,33 +641,12 @@ export function ControlPanel({
               <option value="dark-mode">Dark Mode</option>
             </select>
           </div>
+        </div>
 
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Annotations on the trace</Label>
-            <Switch checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Artifact list (top right)</Label>
-            <Switch checked={showArtifactList} onCheckedChange={setShowArtifactList} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Graph Hover Highlight</Label>
-            <Switch checked={graphHover} onCheckedChange={setGraphHover} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">FFT Spectrum</Label>
-            <Switch checked={showSpectrum} onCheckedChange={setShowSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Per-channel Bands</Label>
-            <Switch checked={showRightSpectrum} onCheckedChange={setShowRightSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-2">
+        {/* ── Export ── */}
+        <div className="px-4 pt-4 pb-3 space-y-2">
+          <h2 className={SECTION_HEADING}>Export</h2>
+          <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 hover:bg-slate-800" onClick={() => exportCSV(dataBuffer.current, timeBuffer.current, MONTAGES[montageId])}>
               <Download className="w-3 h-3 mr-1" /> CSV
             </Button>
@@ -605,48 +656,6 @@ export function ControlPanel({
             }}>
               <Download className="w-3 h-3 mr-1" /> Image
             </Button>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/40" onClick={() => setTutorialMode(true)}>
-              <MonitorPlay className="w-3 h-3 mr-1" /> Tutorial
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 bg-purple-900/30 text-purple-300 hover:bg-purple-800/40" onClick={() => setQuizMode(true)}>
-              <Brain className="w-3 h-3 mr-1" /> Quiz
-            </Button>
-          </div>
-        </div>
-
-        {/* ── Display Settings ── */}
-        <div className="px-4 py-3 space-y-3">
-          <h2 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Display</h2>
-
-          {/*
-            The display convention, stated on screen.
-
-            Negative-up is the single assumption a reader needs before any
-            deflection on this display means anything, and it is the one thing
-            the app had never said anywhere — which is exactly how a downward
-            blink gets read as wrong. It is not a setting: it is fixed for the
-            whole app (EEGCanvas draws y = centreY + v) and every pattern's
-            polarity is asserted against it, so this is a legend, not a control.
-          */}
-          <div className="space-y-1 pt-1">
-            <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Polarity</Label>
-            <div className="flex items-center gap-2 rounded border border-slate-700 px-2 py-1.5">
-              <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" className="shrink-0">
-                <line x1="3" y1="13" x2="23" y2="13" stroke="#475569" strokeWidth="1" strokeDasharray="2 2" />
-                <path d="M13 13 L13 4 M13 4 L10 7.5 M13 4 L16 7.5" fill="none" stroke="#4ade80" strokeWidth="1.4" strokeLinecap="round" />
-                <path d="M13 13 L13 22 M13 22 L10 18.5 M13 22 L16 18.5" fill="none" stroke="#64748b" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-              <div className="text-[10px] leading-tight">
-                <div className="text-emerald-400 font-mono">up = negative (−)</div>
-                <div className="text-slate-500 font-mono">down = positive (+)</div>
-              </div>
-            </div>
-            <p className="text-[10px] text-slate-700 leading-tight">
-              Clinical convention: a channel whose input 1 is more positive than input 2 deflects downward.
-            </p>
           </div>
         </div>
       </div>

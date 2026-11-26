@@ -18,7 +18,6 @@ import { welch } from '../dsp';
 import { SimulationSource } from '../../../artifacts/eeg-simulator/src/engine/adapter';
 import { MONTAGES, ALL_ELECTRODES } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import { commonAverage, computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { defaultArtifactParams, defaultIctalParamsMap, type SimSettings } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
 
 import { mkdirSync } from 'node:fs';

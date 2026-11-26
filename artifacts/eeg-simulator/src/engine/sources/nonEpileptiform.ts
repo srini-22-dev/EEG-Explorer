@@ -17,7 +17,7 @@ import { BurstyOscillator } from '../bursts';
 import { deriveSeed, Gaussian } from '../rng';
 import { TransientSource } from './transient';
 import {
-  gaussian, multiToneSignal, triphasicWave, spikeSlowWave, DELTA_TONES, DELTA_TONE_NORM,
+  gaussian, multiToneSignal, triphasicWave, DELTA_TONES, DELTA_TONE_NORM,
 } from './morphology';
 import type { PatternSourceDescriptor, PatternGenerator } from './registry';
 

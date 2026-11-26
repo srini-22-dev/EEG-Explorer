@@ -3,7 +3,6 @@ import { welch, hilbertEnvelope, spectralPeak } from '../dsp';
 import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import type { ChannelDef } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import { computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 // A6 audit (Step 21): the pure morphology math for the interictal spike/slow-
 // wave complex, reused to build a genuine spike source anchored MIDWAY between
 // two electrodes (IK-003 case b) — every other spike source in the app is
@@ -11,7 +10,7 @@ import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 // signature and one has to be synthesized the same way Step 16's static
 // leadfield-gain precedent already does, just driven as a real time series.
 import { spikeSlowWave } from '../../../artifacts/eeg-simulator/src/engine/sources/morphology';
-import { FS, base, check, corr, displayContrib, midwaySource, pctP2p, runDisplay, section, step } from './harness';
+import { FS, check, corr, displayContrib, midwaySource, pctP2p, runDisplay, section, step } from './harness';
 
 step('\n=== Step 21: epileptiform in DISPLAY space (A6 audit) ===\n');
 

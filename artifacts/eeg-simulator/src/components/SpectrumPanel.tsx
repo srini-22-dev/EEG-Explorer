@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Montage } from '../utils/montages';
-import type { SimSettings } from '../utils/simTypes';
-import { FFT_BANDS, EPOCH_SAMPLES, calculateBandPower } from '../utils/fftBands';
+import { FFT_BANDS, channelBandPowers } from '../utils/fftBands';
 import { getHighlightState, subscribe } from '../utils/highlightStore';
 
 type SpectrumPanelProps = {
@@ -10,8 +9,21 @@ type SpectrumPanelProps = {
   montage: Montage;
   freezeYAxis: boolean;
   setFreezeYAxis: (b: boolean) => void;
-  settings: SimSettings;
 };
+
+/**
+ * What the y-axis carries. `channelBandPowers` (utils/fftBands.ts) takes the
+ * display-space channel in µV (computeChannelVoltage), and for each band sums
+ * (|X(f)|/N)² from the Goertzel at 0.5 Hz steps over the last 8 s — so the unit is
+ * µV², a power, and not a density (no division by Hz) and not dB. It is not a
+ * calibrated absolute band power either: the 0.5 Hz steps sample one DFT bin in
+ * four (8 s gives 0.125 Hz bins) and the sum is one-sided without the factor of 2.
+ * The bars are therefore right to compare with each other — band against band,
+ * channel against channel — but not against a µV² figure from another analyser,
+ * which is what the axis title's tooltip says.
+ */
+const POWER_UNIT = 'µV²';
+const POWER_NOTE = 'Band power in µV²: the squared DFT magnitude of this channel (as displayed, in µV), summed at 0.5 Hz steps across the band, over the last 8 s. Compare bars with each other; it is not a calibrated absolute band power.';
 
 /** Axis labels are read at a glance, so two significant figures is the useful precision. */
 const sig2 = (v: number) => Number(v.toPrecision(2));
@@ -19,10 +31,10 @@ const sig2 = (v: number) => Number(v.toPrecision(2));
 export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis }: SpectrumPanelProps) {
   const [selectedChannel, setSelectedChannel] = useState<number>(0);
   const [powerData, setPowerData] = useState<{ name: string; value: number; color: string }[]>([]);
-  // Band powers are amplitude-scaled µV from the Goertzel above, not a
-  // fixed-unit quantity — a hardcoded axis maximum would be wrong for a
-  // different subject, sensitivity or montage. So freezing captures whatever
-  // the axis is showing at the instant it is switched on, and holds that.
+  // Band powers (µV², see POWER_UNIT) scale with the subject, montage and
+  // pattern — a hardcoded axis maximum would be wrong for a different one. So
+  // freezing captures whatever the axis is showing at the instant it is switched
+  // on, and holds that.
   const [frozenMax, setFrozenMax] = useState<number | null>(null);
   const wasFrozen = useRef(false);
 
@@ -57,18 +69,10 @@ export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis
     const recompute = () => {
       const channelData = dataBuffer.current[effectiveChannel];
       if (!channelData || channelData.length === 0) return;
-
-      // Most recent EPOCH_SAMPLES, so the analysed span is fixed rather than
+      // The most recent EPOCH_SAMPLES, so the analysed span is fixed rather than
       // whatever the canvas happens to be showing.
-      const epoch = channelData.length > EPOCH_SAMPLES
-        ? channelData.slice(channelData.length - EPOCH_SAMPLES)
-        : channelData;
-
-      setPowerData(FFT_BANDS.map(b => ({
-        name: b.name,
-        value: calculateBandPower(epoch, 250, b.lo, b.hi),
-        color: b.color,
-      })));
+      const powers = channelBandPowers(channelData);
+      setPowerData(FFT_BANDS.map((b, i) => ({ name: b.name, value: powers[i], color: b.color })));
     };
 
     // Recompute up front as well as on the interval: the epoch is already in the
@@ -89,6 +93,9 @@ export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis
       <div className="flex justify-between items-center mb-2">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-bold text-emerald-400">FFT Spectrum Analysis</h3>
+          <span className="text-[10px] text-slate-400 cursor-help border-b border-dotted border-slate-600" title={POWER_NOTE}>
+            band power, {POWER_UNIT}
+          </span>
           {/* Legend — same colours the right-side panel and its bars use. */}
           <div className="flex flex-wrap gap-x-2 gap-y-0.5">
             {FFT_BANDS.map(b => (
@@ -130,15 +137,19 @@ export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis
       </div>
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={powerData}>
+          <BarChart data={powerData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
             <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
             <YAxis
               stroke="#94a3b8"
               fontSize={10}
               domain={frozenMax != null ? [0, frozenMax] : undefined}
-              tickFormatter={frozenMax != null ? (v: number) => String(sig2(v)) : undefined}
+              tickFormatter={(v: number) => String(sig2(v))}
+              label={{ value: `Power (${POWER_UNIT})`, angle: -90, position: 'insideLeft', offset: 0, fill: '#94a3b8', fontSize: 10, style: { textAnchor: 'middle' } }}
             />
-            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '4px' }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '4px' }}
+              formatter={(v: number) => [`${sig2(v)} ${POWER_UNIT}`, 'Band power']}
+            />
             <Bar dataKey="value" radius={[4, 4, 0, 0]}>
               {powerData.map((d, i) => (
                 <Cell key={i} fill={d.color} />

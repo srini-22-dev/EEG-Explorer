@@ -22,7 +22,7 @@
  */
 
 import { Gaussian, deriveSeed } from './rng';
-import type { SourceSpec, Vec3 } from './forward';
+import type { SourceSpec } from './forward';
 
 /**
  * Artifact generator positions. These sit outside the cortical shell — the eyes

@@ -1,6 +1,6 @@
 import { AperiodicSource } from '../../../artifacts/eeg-simulator/src/engine/aperiodic';
 import { welch, fitAperiodic, std, kurtosis } from '../dsp';
-import { DT, FS, check, corr, generate, section, step, tally } from './harness';
+import { DT, FS, check, generate, section, step, tally } from './harness';
 
 step('\n=== Step 1: aperiodic background ===\n');
 

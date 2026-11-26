@@ -7,11 +7,10 @@ import { PATTERN_CATEGORIES } from '../../../artifacts/eeg-simulator/src/utils/p
 import { PATTERN_INFO } from '../../../artifacts/eeg-simulator/src/utils/patternInfo';
 import { PATTERN_GALLERY } from '../../../artifacts/eeg-simulator/src/utils/patternGallery';
 import type { ArtifactMark } from '../../../artifacts/eeg-simulator/src/engine/engine';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FS, absPeak, bandPower, base, check, corr, section, step } from './harness';
+import { FS, absPeak, bandPower, check, section, step } from './harness';
 
 step('\n=== Step 28: normal variants and artifacts against SCORE, eegpedia, learningeeg and the IFCN glossary (2026-10-27) ===\n');
 // The owner's list (idea-vault inbox, 2026-10-27): wickets, RMTD, small sharp spikes,
@@ -75,7 +74,7 @@ section('Lateral rectus spike: on the side the eyes turn to, before the movement
   const lrs = marks.filter(({ m }) => m.id === 'eye-movement' && m.label === 'LRS');
   const ratios: number[] = [], lags: number[] = [];
   let wrongSide = 0, steps = 0;
-  for (const { i, m } of lrs) {
+  for (const { i } of lrs) {
     // Which side: the spike is on the F7 rows for a leftward movement, F8 for rightward.
     const peak = (row: string) => { let p = 0; for (let k = i; k <= i + 3 && k < d[row].length; k++) p = Math.max(p, Math.abs(d[row][k] - d[row][i])); return p; };
     const aL = peak('F7-T3'), aR = peak('F8-T4');
@@ -115,7 +114,7 @@ section('\nBreach rhythm: larger, faster, at one electrode only (IFCN "usually b
   const carRatios: number[] = [], defectRows: number[] = [], neighbours: number[] = [];
   const band = { delta: [] as number[], alpha: [] as number[], beta: [] as number[] };
   for (const seed of [3, 11, 21]) {
-    const car = runApp('reference-car', 'awake', ['breach'], 60, seed).data, car0 = runApp('reference-car', 'awake', [], 60, seed).data;
+    const car = runApp('reference-car', 'awake', ['breach'], 60, seed).data;
     carRatios.push(pctP2pOf(car['C4-AVG']) / pctP2pOf(car['C3-AVG']));
     // Per band against the ear: the average reference carries the whole head's alpha,
     // which the defect does not touch, and dilutes the gain at C4-AVG.

@@ -30,7 +30,7 @@
  */
 
 import { readNifti } from './nifti';
-import { fillEnclosedCavities, downsampleMask, extractBoundaryMesh, laplacianSmooth, type Dims } from './isosurface';
+import { fillEnclosedCavities, downsampleMask, extractBoundaryMesh, laplacianSmooth } from './isosurface';
 import { surfaceNets, boxDownsampleField, countBoundaryEdges, marchSphere } from './surfaceNets';
 import { quadricDecimate } from './quadricDecimate';
 import { writeBin, signedVolume, bbox, MODELS, type Mesh } from './mesh';

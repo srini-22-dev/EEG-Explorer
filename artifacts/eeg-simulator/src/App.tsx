@@ -122,14 +122,13 @@ export default function App() {
     patternOptions, filters, conditions,
   };
 
-  // Build active-effects label list for canvas overlay
-  const activeEffects = Array.from(effectivePatterns).slice(0, 5).join(' · ');
-
   return (
     <TooltipProvider>
       <div className={`flex h-screen w-full overflow-hidden font-sans ${theme === 'dark-mode' ? 'bg-[#121212]' : theme === 'white-paper' ? 'bg-white' : 'bg-[#c8e6c0]'}`}>
-        {/* Hidden, not removed, during the quiz: its switches name the answer. */}
-        <div className={quizMode ? 'contents invisible' : 'contents'}>
+        {/* Hidden, not removed, during the quiz: its switches name the answer. The quiz
+            panel docks in its place, so the trace keeps its full width and nothing
+            covers it. */}
+        <div className={quizMode ? 'relative h-full flex-shrink-0 invisible' : 'contents'}>
         <ControlPanel
           montageId={montageId}
           activePatterns={effectivePatterns} togglePattern={togglePattern}
@@ -152,6 +151,13 @@ export default function App() {
           brainOpacity={brainOpacity} setBrainOpacity={setBrainOpacity}
           infoId={infoId} onShowInfo={setInfoId}
         />
+        {quizMode && (
+          <QuizMode
+            onClose={() => setQuizMode(false)}
+            setActivePatterns={selectQuizPatterns}
+            setFreeze={setIsFrozen}
+          />
+        )}
         </div>
         <div className="flex-1 flex flex-col h-full relative min-w-0">
           <TopBar
@@ -181,10 +187,10 @@ export default function App() {
               <EEGCanvas
                 montage={montage}
                 settings={settings}
-                activeEffectsLabel={quizMode ? '' : activeEffects}
                 theme={theme}
                 showAnnotations={showAnnotations && !quizMode}
                 showArtifactList={showArtifactList && !quizMode}
+                showStateLabel={!quizMode}
                 isFrozen={isFrozen}
                 setIsFrozen={setIsFrozen}
                 dataBuffer={dataBuffer}
@@ -241,21 +247,10 @@ export default function App() {
                 montage={montage}
                 freezeYAxis={freezeYAxis}
                 setFreezeYAxis={setFreezeYAxis}
-                settings={settings}
               />
             </Suspense>
           )}
         </div>
-        
-        {quizMode && (
-          <QuizMode
-            onClose={() => setQuizMode(false)}
-            setPatientState={setPatientState}
-            setActivePatterns={selectQuizPatterns}
-            setFreeze={setIsFrozen}
-          />
-        )}
-        
         {tutorialMode && (
           <TutorialMode 
             onClose={() => setTutorialMode(false)}

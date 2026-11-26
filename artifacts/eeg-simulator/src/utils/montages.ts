@@ -64,26 +64,6 @@ export const GROUP_COLORS: Record<ChannelGroup, string> = {
   'ecg':              '#1b6b1b',
 };
 
-// ─── Helper: build a referential channel list in canonical order ──────────────
-function refChannels(
-  refEl: Electrode | 'AVG',
-  label: (el: Electrode, ref: Electrode | 'AVG') => string,
-): ChannelDef[] {
-  const ch: ChannelDef[] = [];
-
-  LEFT_ELECTRODES.forEach(el => {
-    ch.push({ label: label(el, refEl), active: el, reference: refEl, group: 'left-paramedian' });
-  });
-  RIGHT_ELECTRODES.forEach(el => {
-    ch.push({ label: label(el, refEl), active: el, reference: refEl, group: 'right-paramedian' });
-  });
-  CENTRAL_ELECTRODES.forEach(el => {
-    ch.push({ label: label(el, refEl), active: el, reference: refEl, group: 'central' });
-  });
-  ch.push({ label: 'ECG', active: 'ECG', group: 'ecg' });
-  return ch;
-}
-
 export const MONTAGES: Record<string, Montage> = {
   // The double banana: left parasagittal, right parasagittal, left temporal, right
   // temporal, then the midline Fz-Cz-Pz chain, with Fp1-F3 on the top row.

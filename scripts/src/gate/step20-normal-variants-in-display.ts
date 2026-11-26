@@ -1,5 +1,4 @@
-import { spikeSlowWave } from '../../../artifacts/eeg-simulator/src/engine/sources/morphology';
-import { FS, bandPower, base, check, displayContrib, section, step, displayContribAll } from './harness';
+import { FS, bandPower, check, displayContrib, section, step, displayContribAll } from './harness';
 
 step('\n=== Step 20: normal variants in DISPLAY space (A4 audit) ===\n');
 

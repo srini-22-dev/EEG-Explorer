@@ -1,5 +1,5 @@
 import React, { useMemo, useEffect, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { Montage, GROUP_COLORS, isAux } from '../utils/montages';
@@ -391,6 +391,58 @@ function MontageEdges({
   );
 }
 
+/** Space left round the head's bounding sphere when framed, as a fraction of its radius. */
+const FIT_MARGIN = 1.06;
+
+/**
+ * Frames the whole head in the panel at its real size, and again whenever the
+ * panel is resized.
+ *
+ * The camera used to sit at a fixed z = 3 with a 45° vertical field of view. A
+ * perspective camera's field of view is fixed vertically, so the horizontal one
+ * shrinks with the panel's aspect ratio — and this panel is a tall, narrow column
+ * (about 340 x 820 px at 1440 wide, aspect ~0.42), where z = 3 shows only about
+ * ±0.52 scene units across against a head that spans ±1. The sides of the head
+ * were off the panel. The fix fits the scalp mesh's bounding sphere inside
+ * whichever of the two fields of view is narrower, so it holds for any panel
+ * shape and, since a sphere looks the same from every side, at any orbit angle.
+ *
+ * On a resize only the distance changes: the camera stays on the line it was
+ * orbited to, so the user keeps the view they turned to. The orbit target is the
+ * sphere's centre so the head rotates about itself and stays centred.
+ */
+function FitHead() {
+  const skin = useMeshBin(SKIN_MESH);
+  const camera = useThree(s => s.camera);
+  const width = useThree(s => s.size.width);
+  const height = useThree(s => s.size.height);
+  const controls = useThree(s => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
+  const invalidate = useThree(s => s.invalidate);
+
+  useEffect(() => {
+    if (!skin || !(camera instanceof THREE.PerspectiveCamera) || width === 0 || height === 0) return;
+    if (!skin.boundingSphere) skin.computeBoundingSphere();
+    const sphere = skin.boundingSphere!;
+    const halfV = THREE.MathUtils.degToRad(camera.fov) / 2;
+    const halfH = Math.atan(Math.tan(halfV) * (width / height));
+    const distance = (sphere.radius * FIT_MARGIN) / Math.sin(Math.min(halfV, halfH));
+
+    const target = sphere.center.clone();
+    const dir = camera.position.clone().sub(controls?.target ?? new THREE.Vector3());
+    if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
+    camera.position.copy(target).add(dir.normalize().multiplyScalar(distance));
+    if (controls) {
+      controls.target.copy(target);
+      controls.update();
+    } else {
+      camera.lookAt(target);
+    }
+    invalidate();
+  }, [skin, camera, controls, width, height, invalidate]);
+
+  return null;
+}
+
 export function HeadModel3D({ montage, headOpacity = 0.3, brainOpacity = 0.8 }: HeadModel3DProps) {
   // Visual-only marker repositioning. These overrides move where a marker is
   // *drawn* (and the montage edges that touch it); they are deliberately NOT fed
@@ -490,6 +542,7 @@ export function HeadModel3D({ montage, headOpacity = 0.3, brainOpacity = 0.8 }: 
           requesting frames until it comes to rest and then stops on its own.
         */}
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.05} />
+        <FitHead />
       </Canvas>
     </div>
   );

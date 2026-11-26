@@ -29,7 +29,7 @@
  *   pnpm --filter @workspace/scripts exec tsx ./src/measureField.ts --toggle v-waves --state n2
  */
 import { SimulationSource } from '../../artifacts/eeg-simulator/src/engine/adapter';
-import { ALL_ELECTRODES, type ChannelDef } from '../../artifacts/eeg-simulator/src/utils/montages';
+import { ALL_ELECTRODES } from '../../artifacts/eeg-simulator/src/utils/montages';
 import { commonAverage, computeChannelVoltage } from '../../artifacts/eeg-simulator/src/utils/computeChannel';
 import {
   defaultArtifactParams, defaultIctalParamsMap,

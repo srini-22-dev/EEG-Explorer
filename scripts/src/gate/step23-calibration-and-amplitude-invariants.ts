@@ -1,9 +1,7 @@
-import { sampleSubject } from '../../../artifacts/eeg-simulator/src/engine/engine';
 import { traceY, ecgScale } from '../../../artifacts/eeg-simulator/src/utils/displayGeometry';
 import { MONTAGES } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import type { ChannelDef } from '../../../artifacts/eeg-simulator/src/utils/montages';
 import { computeChannelVoltage } from '../../../artifacts/eeg-simulator/src/utils/computeChannel';
-import { toggle } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
 import { SPEED_VALUES } from '../../../artifacts/eeg-simulator/src/utils/simTypes';
 // A8 audit (Step 23): renderTrace.ts drives the SAME geometry EEGCanvas.tsx
 // does (CLAUDE.md §4) and exposes its actual pxPerSec/pxPerMm/pxPerUV, so the

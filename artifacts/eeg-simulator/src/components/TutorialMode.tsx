@@ -15,25 +15,35 @@ const STEPS: TutorialStep[] = [
     title: "Welcome to EEG Reading",
     desc: "This is a standard 10-20 EEG recording. Let's start with a normal awake patient.",
     state: 'awake',
-    patterns: []
+    patterns: [],
+    montage: 'bipolar-ap'
   },
   {
+    // Distinct from step 1 on two counts: an ear-referenced montage, so O1/O2 each
+    // have a row of their own and the posterior maximum is read directly, and the
+    // eye-opening manoeuvre, whose open interval blocks the PDR (IK-007) — so the
+    // page shows reactivity, the property that makes a posterior rhythm the PDR.
+    // The manoeuvre's first opening comes ~0.3 s after it is switched on
+    // (OCULAR_FIRST_EVENT_LEAD_SEC), then about every 12 s.
     title: "The Alpha Rhythm",
-    desc: "In an awake, relaxed patient with eyes closed, you'll see the Posterior Dominant Rhythm (Alpha, 8-13 Hz) prominently in the occipital channels (O1/O2).",
+    desc: "In an awake, relaxed patient with the eyes closed, the Posterior Dominant Rhythm (alpha, 8-13 Hz) is largest over the occipital leads: O1-A1 and O2-A2 in this ear-referenced montage. Watch the eyes open on command (an upward sweep on the frontopolar rows): the alpha attenuates while they are open and returns once they close (a smaller downward sweep). That reactivity is what identifies it as the PDR.",
     state: 'awake',
-    patterns: []
+    patterns: ['eye-opening'],
+    montage: 'reference-ipsi'
   },
   {
     title: "Recognizing Artifacts",
     desc: "Eye blinks create large slow deflections in the frontal leads (Fp1/Fp2) due to the corneoretinal dipole.",
     state: 'awake',
-    patterns: ['blink']
+    patterns: ['blink'],
+    montage: 'bipolar-ap'
   },
   {
     title: "Sleep Stages: N2",
     desc: "As the patient falls deeper into sleep, N2 brings K-complexes — large, frontally maximal waves seen on every chain — and sleep spindles, 11-16 Hz bursts maximal over the central regions.",
     state: 'n2',
-    patterns: ['k-complex', 'spindles']
+    patterns: ['k-complex', 'spindles'],
+    montage: 'bipolar-ap'
   },
   {
     title: "Abnormal Patterns",
@@ -79,7 +89,7 @@ export function TutorialMode({ onClose, setPatientState, setActivePatterns, setM
               size="sm"
               onClick={() => setStepIndex(s => Math.max(0, s - 1))}
               disabled={stepIndex === 0}
-              className="text-slate-900"
+              className="border-slate-700 text-slate-300"
             >
               Previous
             </Button>

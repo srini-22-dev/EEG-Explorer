@@ -7,7 +7,6 @@ import { markRowSizes, markRows } from '../../../artifacts/eeg-simulator/src/uti
 import { PATTERN_CATEGORIES } from '../../../artifacts/eeg-simulator/src/utils/patterns';
 import type { ArtifactMark } from '../../../artifacts/eeg-simulator/src/engine/engine';
 import { initialToggles, effective, toggle, setPage, switchOff } from '../../../artifacts/eeg-simulator/src/utils/toggleRules';
-import { join } from 'node:path';
 import { FS, check, section, step } from './harness';
 
 // ===========================================================================
