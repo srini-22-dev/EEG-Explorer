@@ -223,6 +223,14 @@ export function EEGCanvas({
     else setBackMax(historyGeometry().max);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFrozen]);
+  // The history bar is always shown in normal use (owner, 2026-11-27), so while recording
+  // it keeps up with how much history there is, once a second.
+  useEffect(() => {
+    if (isFrozen || freshPageKey != null) return;
+    const id = setInterval(() => setBackMax(historyGeometry().max), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFrozen, freshPageKey]);
   // Paging while paused: the arrow and Page keys a page at a time (as a review station
   // pages), Home to the oldest, End to the newest; the wheel over the trace a second a notch.
   useEffect(() => {
@@ -932,17 +940,30 @@ export function EEGCanvas({
           </div>
         )}
       </div>
-      {/* Scroll-back: the retained history, oldest at the left, the newest at the right. */}
-      {isFrozen && backMax > 0 && (
-        <div className="absolute bottom-6 left-[74px] right-24 z-10 flex items-center gap-2 px-2 py-1 rounded bg-black/70 text-[11px] text-amber-200">
-          <span className="whitespace-nowrap font-mono">{back > 0 ? `−${fmtBack(back)}` : 'newest'}</span>
+      {/* Scroll-back: the retained history, oldest at the left, the newest at the right.
+          Always shown in normal use, not only once paused (owner, 2026-11-27: "make the
+          history for normal use also"): dragging it while recording pauses the page there,
+          and Space resumes at the newest sample. Never in the quiz, which has no history. */}
+      {freshPageKey == null && (
+        <div className={`absolute bottom-6 left-[74px] right-24 z-10 flex items-center gap-2 px-2 py-1 rounded bg-black/70 text-[11px] text-amber-200 transition-opacity ${
+          isFrozen ? '' : 'opacity-50 hover:opacity-100'}`}>
+          <span className="whitespace-nowrap font-mono">
+            {!isFrozen ? 'live' : back > 0 ? `−${fmtBack(back)}` : 'newest'}
+          </span>
           <input
-            type="range" min={0} max={backMax} step={0.1} value={backMax - back}
-            onChange={e => scrollBack(backMax - parseFloat(e.target.value))}
+            type="range" min={0} max={Math.max(backMax, 0.1)} step={0.1} value={backMax > 0 ? backMax - back : 0.1}
+            disabled={backMax <= 0}
+            onChange={e => {
+              if (!isFrozen) setIsFrozen(true);
+              scrollBack(backMax - parseFloat(e.target.value));
+            }}
             aria-label="Scroll back in time"
-            className="flex-1 accent-amber-500 cursor-pointer"
+            title={isFrozen ? 'Page back through the record' : 'Drag to pause and page back through the record'}
+            className="flex-1 accent-amber-500 cursor-pointer disabled:cursor-default"
           />
-          <span className="whitespace-nowrap font-mono text-amber-200/60">oldest −{fmtBack(backMax)}</span>
+          <span className="whitespace-nowrap font-mono text-amber-200/60">
+            {backMax > 0 ? `oldest −${fmtBack(backMax)}` : 'no history yet'}
+          </span>
         </div>
       )}
     </div>
