@@ -629,16 +629,6 @@ export function ControlPanel({
           </div>
 
           <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Annotations on the trace</Label>
-            <Switch aria-label="Annotations on the trace" checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Artifact list (top right)</Label>
-            <Switch aria-label="Artifact list (top right)" checked={showArtifactList} onCheckedChange={setShowArtifactList} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
             <Label className="text-xs text-slate-300">Graph Hover Highlight</Label>
             <Switch aria-label="Graph hover highlight" checked={graphHover} onCheckedChange={setGraphHover} className="scale-90 data-[state=checked]:bg-emerald-600" />
           </div>
@@ -675,7 +665,16 @@ export function ControlPanel({
       </div>
 
       {/* ── Footer ── */}
-      <div className="px-4 py-3 border-t border-[#2e4a2e]">
+      <div className="px-4 py-3 border-t border-[#2e4a2e] space-y-2">
+        {/* Docked with Clear All so the marks can be switched without scrolling. */}
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-slate-300">Annotations on the trace</Label>
+          <Switch aria-label="Annotations on the trace" checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-slate-300">Artifact list (top right)</Label>
+          <Switch aria-label="Artifact list (top right)" checked={showArtifactList} onCheckedChange={setShowArtifactList} className="scale-90 data-[state=checked]:bg-emerald-600" />
+        </div>
         <Button
           variant="outline"
           className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white text-xs py-1.5 h-auto"
