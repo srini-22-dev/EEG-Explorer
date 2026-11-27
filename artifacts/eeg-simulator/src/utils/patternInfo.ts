@@ -137,7 +137,7 @@ export const PATTERN_INFO: Record<string, PatternInfo> = {
     seenIn: 'Any state, especially in short or obese necks and on ear references. Check that each transient lines up with an R wave on the ECG channel: that alone tells it from a periodic discharge.',
   },
   'movement': {
-    summary: 'Rare, very large broadband transients from head or body movement, 0.2-1 s, frontally predominant, often driving several channels off-scale at once, with no consistent shape and no smooth field.',
+    summary: 'Rare, very large, chaotic transients from moving the head, the body or the leads, 0.2-1 s. They are made at the electrodes, not in the head: each disturbed electrode does something of its own, so there is no consistent shape and no smooth field. Where they land depends on what moved; the head moving on a pillow disturbs the electrodes at the back of the head.',
     seenIn: 'Wakefulness and arousals from sleep. Its size, chaos and lack of a field mark it as artifact; a video or technologist note confirms it.',
   },
   'respiration': {

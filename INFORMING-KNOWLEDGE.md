@@ -7,7 +7,7 @@ This file is not documentation of how the code works — the engine source (`src
 that. This is a list of things that must remain **true of the output**, whatever the
 implementation happens to be.
 
-> **52 entries · highest ID `IK-052` · 45 enforced by an automated check, 7 unverified in code.**
+> **60 entries · highest ID `IK-060` · 45 enforced by an automated check, 15 unverified in code.**
 
 ---
 
@@ -1183,6 +1183,222 @@ burst, evident in a few or in multiple channels"; "the very brief duration and r
 drip rate (30 a minute), the size and the spike's shape are the owner's choice. Approved by the
 user 2026-11-25.
 
+### IK-053 — ECG artifact is largest on the ear references and, on the double banana, on the left posterior chains
+
+**Claim.** ECG artifact is a sharp deflection locked to each QRS complex, more prominent on the
+left or seen only there, and most prominent on montages referred to the earlobes. On the double
+banana it sits on the left posterior chains (C3-P3, P3-O1, T3-T5, T5-O1) at about half their
+background's size, with little frontally. Its size differs between people with their build: it is
+larger in overweight patients and those with short, stocky necks. Scope: field, side and size
+against the background; polarity at the two ears is not asserted.
+
+**Observable.** Toggle `ecg-artifact`, state `awake`, six subjects, each with its own build and neck
+position. In every subject the three largest `bipolar-ap` rows are left posterior (currently 6 of
+6); P3-O1, T5-O1 and T3-T5 are at least 1.5 times their right homologues (smallest currently
+1.75); the frontal rows are at most 0.35 of the largest row (worst currently 0.22); the largest
+row is 0.25–1 of its own background peak to peak (median currently 0.63); the largest
+ear-referenced channel is at least 1.5 times the largest double-banana row (smallest currently
+1.75); the largest subject's ear-referenced channel is at least 1.4 times the smallest's
+(currently 1.51). On `reference-ipsi`, left over right exceeds 1 (currently 5.1) and the R
+wave at Cz-A1 is 7–60 µV (currently 37.1 µV).
+
+**Mechanism.** *(non-binding)* The heart's field reaches the head through the neck, nearer on the
+left, and the ear electrodes sit low, by the neck; a heavier build or shorter neck brings the head
+nearer the thorax. The model's neck-patch position and the far field's 0.2 weight were found by
+search; the build's 0.7–1.6x gain and the neck patch's ±0.8 cm movement are designs.
+
+**Check.** `validateEngine.ts` Step 25 — `check('ecg-artifact R wave at Cz-A1, reference-ipsi
+(measured 4 uV before the fix)', …)`, `check('ecg-artifact left / right, reference-ipsi
+(LEARNINGEEG: more prominent on the left)', …)`, `check('ecg-artifact: subjects whose three largest
+double-banana rows are left posterior (C3-P3, P3-O1, T3-T5, T5-O1), of 6', …)`,
+`check('ecg-artifact: left / right double-banana rows (P3-O1, T5-O1, T3-T5 over the right),
+smallest of 6', …)`, `check('ecg-artifact: frontal double-banana rows / the largest row, worst of
+6', …)`, `check('ecg-artifact: largest double-banana row / its own background, peak to peak, median
+of 6 (learningeeg figure: about 0.5)', …)`, `check('ecg-artifact: largest ear-referenced channel /
+largest double-banana row, smallest of 6 (eegpedia: most prominent with earlobe references)', …)`,
+`check('ecg-artifact: largest ear-referenced channel, largest / smallest subject of 6 (Tatum 2011:
+build changes it)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts): "sharp, QRS-locked
+deflections, usually more prominent on the left"; "more prominent or solely seen on the left side";
+its figure boxes C3-P3/P3-O1 and T3-T5/T5-O1, with blips about 0.4–0.5 of their rows. eegpedia:
+"most prominent in referential montages using earlobe electrodes A1 and A2". Tatum, Dworetzky &
+Schomer, "Artifact and Recording Concepts in EEG", J Clin Neurophysiol 2011;28:252: "Patients who
+are overweight or have short stocky necks may be predisposed to this type of EKG artifact because
+the QRS complex is amplified"; reduction "may be possible if the technologist is able to alter the
+position of the head and neck". The frontal ceiling (0.35), the build floor (1.4) and the Cz-A1
+ceiling (60 µV) have no source. Approved by the user 2026-11-26 ("find more build, because it
+should be slightly generalizable").
+
+### IK-054 — Muscle artifact is fast activity over the contracting muscle, least at the vertex, absent in REM
+
+**Claim.** Muscle (EMG) artifact is fast activity, faster than beta (about 20–100 Hz as displayed),
+over the muscles contracting: temporalis at T3/T4 and F7/F8, frontalis at Fp1/Fp2, the neck muscles
+posteriorly. There is little at the vertex, and it is near-absent in REM sleep.
+
+**Observable.** Toggle `muscle`, `bipolar-ap`, state `awake` unless named. Central rows / mid-temporal
+rows at most 0.3 (currently 0.044); midline rows / mid-temporal rows at most 0.3 (currently
+0.053); frontopolar rows / mid-temporal rows 0.3–2 (currently 0.74); frontalis alone, Fp1 / O1
+20–70 Hz power at least 2 (currently 39); neck alone, O1 / Fz at least 2 (currently 11);
+REM / N2 at T3 at most 0.25 (currently 0.006).
+
+**Mechanism.** *(non-binding)* Motor-unit potentials of scalp and neck muscles, picked up by the
+electrodes over them.
+
+**Check.** `validateEngine.ts` — `check('muscle central rows / mid-temporal rows (LEARNINGEEG:
+temporal; measured 0.87 before the fix)', …)`, `check('muscle midline rows / mid-temporal rows
+(LEARNINGEEG: "minimal ... near the vertex")', …)`, `check('muscle frontopolar rows / mid-temporal
+rows (LEARNINGEEG: frontal as well as temporal)', …)`, `check('frontalis EMG: Fp1 / O1 20-70 Hz
+power', …)`, `check('nuchal EMG: O1 / Fz 20-70 Hz power', …)`, `check('REM muscle / N2 muscle at
+T3 (REM atonia: near-absent muscle)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts): "most commonly found in the
+frontal or lateral temporal regions", "typically only minimal myogenic artifact near the vertex",
+"tends to be even faster in frequency" than excess beta; (Sleep) in REM "muscle activity should be
+near-absent". eegpedia: "Frequency 20 to 100 Hz", "Most common muscles: frontalis and temporalis".
+Approved by the user 2026-11-26.
+
+### IK-055 — Chewing is intermittent bursts of fast muscle activity, generalized with a temporal maximum
+
+**Claim.** Chewing gives sudden-onset, intermittent bursts of generalized very fast (muscle)
+activity, one per jaw closure, largest temporally. It is not generalized paroxysmal fast activity,
+which is slower and lower.
+
+**Observable.** Toggle `chewing`, state `awake`. Temporal (T3/T4) high-frequency power on / off at
+least 4 (currently 45); temporal / Cz high-frequency power at least 2.5 (currently
+12); on `bipolar-ap`, parasagittal rows / temporal rows 0.1–1 (currently 0.20). Every
+chewing episode is boxed, one box per episode and side.
+
+**Mechanism.** *(non-binding)* Temporalis contraction with each closure of the jaw.
+
+**Check.** `validateEngine.ts` — `check('temporal (T3/T4) high-freq power, chewing on/off', …)`,
+`check('temporal / midline (Cz) high-freq power, chewing on', …)`, `check('chewing parasagittal
+rows / temporal rows (LEARNINGEEG: "generalized", temporal maximum)', …)`, `check('boxes: chewing
+boxes per episode and side (one each)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts): "sudden onset, intermittent
+bursts of generalized very fast activity (muscle artifact)", from the temporalis. The rate (about
+1.5 chews a second) has no source. Approved by the user 2026-11-26.
+
+### IK-056 — Electrode pop is a steep rise and a slower fall on one electrode, with no field
+
+**Claim.** An electrode pop is a very sudden, steep upslope with a slower downslope on a single
+electrode, with no field: on a bipolar montage only the rows sharing that electrode change. It is
+caused most often by a loose electrode.
+
+**Observable.** Toggle `electrode-pop`, `bipolar-ap`, state `awake`, isolated contribution over 300
+s. Every pop rises to its peak faster than it falls to a third of it (currently 1.00); the
+largest row not sharing the popped electrode is at most 0.01 of the pop (worst currently
+0.000).
+
+**Mechanism.** *(non-binding)* A sudden change in the electrode–skin junction's potential, which
+then recovers.
+
+**Check.** `validateEngine.ts` Step 28 — `check('electrode pop: share rising faster than they fall
+(learningeeg: "steep upslope with a slower downslope")', …)`, `check('electrode pop: largest row
+not sharing the electrode / the pop, worst (learningeeg: "absolutely no field")', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts): "a single electrode showing a
+very sudden, steep upslope with a slower downslope and absolutely no field", "caused most often by
+a loose electrode". Approved by the user 2026-11-26.
+
+### IK-057 — A poorly connected electrode shows on the rows that share it, and nowhere else
+
+**Claim.** A high-impedance or loose electrode shows noise, mains or a flat line on the bipolar
+rows that share it and nowhere else. That confinement is how an electrode is told from a brain
+generator.
+
+**Observable.** Toggle `bad-electrodes`, any montage: every row of a bad contact, or mains on it,
+that is plainly on is boxed (currently 0 unboxed); with one poor contact, the largest
+other row is at most a small fraction of the band (see [[IK-048]]).
+
+**Mechanism.** *(non-binding)* A poor junction raises the electrode's impedance and its pickup of
+noise and mains; a broken one leaves nothing to record.
+
+**Check.** `validateEngine.ts` Step 27 — `check('pages: rows of a bad contact, or mains on them,
+plainly on and not boxed (any montage)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts), its 60 Hz figure: "the Fp1
+electrode is likely not well connected". Tatum et al. 2011: "High-impedance electrodes are
+especially common during EEG recordings in the intensive care unit". Approved by the user
+2026-11-26.
+
+### IK-058 — Sweat artifact is a very slow, low-amplitude sway of the baseline
+
+**Claim.** Sweat gives very slow (under 0.5–1 Hz), relatively low-amplitude sways of the baseline.
+It can be bilateral, unilateral, or confined to a few electrodes. Scope: speed and size; the
+simulator draws it over the forehead only, which is one of the distributions the sources allow,
+not all of them.
+
+**Observable.** Toggle `sweat`, `bipolar-ap`, state `awake`: Fp1-F3 drift, on minus off, 2.5–20 µV RMS
+(currently 8.0 µV); its dominant frequency under 0.5 Hz (currently 0.21 Hz).
+
+**Mechanism.** *(non-binding)* Sweat changes the skin's potential under the electrodes.
+
+**Check.** `validateEngine.ts` — `check('sweat Fp1-F3 drift, toggle on minus off (RMS; measured 0.1
+uV before the fix)', …)`, `check('sweat Fp1-F3 dominant frequency (LEARNINGEEG: typically < 0.5
+Hz)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts): "very slow (typically less
+than 0.5 Hz), relatively low amplitude", "can be bilateral, unilateral, or even focal". eegpedia:
+"slow baseline sways", "<1 Hz". Approved by the user 2026-11-26.
+
+### IK-059 — Movement artifact is chaotic, high-amplitude activity on many channels, unlike any cerebral field
+
+**Claim.** Moving the head, the body or the leads gives chaotic, high-amplitude activity that does
+not mimic any cerebral pattern: it is on many channels at once, each with its own waveform, not one
+field decaying smoothly from a generator. Where it lands depends on what moved; with the head
+resting on a pillow, head movement is more prominent posteriorly.
+
+**Observable.** Toggle `movement` at 6 a minute, `bipolar-ap`, state `awake`, three subjects, each
+movement read over its own marked span, isolated contribution. Per movement, the median number of
+rows past 2 mm at 7 µV/mm is at least 4 (currently 8); the median largest row is at least 50
+µV (currently 213 µV); the median |r| between the rows it is on is at most 0.5 (currently
+0.26; a single generator gives 1.0); 45–95% of movements are largest at the back of the head
+(currently 0.82).
+
+**Mechanism.** *(non-binding)* Movement disturbs each electrode's contact with the skin and pulls on
+its lead, so the artifact is made at the contacts, independently at each, rather than conducted
+from one source. In the model half the movements are the head on the pillow and the rest anywhere;
+that share, the size, the 0.2–0.9 s duration and the spectrum are designs.
+
+**Check.** `validateEngine.ts` Step 28 — `check('movement: rows past 2 mm per movement, median
+(learningeeg: high amplitude, on many channels)', …)`, `check('movement: largest row per movement,
+median (high amplitude; a design floor of 7 mm at 7 uV/mm)', …)`, `check('movement: |r| between the
+rows it is on, median over movements (chaotic, no generator; one source gave 1.0)', …)`,
+`check('movement: share of movements largest at the back of the head (learningeeg: posteriorly on a
+pillow)', …)`.
+
+**Status.** unverified in code · **Source.** learningeeg (Artifacts): "Movement artifact has a
+plethora of appearances, usually of chaotic looking, high amplitude activity that doesn't mimic any
+actual cerebral patterns"; "varies widely depending on the type and location of movement"; head
+shaking "is usually more prominent posteriorly if the patient is resting their head on a pillow".
+Until 2026-11-27 the simulator drove movement through the eye sources, one smooth frontal field,
+which this entry was first drafted against as violated; the model was rebuilt at the user's
+request ("fix the model then"). Approved by the user 2026-11-26.
+
+### IK-060 — The ICU is an electrically hostile setting
+
+**Claim.** Recordings in intensive care carry more, and different, artifact than routine ones:
+high-impedance electrodes, mains, and artifacts from the ventilator, IV drips and nursing care;
+muscle and blinks are reduced in a sedated patient.
+
+**Observable.** Recording conditions `ICU bedside`: mains on the occipital rows is at least twice
+their own background, peak to peak (smallest of 3 currently 2.63); with the notch on, mains
+left over the background is at most 0.25 (worst of 3 currently 0.23).
+
+**Mechanism.** *(non-binding)* Many powered devices close to the patient, and electrodes left on
+for days.
+
+**Check.** `validateEngine.ts` Step 29 — `check('icu: mains on the occipital rows / their own
+background, peak to peak, median row, smallest of 3 (it buries them)', …)`, `check('icu: with the
+notch on, mains left / the background, median occipital row, worst of 3 subjects (readable again)',
+…)`.
+
+**Status.** unverified in code · **Source.** Tatum et al. 2011: "electrically 'hostile
+environments'". ICU continuous-EEG reviews list "ventilator cycling, suctioning, IV drip pumps".
+The level recipes are the owner's design. Approved by the user 2026-11-26.
+
 ## 5. Normal variants
 
 Benign patterns mistakable for pathology — mu rhythm, wicket spikes, lambda waves, RMTD, 14&6
@@ -1343,7 +1559,9 @@ sides together, 1–2 s (learningeeg); the simulator offers both (Sides, under t
 posterior-temporal electrode is the reference input, and invert on a bipolar link where that
 electrode is input 2 (compare the montage-dependence of [[IK-008]]). They are a drowsy/light-sleep
 finding, absent in relaxed wakefulness. Scope: band, topography, surface polarity, state
-gating, and sides and length under each choice; amplitude and burst rate are not asserted.
+gating, and sides and length under each choice; amplitude and burst rate are not asserted. Each
+burst is at 14 Hz, at 6 Hz, or a mix of both, and whichever it is, it is the same on every row
+it reaches at that moment.
 
 **Observable.** Toggle `14-6-pos`, posterior-temporal electrodes T5/T6. In state `drowsy`, 13.5–
 15.5 Hz power at T5/T6 rises above its toggle-off value; in state `awake` the same toggle produces
@@ -1352,7 +1570,9 @@ positive → down). On `bipolar-ap` link T4-T6, where T6 is input 2, the same bu
 deflects upward — the sign is a property of the montage, not of the source. With Sides `shifting`
 (the default) 30–70% of bursts are on both sides (currently 0.47), one-sided bursts are on the right
 more often than the left (currently 1.31 times), and every burst lasts 0.49–1.01 s; with Sides
-`bilateral` every burst is on both sides and lasts 0.99–2.01 s.
+`bilateral` every burst is on both sides and lasts 0.99–2.01 s. In `drowsy` over 300 s, bursts at
+14 Hz alone, at 6 Hz alone and mixed are each 15–55% (currently 0.39, 0.34 and 0.27), and no
+burst's 14:6 balance differs across the rows it is on by more than 0.05 (currently 0.00).
 
 **Mechanism.** *(non-binding)* Conventionally a benign posterior-temporal sleep variant of no
 pathological significance; the two combs (~14 and ~6 Hz) are the usual descriptive labels, not
@@ -1367,7 +1587,11 @@ on both sides', …)`, `check('14-6-pos one-sided bursts on the right / on the l
 …)`, `check('14-6-pos shortest burst (eegpedia, SCORE: 0.5-1 s)', …)`, `check('14-6-pos longest
 burst', …)`, `check('14-6-pos, Sides bilateral: share of bursts on both sides (learningeeg:
 "bilateral and synchronous")', …)`, `check('14-6-pos, Sides bilateral: shortest burst (learningeeg:
-1-2 s)', …)` and `check('14-6-pos, Sides bilateral: longest burst', …)`.
+1-2 s)', …)` and `check('14-6-pos, Sides bilateral: longest burst', …)`; and since 2026-11-27 `check('14-6-pos:
+share of bursts at 14 Hz alone (learningeeg: "either 14 Hz ... or 6 Hz ... or an admixture")', …)`,
+`check('14-6-pos: share of bursts at 6 Hz alone', …)`, `check('14-6-pos: share of bursts mixing
+both', …)` and `check('14-6-pos: largest spread of one burst\'s 14:6 balance across the rows it is
+on (one frequency on every row at once)', …)`.
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-08-24 — drafted by the assistant at
 the user's request and approved in the batch this session; recording behaviour the validation
@@ -1375,21 +1599,27 @@ battery guards. Clinical wording not yet independently confirmed by the user. Si
 2026-10-27: eegpedia, "Unilateral (R>L) or bilateral asynchronous or synchronous", "Duration:
 0.5-1 second"; the SCORE study, "0.5–1 s bursts", "shifting predominance"; learningeeg,
 "bilateral and synchronous", "1-2 second bursts" — both pictures are offered, at the user's
-request. Approved by the user 2026-10-27.
+request. Approved by the user 2026-10-27. Frequency per burst added 2026-11-27: learningeeg, "come
+in frequencies of either 14 Hz (13-17 Hz) or 6 Hz (5-7 Hz), or an admixture of both". "The same on
+every row" is a neurology consultant's feedback relayed by the owner (2026-11-25); no source says
+it in words, but it agrees with learningeeg's "bilateral and synchronous" and with one generator
+per burst. The one-third shares are a design. Approved by the user 2026-11-26.
 
 ### IK-041 — RMTD is one frequency, 5–7 Hz, in trains of seconds over the mid-temporal region
 
 **Claim.** Rhythmic mid-temporal theta of drowsiness comes as trains of rhythmic theta at 5–7 Hz,
 each train at one frequency that does not change over it, lasting from a couple of seconds to about
 ten, maximal over the mid-temporal region with little on the parasagittal chain, on one side or on
-both out of step; in drowsiness and light sleep, and occasionally in relaxed wakefulness. The fixed
+both out of step, with stretches of ordinary background between the trains; in drowsiness and
+light sleep, and occasionally in relaxed wakefulness. The fixed
 frequency is what separates it from a temporal seizure (contrast [[IK-020]]).
 
 **Observable.** Montage `bipolar-ap`, toggle `rmtd`, isolated contribution, state `drowsy`, 240 s.
 Every train lies in 4.9–7.1 Hz (currently 5.13–7.00 Hz); no train's cycle length varies by more than 6%
 (CV, currently 0.001); trains last 1.9–10.1 s (currently 2.1–9.9 s); the largest parasagittal
 row is at most 0.5 of the largest temporal row (currently 0.04). Trains appear in `awake`, `n1`
-and `n2` too.
+and `n2` too. Over 600 s a train is on, on either side, for 10–55% of the record (currently
+0.38), and the longest stretch with no train is at least 8 s (currently 26.7 s).
 
 **Mechanism.** *(non-binding)* None asserted.
 
@@ -1399,7 +1629,9 @@ and `n2` too.
 (learningeeg: "a few seconds")', …)`, `check('RMTD longest train (eegpedia: 5-10 s)', …)`,
 `check('RMTD largest parasagittal row / largest temporal row (temporal maximum)', …)`, and
 `check('RMTD trains in awake (SCORE: drowsiness and light sleep, occasionally awake)', …)` with its
-`n1` and `n2` twins.
+`n1` and `n2` twins; and since 2026-11-27 `check('RMTD share of the record with a train on either
+side (intermittent)', …)` and `check('RMTD longest stretch with no train (background between
+trains)', …)`.
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — eegpedia: "Trains of rhythmic
 theta waves 5-7Hz", "Duration 5-10sec", "Located in midtemporal region", "Often unilateral", "May
@@ -1409,18 +1641,26 @@ PMC9294211): 5–7 Hz, "mostly seen during drowsiness and light sleep … occasi
 "maximum is usually mid-temporal but may sometimes spread to the parasagittal", "arch-shaped and
 often notched"; IFCN glossary: "4–7 c/s waves whose morphology is frequently notched by faster
 waves"; learningeeg: "a few seconds", its runs measured at ~2 s and ~6 Hz. Approved by the user 2026-10-27.
+Gaps added 2026-11-27, at the owner's report that RMTD ran continuously (2026-11-25): eegpedia
+"Trains"; the 10–30 s between trains has no source. Approved by the user 2026-11-26.
 
 ### IK-042 — Small sharp spikes are brief, small, steeply falling, and leave the background alone
 
 **Claim.** Small sharp spikes (benign epileptiform transients of sleep) are temporal spikes under
 50 ms and under 50 µV, mono- or diphasic, whose descending limb is steeper than the ascending one;
-some are followed by a small slow wave, never a prominent one; drowsiness and light sleep only.
+some are followed by a small slow wave, never a prominent one (the sources disagree on how often:
+IFCN "often", eegpedia "occasionally", learningeeg "characteristically lack"); drowsiness and
+light sleep only. They are largest over the temporal region but have a broad field reaching the
+other leads, and not every one reverses phase on a bipolar montage.
 
 **Observable.** Montage `bipolar-ap`, toggle `bets`, state `drowsy`, isolated contribution over
 400 s, each spike on its own side's T3-T5 / T4-T6 row. At least 80% fall faster than they rise
-(currently 0.99); 10–45% are diphasic (currently 0.29); 15–60% are followed by a slow
-wave (currently 0.40), none larger than 0.2 of its spike (currently 0.14). The largest
-on T3-T5 is under 50 µV and under 50 ms at the base (currently 39 µV, 44 ms).
+(currently 1.00); 10–45% are diphasic (currently 0.26); 15–60% are followed by a slow
+wave (currently 0.32), none larger than 0.2 of its spike (currently 0.065). The largest
+on T3-T5 is under 50 µV and under 50 ms at the base (currently 42 µV, 28 ms). On
+`reference-car`, at least 60% of channels carry a fifth of the largest or more (currently 1.00),
+and the largest channel is temporal (F7, T3, T5 or their right homologues). On `bipolar-ap`,
+20–80% of spikes reverse phase at T3/T4 (currently 0.50).
 
 **Mechanism.** *(non-binding)* None asserted.
 
@@ -1429,7 +1669,11 @@ descending arm")', …)`, `check('BETS share diphasic (eegpedia: "occasionally d
 `check('BETS share followed by a slow wave (IFCN "often", eegpedia "occasionally")', …)`,
 `check('BETS largest slow wave / its spike ("not prominent and of low amplitude")', …)`,
 `check('BETS T3-T5 base width (site/patterns.ts: <50 ms)', …)`, `check('BETS T3-T5 peak amplitude
-(patterns.ts: <50 uV)', …)`.
+(patterns.ts: <50 uV)', …)`;
+and since 2026-11-27 `check('BETS field: average-referenced channels carrying a fifth of the largest
+or more (owner: across all the leads)', …)`, `check('BETS field: largest average-referenced channel
+is temporal (F7, T3, T5 or their right homologues)', …)` and `check('small sharp spikes with a phase
+reversal at T3/T4 on the double banana, share (owner: "not necessarily ... each time")', …)`.
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — SCORE study: "a mono- or
 diphasic spike with a steep descending arm. If present, the following slow wave is not prominent
@@ -1437,6 +1681,13 @@ and of low amplitude", "drowsiness/light sleep (N1, N2)"; eegpedia: "<50 microV 
 "Usually monophasic, occasionally diphasic", "Occasionally followed by a slow wave, however do not
 disturb the background"; IFCN glossary: "often followed by a small theta wave". The shares are a
 design between "often" and "occasionally"; no source gives a figure. Approved by the user 2026-10-27.
+Field and phase reversal added 2026-11-27, at the owner's request (2026-11-25: across all the
+leads, not always a phase reversal): learningeeg "having a field", "most often in the temporal
+chains"; eegpedia "Located temporal uni- or bilateral"; IFCN "in the temporal regions". "Across all
+the leads" goes beyond these sources, which say only temporal and a field; it is built as a broad
+field that keeps the temporal maximum. The half-and-half split between spikes that reverse at
+T3/T4 and spikes that do not, and the 0.55 size of the second kind, are designs. Approved by the
+user 2026-11-26.
 
 ### IK-043 — The 6 Hz phantom spike-and-wave has two forms: FOLD posterior and small, WHAM anterior and large
 
@@ -1444,12 +1695,15 @@ design between "often" and "occasionally"; no source gives a figure. Approved by
 occipital, low-amplitude spike, drowsy) is posterior, its spike under 25 µV and smaller than its
 wave, in drowsiness — the benign form. WHAM (waking, high-amplitude spike, anterior, male) is
 fronto-central, its spike over 45 µV, and occurs awake as well; eegpedia associates it with
-epilepsy.
+epilepsy. Each run is at its own frequency in 5–7 Hz, and FOLD's slow wave is about the size of
+its spike, as tiny as it.
 
 **Observable.** Montage `reference-ipsi`, toggle `6hz-sw`, isolated contribution. With Form WHAM
 in `drowsy`, F3-A1 is at least 5 times O1-A1 (currently 470) and its largest deflection is
 45–150 µV (currently 72 µV); in `awake` WHAM is drawn. With Form FOLD, O1-A1 is at least
-twice F3-A1 (currently 2.56) and nothing is drawn awake.
+twice F3-A1 (currently 2.56) and nothing is drawn awake. With Form FOLD in `drowsy`, runs lie in
+4.8–7.2 Hz (currently 4.95–6.90 Hz), and the spike is about its wave's size at O1 (spike / wave
+currently 0.91).
 
 **Mechanism.** *(non-binding)* None asserted.
 
@@ -1457,7 +1711,8 @@ twice F3-A1 (currently 2.56) and nothing is drawn awake.
 FOLD O1-A1 / F3-A1 ("occipital")', …)`, `check('6 Hz WHAM largest deflection on F3-A1 (spike
 ">45uV")', …)`, `check('6 Hz WHAM drawn awake ("Waking")', …)`, `check('6 Hz FOLD not drawn awake
 ("Drowsy")', …)`, with the FOLD checks of Step 13 (`check('6hz-sw O1 spike / slow wave (StatPearls:
-wave of equal or greater amplitude)', …)`, `check('6hz-sw O1 / Fz (FOLD: posterior maximum)', …)`).
+wave of equal or greater amplitude)', …)`, `check('6hz-sw O1 / Fz (FOLD: posterior maximum)', …)`); and since 2026-11-27 `check('6hz-sw lowest
+run frequency (eegpedia: 5-7 Hz)', …)` and `check('6hz-sw highest run frequency', …)`.
 
 **Status.** enforced (automated) · **Source.** Claude, 2026-10-27 — eegpedia: "WHAM: Waking, High
 amplitude spike (>45uV), Anterior, Male", "Associated with epilepsy especially when high amplitude
@@ -1465,6 +1720,9 @@ spikes, rate <5-6Hz and persists during deep sleep", "FOLD: Female, Occipital, L
 Drowsy", "Not associated with epilepsy"; SCORE study: "low-voltage-spikes (<25 µV) of brief duration
 (<30 ms)", WHAM's "amplitude is mostly higher over the fronto-central regions"; eegpedia's WHAM
 figure, read as a picture (its rows could not be traced through the discharge). Approved by the user 2026-10-27.
+Run frequency and FOLD's wave added 2026-11-27, at the owner's report that the 6 Hz phantom was "a
+little wrong" (2026-11-25): eegpedia "6Hz (5-7Hz)"; learningeeg "5-7 Hz", "an equally tiny slow
+wave". Approved by the user 2026-11-26.
 
 ### IK-044 — Breach rhythm is larger, faster activity at the electrode over a skull defect, and stops at its edge
 
@@ -2240,7 +2498,7 @@ battery guards. Claim corrected 2026-09-01 after an adversarial audit found the 
 (*literal*), its checks were circular with it and unfalsifiable, and the code had a real
 window-dependence the entry denied. Clinical wording not independently confirmed.
 
-### IK-028 — Adult scalp amplitudes are ~10–100 µV, and amplitude falls along the AP gradient
+### IK-028 — Adult scalp amplitudes are ~10–100 µV, and amplitude rises from front to back (the AP gradient)
 
 **Claim.** In a normal awake adult record, scalp EEG amplitudes sit in roughly the **10–100 µV**
 range, and amplitude follows the **antero-posterior gradient**: the posterior background is

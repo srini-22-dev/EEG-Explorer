@@ -9,7 +9,7 @@ import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, Pattern
 import { POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } from '../utils/simTypes';
 import { ICTAL_TOGGLE_IDS } from '../utils/simTypes';
 import { PATTERN_CATEGORIES } from '../utils/patterns';
-import { ArtifactControls } from './ArtifactControls';
+import { ArtifactControls, Slider } from './ArtifactControls';
 import { isLiveOn } from '../utils/liveArtifacts';
 import type { LiveArtifacts } from '../engine/engine';
 import { INFO_TRIGGER_ATTR } from './InfoPanel';
@@ -219,6 +219,16 @@ export function ControlPanel({
               </Tooltip>
               );
             })}
+          </div>
+          {/* The patient's heart rate, here as well as under ECG Artifact (owner's inbox,
+              2026-11-27: "too important to only be there"). One setting, so the two
+              sliders move together; it sets the ECG row and the pulse artifact too. */}
+          <div className="mt-3">
+            <Slider
+              label="Heart rate" value={artifactParams.ecgBpm} min={40} max={140} step={1} unit=" bpm"
+              live={live?.level ? live.heartRate : undefined}
+              onChange={v => updateArtifactParams({ ecgBpm: v })}
+            />
           </div>
         </div>
 

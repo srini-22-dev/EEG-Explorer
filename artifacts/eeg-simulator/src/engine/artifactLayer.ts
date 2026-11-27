@@ -22,7 +22,7 @@
 import {
   OCULAR_DIPOLE_SHARE, OCULAR_FIRST_EVENT_LEAD_SEC, BlinkGenerator, EyeOpeningGenerator, SaccadeGenerator,
   EmgGenerator, EcgGenerator, EyeFlutterGenerator, FLUTTER_SHARE, FLUTTER_TAIL_S, LRS_PEAK_UV, LRS_SPIKE_S,
-  ElectrodePopGenerator, SweatGenerator, SWEAT_SKIN_UV, ECG_SCALP_UV, LineNoiseGenerator, MovementGenerator,
+  ElectrodePopGenerator, SweatGenerator, SWEAT_SKIN_UV, ECG_SCALP_UV, LineNoiseGenerator, MovementGenerator, heartOf,
   artifactSeeds,
 } from './artifacts';
 import { defectLineMultiplier, type ChannelDefect, type RecordingChain } from './chain';
@@ -79,6 +79,8 @@ export type LiveArtifacts = {
   breathRate: number;
   sweatSeverity: number;
   popRate: number;
+  /** The electrode that popped last, or null: so a random pop can be disconnected (owner's inbox, 2026-11-27). */
+  lastPop: string | null;
 };
 
 export type ArtifactGates = {
@@ -212,6 +214,8 @@ export class ArtifactLayer {
   private readonly resp: RespirationGenerator;
   private readonly fieldOf: LayerOptions['fieldOf'];
   private readonly marks: MarkBook;
+  /** This subject's R wave at the heart source, microvolts: the build's gain on ECG_SCALP_UV (heartOf). */
+  private readonly ecgUv: number;
 
   private blink: BlinkGenerator | null = null;
   private eyeOpening: EyeOpeningGenerator | null = null;
@@ -293,6 +297,7 @@ export class ArtifactLayer {
     this.resp = o.resp;
     this.fieldOf = o.fieldOf;
     this.marks = o.marks;
+    this.ecgUv = ECG_SCALP_UV * heartOf(o.seed).gain;
     const S = this.subject;
 
     if (o.artifacts) {
@@ -310,7 +315,7 @@ export class ArtifactLayer {
       this.pop = new ElectrodePopGenerator(A.pop, this.dt, this.electrodes.length, 60 / b);
       this.sweat = new SweatGenerator(A.sweat, this.dt);
       this.line = new LineNoiseGenerator(A.line, this.dt, S.lineFreq);
-      this.movement = new MovementGenerator(A.movement, this.dt, 90 / b);
+      this.movement = new MovementGenerator(A.movement, this.dt, this.electrodes, 90 / b);
       // Own streams, so adding them left every subject's other artifacts unchanged.
       this.breathing = new BreathingArtifact(deriveSeed(o.seed, 'breathingArtifact'), this.dt);
       this.water = new WaterInTubing(deriveSeed(o.seed, 'waterInTubing'), this.dt);
@@ -330,7 +335,7 @@ export class ArtifactLayer {
       this.markField.lrsL = [this.fieldOf([[ix.lateralRectusL, LRS_PEAK_UV]])];
       this.markField.lrsR = [this.fieldOf([[ix.lateralRectusR, LRS_PEAK_UV]])];
       // In microvolts at the R wave, where the generator's own output is 1.
-      this.markField.heart = [this.fieldOf([[ix.heart, ECG_SCALP_UV]])];
+      this.markField.heart = [this.fieldOf([[ix.heart, this.ecgUv]])];
       this.markField.sweat = [this.fieldOf([[ix.sweatFrontal, 1]])];
     }
     this.markField.pop = o.electrodeFields;
@@ -362,6 +367,7 @@ export class ArtifactLayer {
   readonly live: LiveArtifacts = {
     level: false, emgOn: false, emgRegions: null, emgSeverity: 1, blinkRate: 16, saccadeRate: 25,
     movementActive: true, movementRate: 0.7, tubingWater: 1, heartRate: 68, breathRate: 15, sweatSeverity: 1, popRate: 1,
+    lastPop: null,
   };
   private conditionLevel: ConditionLevel = 'none';
   // The muscles of the current episode that the Muscle toggle's own region choice
@@ -488,12 +494,10 @@ export class ArtifactLayer {
       if (on('frontalis'))   V[ix.frontalis]   += emgFV * emgEnv;
       if (on('nuchal'))      V[ix.nuchal]      += emgNV * emgEnv;
     }
-    const heartV = ecgRaw * ECG_SCALP_UV;
+    const heartV = ecgRaw * this.ecgUv;
     if (g.ecgScalp) V[ix.heart] += heartV;
     const sweatV = this.sweat!.next() * SWEAT_SKIN_UV * (p.sweatSeverity ?? 1) * (dir ? dir.sweat : 1);
     if (g.sweat) V[ix.sweatFrontal] += sweatV;
-    const mv = this.movement!.next() * 60 * (p.movementSeverity ?? 1);
-    if (g.movement) eyes(mv);
     const lineRaw = this.line!.next();
     lineVal = g.line ? lineRaw : 0;
 
@@ -533,7 +537,6 @@ export class ArtifactLayer {
       // A run of eye flutter: one box over the whole run, from its first lid cycle, and
       // the filter's recovery after it (FLUTTER_TAIL_S).
       if (this.flutter!.runStarted > 0) M.push({ id: 'eye-flutter', fields: F.ocular, dur: 0, span: this.flutter!.runStarted + FLUTTER_TAIL_S });
-      M.mark('movement', g.movement && mv !== 0, F.ocular, 0.9);
       // Every beat, at the upstroke of its R wave.
       M.mark('ecg-artifact', g.ecgScalp && ecgRaw > 0.5, F.heart, 0.08, { inUv: true });
       // Not in REM: atonia leaves no muscle on the page to point at.
@@ -564,7 +567,11 @@ export class ArtifactLayer {
     if (!this.pop) return;
     const popV = this.pop.next() * 220;
     const c = this.pop.channel;
-    if (this.gates.pop && c >= 0 && c < out.length) out[c] += popV;
+    if (this.gates.pop && c >= 0 && c < out.length) {
+      out[c] += popV;
+      // A pop only ever decays, so a level that has grown is a new one.
+      if (Math.abs(popV) > Math.abs(this.prevPopV) + 1) this.live.lastPop = this.electrodes[c];
+    }
     if (marking) {
       // A pop only ever decays, so a level that has grown is a new pop.
       const fresh = this.gates.pop && c >= 0 && c < out.length && Math.abs(popV) > Math.abs(this.prevPopV) + 1;
@@ -606,6 +613,11 @@ export class ArtifactLayer {
     this.drip!.setRate(p.dripRatePerMin ?? 30);
     const dv = this.drip!.next();
     if (g.ivDrip && dv !== 0) for (let c = 0; c < out.length; c++) out[c] += dv * this.drip!.coupling[c];
+    // Movement disturbs the contacts, each electrode its own way (IK-059, artifacts.ts).
+    const mv = this.movement!;
+    mv.next();
+    const mvSev = p.movementSeverity ?? 1;
+    if (g.movement) for (let c = 0; c < out.length; c++) out[c] += mv.out[c] * mvSev;
 
     if (marking) {
       const uv = (k: number[], amp: number) => [Object.fromEntries(this.electrodes.map((e, c) => [e, k[c] * amp]))];
@@ -626,6 +638,12 @@ export class ArtifactLayer {
       }
       if (g.ventilator && this.water!.started) {
         this.marks.push({ id: 'ventilator', inUv: true, dur: 0, span: BURST_S, fields: uv(this.tubeK, WATER_UV) });
+      }
+      // One part per disturbed electrode: their waveforms are independent, so on a row
+      // between two of them they add rather than cancel (as the bad contacts' parts do).
+      if (g.movement && mv.started) {
+        const parts = this.electrodes.flatMap((e, c) => (mv.gain[c] > 0 ? [{ [e]: mv.gain[c] * mvSev }] : []));
+        this.marks.push({ id: 'movement', inUv: true, dur: mv.duration, fields: parts });
       }
     }
   }

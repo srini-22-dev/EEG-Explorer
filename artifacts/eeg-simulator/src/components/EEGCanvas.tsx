@@ -77,6 +77,22 @@ type EEGCanvasProps = {
   // still cross-highlights its channels here, because that comes through
   // hoveredElectrodes, not this canvas's own mouse-move.
   graphHover?: boolean;
+  /**
+   * The quiz's page (owner's inbox, 2026-11-27: "each page should be refreshed because
+   * most of the page is from the previous questions"). A new key starts blank paper: only
+   * what is recorded from then on is drawn, and `onPageFull` fires once when it reaches
+   * the left edge. Undefined outside the quiz, where the whole history is drawn.
+   */
+  freshPageKey?: number;
+  /** A fresh page has started; it fills in this many seconds at this width and speed. */
+  onFreshPage?: (pageSec: number) => void;
+  onPageFull?: () => void;
+  /**
+   * The pattern the fresh page is for. The page is full only once one of its events lies
+   * inside the middle 80% of the page, clear of both edges (owner's inbox, 2026-11-27:
+   * "dont put it in the corners (have a 10% margin)"); after three pages it is full anyway.
+   */
+  pageInterest?: string;
 };
 
 /**
@@ -104,6 +120,9 @@ const HISTORY_SEC = 300;
  */
 const EVICT_CHUNK = 250;
 
+/** Seconds from a disconnect to its electrode going flat: the pop rings out first (ArtifactLayer.setParams). */
+const DETACH_FLAT_AFTER_S = 0.8;
+
 /** Index of the first element >= value in a sorted array. */
 
 function lowerBound(arr: number[], value: number): number {
@@ -118,7 +137,7 @@ function lowerBound(arr: number[], value: number): number {
 export function EEGCanvas({
   montage, settings,
   theme, showAnnotations, showArtifactList, showStateLabel, isFrozen, setIsFrozen,
-  dataBuffer, timeBuffer, graphHover = true
+  dataBuffer, timeBuffer, graphHover = true, freshPageKey, onFreshPage, onPageFull, pageInterest,
 }: EEGCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -137,6 +156,43 @@ export function EEGCanvas({
   stateLabelRef.current = showStateLabel;
   const frozenRef = useRef(isFrozen);
   frozenRef.current = isFrozen;
+  // The fresh page's start (sample time), -Infinity for the whole history; and whether
+  // its fill has been reported.
+  const pageStartRef = useRef(-Infinity);
+  const pageFullSentRef = useRef(true);
+  const onPageFullRef = useRef(onPageFull);
+  onPageFullRef.current = onPageFull;
+  const pageInterestRef = useRef(pageInterest);
+  pageInterestRef.current = pageInterest;
+
+  // When each electrode was disconnected and reattached, sample times. A disconnected
+  // electrode's rows draw no signal from the moment its pop has rung out (the engine's
+  // 0.8 s, ArtifactLayer.setParams) until it is reattached (owner's inbox, 2026-11-27:
+  // "it should have no signal till it is reconnected"). In a bipolar row the engine's flat
+  // electrode left the neighbour's activity on the row, so a disconnect looked like nothing.
+  const detachSpansRef = useRef(new Map<string, { from: number; to: number }[]>());
+  const detachedNow = settings.artifactParams.detachedElectrodes;
+  useEffect(() => {
+    const spans = detachSpansRef.current;
+    const now = elapsedRef.current;
+    for (const e of detachedNow) {
+      const list = spans.get(e) ?? [];
+      if (!list.length || list[list.length - 1].to !== Infinity) list.push({ from: now + DETACH_FLAT_AFTER_S, to: Infinity });
+      spans.set(e, list);
+    }
+    for (const [e, list] of spans) {
+      const last = list[list.length - 1];
+      if (last && last.to === Infinity && !detachedNow.includes(e)) last.to = now;
+    }
+  }, [detachedNow]);
+  useEffect(() => {
+    if (freshPageKey == null) { pageStartRef.current = -Infinity; pageFullSentRef.current = true; return; }
+    pageStartRef.current = elapsedRef.current;
+    pageFullSentRef.current = false;
+    const canvas = canvasRef.current;
+    onFreshPage?.(canvas ? canvas.width / (settingsRef.current.speed * PX_PER_MM_X) : 10);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freshPageKey]);
 
   // Scroll-back while paused: how far the page's right edge sits behind the newest
   // sample, seconds. The render loop reads the ref; the slider shows the state.
@@ -148,6 +204,9 @@ export function EEGCanvas({
     const tb = timeBuffer.current;
     const canvas = canvasRef.current;
     const page = canvas ? canvas.width / (settingsRef.current.speed * PX_PER_MM_X) : 10;
+    // No history on a fresh page (the quiz): only its own page is there to read (owner's
+    // inbox, 2026-11-27: "no history in the quiz"). The regular app keeps its five minutes.
+    if (pageStartRef.current > -Infinity) return { page, max: 0 };
     const span = tb.length > 1 ? tb[tb.length - 1] - tb[0] : 0;
     return { page, max: Math.max(0, span - page) };
   };
@@ -288,6 +347,27 @@ export function EEGCanvas({
 
       const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
       const winSec    = canvas.width / pxPerSec;
+      // Nothing before a fresh page's start is drawn (freshPageKey).
+      const tMin = pageStartRef.current;
+      if (!pageFullSentRef.current && currentT - tMin >= winSec) {
+        // One of the pattern's events clear of both edges: a tenth of the page each side.
+        const id = pageInterestRef.current;
+        const lo = currentT - 0.9 * winSec, hi = currentT - 0.1 * winSec;
+        const tEnd = timeBuffer.current.length ? timeBuffer.current[timeBuffer.current.length - 1] : currentT;
+        const clear = !id || marksRef.current.some(m => {
+          if (m.t < tMin || (m.id !== id && !(id === 'eye-opening' && m.id === 'eye-closing'))) return false;
+          if (m.page) return true;
+          if (m.span == null) return m.t >= lo && m.t + m.dur <= hi && m.t + m.dur <= tEnd;
+          // A box: within the margins, or, for one still open or longer than the
+          // page's middle, covering it.
+          const end = Number.isFinite(m.span) ? m.t + m.span : Infinity;
+          return (m.t >= lo && end <= hi) || (m.t <= lo && end >= hi);
+        });
+        if (clear || currentT - tMin >= 3 * winSec) {
+          pageFullSentRef.current = true;
+          onPageFullRef.current?.();
+        }
+      }
 
       // ── Fill sample buffer at 250 Hz (only if not frozen) ──
       if (!frozenRef.current) {
@@ -435,7 +515,7 @@ export function EEGCanvas({
       // channel at 0 and discarding the misses would walk several times more
       // samples than it draws. Sample times are monotonic, so one binary search
       // finds the left edge and all channels share it.
-      const firstVisible = lowerBound(timeBuffer.current, tRight - winSec);
+      const firstVisible = lowerBound(timeBuffer.current, Math.max(tRight - winSec, tMin));
 
       // Cross-highlight: a channel is highlighted if it's directly hovered/clicked
       // (from the canvas side) or if either of its electrodes is highlighted from
@@ -450,12 +530,8 @@ export function EEGCanvas({
       });
       const anyHighlight = highlightedChannels.size > 0;
 
-      // A detached electrode is flattened in the engine, but that only *looks*
-      // dead in a referential montage; in a bipolar chain the two derivations
-      // containing it correctly show the neighbour's activity, so the trace keeps
-      // moving and reads as still connected. Marking the affected rows makes the
-      // detachment legible in any montage without altering the waveform: the row
-      // still draws the true (flat or neighbour) signal, it is just labelled off.
+      // A detached electrode's rows are shaded while it is off, and draw no signal
+      // from its pop's end until it is reattached (detachSpansRef above).
       const detached = currentSettings.artifactParams.detachedElectrodes;
       const detachedSet = detached.length ? new Set(detached) : null;
       const rowDetached = (ch: Montage['channels'][number]) =>
@@ -495,11 +571,17 @@ export function EEGCanvas({
         ctx.strokeStyle = currentTheme.traceColors[ch.group];
         ctx.lineWidth   = isHighlighted ? 2.2 : (isECG ? 1.1 : 0.9);
         let started = false;
+        // Spans while one of this row's electrodes was disconnected: no signal there.
+        const off = [
+          ...(detachSpansRef.current.get(ch.active) ?? []),
+          ...(ch.reference ? detachSpansRef.current.get(ch.reference) ?? [] : []),
+        ];
 
         for (let j = firstVisible; j < data.length; j++) {
-          const tDist = tRight - timeBuffer.current[j];
+          const tj = timeBuffer.current[j];
+          const tDist = tRight - tj;
           const x = w - tDist * pxPerSec;
-          const v = data[j];
+          const v = off.length && off.some(o => tj >= o.from && tj < o.to) ? 0 : data[j];
           // Real EEG paper and clinical review systems never clip: a
           // high-amplitude event is drawn at its true height and simply
           // overruns into neighbouring channels, which is how reviewers judge
@@ -556,10 +638,19 @@ export function EEGCanvas({
         // Every arrow carries its artifact's name (the owner, 2026-10-14: "all arrows
         // should be annotated"; it was one name per artifact every 2.5 s). A name is
         // left off only where the same name already covers that spot.
-        const drawnLabels: { x0: number; y0: number; x1: number; y1: number; text: string }[] = [];
+        const drawnLabels: { x0: number; y0: number; x1: number; y1: number; text: string; block: number }[] = [];
+        // Arrows keep a name each only once per chain block every LABEL_EVERY_S seconds
+        // (owner's inbox, 2026-11-27: "annotations can be a little obstrusive"). With every
+        // arrow named, a Worst case page carried a name on each row an eye movement or ECG
+        // beat reached, beat after beat, and the trace went under its tags. Every arrow is
+        // still drawn, so where an artifact is stays marked.
+        const LABEL_EVERY_S = 2;
+        const blockOf = new Map<number, number>();
+        { let b = 0; for (const r of layout) { if (r.channelIndex < 0) b++; else blockOf.set(r.channelIndex, b); } }
         for (const m of marksRef.current) {
           if (m.span == null && m.t + m.dur > tEnd) continue; // still developing: its peak is not drawn yet
           if (m.t + (m.span ?? 0) < tRight - winSec) continue; // scrolled off
+          if (m.t < tMin) continue; // before a fresh page (freshPageKey)
           if (m.page) {
             // Named while it lasts at the page's right edge, the moment being drawn.
             const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
@@ -583,10 +674,15 @@ export function EEGCanvas({
           const pid = m.id === 'eye-closing' ? 'eye-opening' : m.id;
           const color = PATTERN_COLOR[pid] ?? currentTheme.overlayText;
           const text = m.label ?? PATTERN_BY_ID[pid]?.name ?? pid;
-          const label = (x: number, ty: number) => {
+          const label = (x: number, ty: number, block = -1) => {
             const textW = ctx.measureText(text).width;
-            const box = { x0: x - textW / 2 - padX, y0: ty - tagH / 2, x1: x + textW / 2 + padX, y1: ty + tagH / 2, text };
+            // Never under the channel-label strip or past the right edge: a tag near the
+            // page's left edge was cut ("ent Artifact", 2026-11-27).
+            x = Math.min(w - textW / 2 - padX - 2, Math.max(lblW + textW / 2 + padX + 2, x));
+            const box = { x0: x - textW / 2 - padX, y0: ty - tagH / 2, x1: x + textW / 2 + padX, y1: ty + tagH / 2, text, block };
             if (drawnLabels.some(b => b.text === text && b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) return;
+            if (block >= 0 && drawnLabels.some(b => b.text === text && b.block === block
+              && Math.abs((b.x0 + b.x1) / 2 - x) < LABEL_EVERY_S * pxPerSec)) return;
             drawnLabels.push(box);
             ctx.fillStyle = currentTheme.overlayBg;
             ctx.fillRect(box.x0, box.y0, textW + 2 * padX, tagH);
@@ -618,7 +714,7 @@ export function EEGCanvas({
               ctx.stroke();
               const textW = ctx.measureText(text).width;
               drawnMarks++;
-              label(Math.min(xa + 6 + textW / 2, xb - textW / 2 - padX), y0 + tagH / 2 + 2);
+              label(Math.min(xa + 6 + textW / 2, xb - textW / 2 - padX), y0 + tagH / 2 + 2, blockOf.get(block[0]) ?? -1);
             }
             continue;
           }
@@ -671,7 +767,7 @@ export function EEGCanvas({
             ctx.moveTo(x, tip); ctx.lineTo(x - 4 * k, tip + dir * 7 * k); ctx.lineTo(x + 4 * k, tip + dir * 7 * k);
             ctx.closePath();
             ctx.fill();
-            label(x, tail + dir * (tagH / 2 + 2));
+            label(x, tail + dir * (tagH / 2 + 2), blockOf.get(row.channelIndex) ?? -1);
           }
         }
 
@@ -759,22 +855,24 @@ export function EEGCanvas({
             const on = isLiveOn(id, live);
             const detail = liveDetail(id, live, currentSettings);
             const text = `${PATTERN_BY_ID[id]?.name ?? id}${detail ? ` — ${detail}` : ''}`;
-            ctx.font = '11px sans-serif';
+            // 10 px on 15 px lines (11 on 18 until 2026-11-27): under Worst case the list
+            // ran to twelve lines over the top four rows.
+            ctx.font = '10px sans-serif';
             const textW = ctx.measureText(text).width;
             const x1 = w - 12, x0 = x1 - textW - 22;
             ctx.fillStyle = currentTheme.overlayBg;
-            ctx.fillRect(x0, py - 2, textW + 22, 16);
+            ctx.fillRect(x0, py - 2, textW + 22, 14);
             ctx.fillStyle = PATTERN_COLOR[id] ?? currentTheme.overlayText;
             ctx.strokeStyle = PATTERN_COLOR[id] ?? currentTheme.overlayText;
             ctx.lineWidth = 1.4;
             ctx.beginPath();
-            ctx.arc(x0 + 9, py + 6, 3.6, 0, Math.PI * 2);
+            ctx.arc(x0 + 9, py + 5, 3.2, 0, Math.PI * 2);
             if (on) ctx.fill(); else ctx.stroke();
             ctx.globalAlpha = on ? 1 : 0.55;
             ctx.fillStyle = currentTheme.overlayText;
             ctx.fillText(text, x1, py);
             ctx.globalAlpha = 1;
-            py += 18;
+            py += 15;
           }
         }
       }

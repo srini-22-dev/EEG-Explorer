@@ -88,7 +88,8 @@ export default function App() {
   };
   const conditionsEdited = isEdited(appliedLevel, toggles, artifactParams);
   // The controls follow what the level is doing (and the tubing's water after a suction).
-  const live = useLiveArtifacts(conditions !== 'none' || effectivePatterns.has('ventilator'));
+  // Also while Electrode Pop is on: its controls offer to disconnect the electrode that popped last.
+  const live = useLiveArtifacts(conditions !== 'none' || effectivePatterns.has('ventilator') || effectivePatterns.has('electrode-pop'));
 
   const [patternOptions, setPatternOptions] = useState<PatternOptions>({ postsForm: 'singles', focalPlacement: 'under', seizureMuscle: true, kcSpindle: 'sometimes', sixHzForm: 'fold', breachSite: 'C4', breachSites: ['C4'], pos146Sides: 'shifting', postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT });
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
@@ -104,6 +105,13 @@ export default function App() {
   const [showRightSpectrum, setShowRightSpectrum] = useState(false);
   const [freezeYAxis, setFreezeYAxis] = useState(false);
   const [quizMode, setQuizMode] = useState(false);
+  // Each quiz question gets a fresh page (EEGCanvas freshPageKey), and its annotations
+  // once answered (owner's inbox, 2026-11-27).
+  const [quizPageKey, setQuizPageKey] = useState(0);
+  const [quizPageSec, setQuizPageSec] = useState(10);
+  const [quizPageFullKey, setQuizPageFullKey] = useState(-1);
+  const [quizReveal, setQuizReveal] = useState(false);
+  const [quizTarget, setQuizTarget] = useState<string | undefined>(undefined);
   const [tutorialMode, setTutorialMode] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
 
@@ -156,6 +164,10 @@ export default function App() {
             onClose={() => setQuizMode(false)}
             setActivePatterns={selectQuizPatterns}
             setFreeze={setIsFrozen}
+            newPage={(target: string) => { setQuizTarget(target); setQuizPageKey(k => k + 1); }}
+            pageFull={quizPageFullKey === quizPageKey}
+            pageSec={quizPageSec}
+            setReveal={setQuizReveal}
           />
         )}
         </div>
@@ -188,7 +200,7 @@ export default function App() {
                 montage={montage}
                 settings={settings}
                 theme={theme}
-                showAnnotations={showAnnotations && !quizMode}
+                showAnnotations={quizMode ? quizReveal : showAnnotations}
                 showArtifactList={showArtifactList && !quizMode}
                 showStateLabel={!quizMode}
                 isFrozen={isFrozen}
@@ -196,6 +208,10 @@ export default function App() {
                 dataBuffer={dataBuffer}
                 timeBuffer={timeBuffer}
                 graphHover={graphHover}
+                freshPageKey={quizMode ? quizPageKey : undefined}
+                onFreshPage={setQuizPageSec}
+                onPageFull={() => setQuizPageFullKey(quizPageKey)}
+                pageInterest={quizMode ? quizTarget : undefined}
               />
             </Panel>
             {show3DPanel && (

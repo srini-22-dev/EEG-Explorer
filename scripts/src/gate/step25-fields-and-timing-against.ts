@@ -259,7 +259,10 @@ section('\nMains, many poor contacts: worst over the back of the head, much redu
 
 section('\nECG artifact: visible against the ear, low on the double banana, larger on the left:', () => {
   const ear = displayContribAll('reference-ipsi', 'awake', 'ecg-artifact', 30, 20);
-  check('ecg-artifact R wave at Cz-A1, reference-ipsi (measured 4 uV before the fix)', absPeak(ear['Cz-A1']), 7, 40, ' uV');
+  // The ceiling was 40, with no source. Since 2026-11-27 each subject's build scales the
+  // artifact 0.7-1.6x (heartOf; Tatum 2011: "overweight or ... short stocky necks"), and
+  // seed 20 draws 1.38x, which put it at 37 of 40. 60 still catches a runaway field.
+  check('ecg-artifact R wave at Cz-A1, reference-ipsi (measured 4 uV before the fix)', absPeak(ear['Cz-A1']), 7, 60, ' uV');
   const side = (els: string[], ref: string) => els.reduce((a, e) => a + absPeak(ear[`${e}-${ref}`]), 0);
   check('ecg-artifact left / right, reference-ipsi (LEARNINGEEG: more prominent on the left)',
     side(['F3', 'C3', 'P3'], 'A1') / side(['F4', 'C4', 'P4'], 'A2'), 1, Infinity);
@@ -274,8 +277,11 @@ section('\nECG artifact on the double banana (IK-053): the left posterior chains
   };
   const median = (a: number[]) => [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)];
   let leftPosterior = 0;
-  const lr: number[] = [], frontal: number[] = [], size: number[] = [], earOverBip: number[] = [];
-  for (const seed of [3, 7, 20]) {
+  const lr: number[] = [], frontal: number[] = [], size: number[] = [], earOverBip: number[] = [], earPeak: number[] = [];
+  // Six subjects, each with its own build and neck position (heartOf): the pattern every
+  // source agrees on has to hold in each of them, not in one fitted subject.
+  const SEEDS = [3, 7, 20, 11, 42, 5];
+  for (const seed of SEEDS) {
     const bip = displayContribAll('bipolar-ap', 'awake', 'ecg-artifact', 20, seed);
     const ear = displayContribAll('reference-ipsi', 'awake', 'ecg-artifact', 20, seed);
     const bg = runDisplay('bipolar-ap', 'awake', [], 20, seed);
@@ -288,12 +294,17 @@ section('\nECG artifact on the double banana (IK-053): the left posterior chains
     const row = bg.montage.channels.findIndex((c) => c.label === topLabel);
     size.push(topAmp / p2p(bg.data[row]));
     earOverBip.push(Math.max(...Object.values(ear).map(p2p)) / topAmp);
+    earPeak.push(Math.max(...Object.values(ear).map(p2p)));
   }
-  check('ecg-artifact: subjects whose three largest double-banana rows are left posterior (C3-P3, P3-O1, T3-T5, T5-O1)', leftPosterior, 3, 3);
-  check('ecg-artifact: left / right double-banana rows (P3-O1, T5-O1, T3-T5 over the right), smallest of 3', Math.min(...lr), 1.5, Infinity);
-  check('ecg-artifact: frontal double-banana rows / the largest row, worst of 3', Math.max(...frontal), 0, 0.35);
-  check('ecg-artifact: largest double-banana row / its own background, peak to peak, median of 3 (learningeeg figure: about 0.5)', median(size), 0.25, 1);
-  check('ecg-artifact: largest ear-referenced channel / largest double-banana row, smallest of 3 (eegpedia: most prominent with earlobe references)', Math.min(...earOverBip), 1.5, Infinity);
+  const k = SEEDS.length;
+  check(`ecg-artifact: subjects whose three largest double-banana rows are left posterior (C3-P3, P3-O1, T3-T5, T5-O1), of ${k}`, leftPosterior, k, k);
+  check(`ecg-artifact: left / right double-banana rows (P3-O1, T5-O1, T3-T5 over the right), smallest of ${k}`, Math.min(...lr), 1.5, Infinity);
+  check(`ecg-artifact: frontal double-banana rows / the largest row, worst of ${k}`, Math.max(...frontal), 0, 0.35);
+  check(`ecg-artifact: largest double-banana row / its own background, peak to peak, median of ${k} (learningeeg figure: about 0.5)`, median(size), 0.25, 1);
+  check(`ecg-artifact: largest ear-referenced channel / largest double-banana row, smallest of ${k} (eegpedia: most prominent with earlobe references)`, Math.min(...earOverBip), 1.5, Infinity);
+  // Tatum 2011: larger in "overweight or ... short stocky necks". Subjects differ: the
+  // largest ear-referenced channel of the biggest build over the smallest's.
+  check(`ecg-artifact: largest ear-referenced channel, largest / smallest subject of ${k} (Tatum 2011: build changes it)`, Math.max(...earPeak) / Math.min(...earPeak), 1.4, Infinity);
 });
 
 // Source: learningeeg (Artifacts) — myogenic artifact is "most commonly found in the

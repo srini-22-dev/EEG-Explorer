@@ -23,6 +23,7 @@
 
 import { Gaussian, deriveSeed } from './rng';
 import type { SourceSpec } from './forward';
+import { electrodePositions3D } from '../utils/electrodePositions3D';
 
 /**
  * Artifact generator positions. These sit outside the cortical shell — the eyes
@@ -169,6 +170,42 @@ export const ARTIFACT_SOURCES: Record<string, SourceSpec> = {
   // below. y = -0.80 is ~3.4 cm below the inion, z = -0.80 behind it.
   nuchal:      { id: 'nuchal',      pos: [ 0.00,-0.80,-0.80], orientation: { kind: 'radial' }, extent: 0.50 },
 };
+
+/** How far the neck patch moves with head and neck position, scene units per axis (about 0.8 cm). A design. */
+const HEART_NECK_JITTER = 0.08;
+/** The range of the build's gain on the ECG artifact. A design: no source gives a figure. */
+const HEART_BUILD_GAIN: [number, number] = [0.7, 1.6];
+
+/**
+ * One subject's heart source and the size of its ECG artifact (IK-053). The sources
+ * agree on what stays the same in everyone: it is left-sided, posterior, largest on the
+ * ear references, and opposite in polarity at the two ears. They also name two things
+ * that differ between people:
+ *   - Build. Tatum et al. 2011 (J Clin Neurophysiol 28:252): "Patients who are
+ *     overweight or have short stocky necks may be predisposed ... because the QRS
+ *     complex is amplified". A neurotechnology training log (SCTIMST, 2014-15): "obese
+ *     patients, short necks and infants, in whom the head is close to the thorax".
+ *     So each subject draws a gain on the artifact, 0.7-1.6x.
+ *   - Head and neck position. Tatum: reducing it "may be possible if the technologist
+ *     is able to alter the position of the head and neck". So the neck patch, where the
+ *     field arrives, moves by up to about 0.8 cm per axis. It never moves far enough to
+ *     leave the left side.
+ *
+ * Neither range has a source; they are designs, and the gate holds the shared pattern
+ * across several subjects rather than one fitted subject. Drawn on its own stream, so
+ * every other parameter of every existing seed is unchanged.
+ */
+export function heartOf(seed: number): { spec: SourceSpec; gain: number } {
+  const g = new Gaussian(deriveSeed(seed, 'heartBuild'));
+  const base = ARTIFACT_SOURCES.heart;
+  const [neck, far] = base.patches!;
+  const j = () => g.range(-HEART_NECK_JITTER, HEART_NECK_JITTER);
+  const pos: [number, number, number] = [neck.spec.pos[0] + j(), neck.spec.pos[1] + j(), neck.spec.pos[2] + j()];
+  return {
+    spec: { ...base, pos, patches: [{ ...neck, spec: { ...neck.spec, pos } }, far] },
+    gain: g.range(HEART_BUILD_GAIN[0], HEART_BUILD_GAIN[1]),
+  };
+}
 
 /**
  * How the ocular drive splits between the dipole term (`eyeL`/`eyeR`) and the monopole
@@ -803,16 +840,77 @@ export class LineNoiseGenerator {
   }
 }
 
-/** Movement: rare, very large, broadband multi-channel transients (§8). */
+/** Microvolts of movement artifact at a disturbed electrode, the median of each movement's own size draw (log-normal). */
+export const MOVEMENT_UV = 60;
+/** The electrodes a supine head rests on, as the breathing artifact's lying form has them (breathing.ts). */
+const PILLOW_ELECTRODES = ['O1', 'O2'];
+/** Share of movements that are the head moving on the pillow. A design: no source gives it. */
+const PILLOW_SHARE = 0.5;
+/**
+ * Electrodes this close to a disturbed one (unit-sphere chord) are disturbed too, at
+ * MOVEMENT_NEIGHBOUR_SHARE: the adjacent 10-20 sites, which measure 0.54-0.84 apart on this
+ * head (O1-T5 0.57, O1-P3 0.65, C3-Cz 0.75). A design.
+ */
+const MOVEMENT_REACH = 0.8;
+const MOVEMENT_NEIGHBOUR_SHARE = 0.5;
+/** Corner of each electrode's slow wander, Hz. A design: no source gives the spectrum. */
+const MOVEMENT_CORNER_HZ = 3;
+/** Fast (unfiltered) part riding on the slow wander, against the slow part's unit RMS. */
+const MOVEMENT_FAST_SHARE = 0.4;
+
+/**
+ * Movement (IK-059). Moving the head, the body or the leads disturbs the electrodes'
+ * contact with the skin and pulls on their wires. So it is made at the contacts, like a
+ * pop or the breathing artifact, and does not go through the leadfield: each disturbed
+ * electrode carries a waveform of its own. That is why it reads as "chaotic looking, high
+ * amplitude activity that doesn't mimic any actual cerebral patterns", and why it "varies
+ * widely depending on the type and location of movement" (learningeeg, Artifacts). What it
+ * must not look like is a smooth field decaying from one generator.
+ *
+ * Until 2026-11-27 it was one white-noise burst driven through the eye sources: a single
+ * smooth frontal field, with every row drawing the same waveform in proportion. That is a
+ * cerebral-looking field, the very thing the toggle's text said it was not.
+ *
+ * Where: each movement disturbs one site.
+ *   - Half are the head moving on the pillow. The electrodes it rests on are disturbed,
+ *     at the back of the head: learningeeg says head movement "is usually more prominent
+ *     posteriorly if the patient is resting their head on a pillow".
+ *   - The rest are anywhere: one electrode and its neighbours (a hand to the head, a tug
+ *     on a lead).
+ *   - The half is a design; no source gives the share.
+ *
+ * What, on each disturbed electrode:
+ *   - its own random wave, mostly slow (a 3 Hz one-pole low-pass) with some fast in it;
+ *   - under a rise-and-fall envelope over 0.2-0.9 s;
+ *   - its own size (log-normal); an adjacent electrode gets about half (MOVEMENT_REACH).
+ *   - The size, duration and corner are designs, since no source gives a figure. "High
+ *     amplitude" is held by the gate check that several rows pass 2 mm.
+ */
 export class MovementGenerator {
   private g: Gaussian;
   private samplesToNext = 0;
   private left = 0;
-  private amp = 0;
   private len = 1;
+  private readonly a: number;
+  private readonly norm: number;
+  private readonly lp: Float64Array;
+  /** Microvolts per electrode for this movement, at its peak and unit severity. */
+  readonly gain: Float64Array;
+  /** This sample's artifact per electrode, microvolts at unit severity; zero between movements. */
+  readonly out: Float64Array;
+  /** True on the sample a movement begins. */
+  started = false;
+  /** The current movement's length, seconds. */
+  get duration(): number { return this.len * this.dt; }
 
-  constructor(seed: number, private dt: number, private meanInterval = 70) {
+  constructor(seed: number, private dt: number, private electrodes: string[], private meanInterval = 70) {
     this.g = new Gaussian(seed);
+    this.a = Math.exp(-2 * Math.PI * MOVEMENT_CORNER_HZ * dt);
+    // A one-pole low-pass of unit white noise has variance (1 - a) / (1 + a).
+    this.norm = Math.sqrt((1 + this.a) / (1 - this.a));
+    this.lp = new Float64Array(electrodes.length);
+    this.gain = new Float64Array(electrodes.length);
+    this.out = new Float64Array(electrodes.length);
     this.schedule();
   }
   setMeanInterval(sec: number) { this.meanInterval = Math.max(1, sec); }
@@ -821,18 +919,38 @@ export class MovementGenerator {
   private schedule() {
     this.samplesToNext = Math.max(1, Math.round(this.g.exponential(this.meanInterval) / this.dt));
   }
-  next(): number {
-    if (--this.samplesToNext <= 0) {
-      this.len = Math.max(2, Math.round(this.g.range(0.2, 0.9) / this.dt));
-      this.left = this.len;
-      this.amp = this.g.logNormal(1, 0.5);
-      this.schedule();
+  private begin() {
+    this.len = Math.max(2, Math.round(this.g.range(0.2, 0.9) / this.dt));
+    this.left = this.len;
+    const site = this.g.uniform() < PILLOW_SHARE
+      ? PILLOW_ELECTRODES
+      : [this.electrodes[Math.floor(this.g.uniform() * this.electrodes.length)]];
+    const near = (a: string, b: string) => {
+      const pa = electrodePositions3D[a], pb = electrodePositions3D[b];
+      return !!pa && !!pb && Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]) < MOVEMENT_REACH;
+    };
+    const k = this.electrodes.map(e => (site.includes(e) ? 1 : site.some(c => near(c, e)) ? MOVEMENT_NEIGHBOUR_SHARE : 0));
+    const amp = MOVEMENT_UV * this.g.logNormal(1, 0.5);
+    for (let c = 0; c < this.electrodes.length; c++) {
+      this.gain[c] = k[c] > 0 ? amp * k[c] * this.g.logNormal(1, 0.4) : 0;
+      this.lp[c] = 0;
     }
-    if (this.left <= 0) return 0;
-    const u = (this.len - this.left) / this.len;
+    this.started = true;
+  }
+  /** Advance one sample, filling `out`. */
+  next() {
+    this.started = false;
+    if (--this.samplesToNext <= 0) { this.begin(); this.schedule(); }
+    // Between movements: clear the last sample once, then nothing to do.
+    if (this.left <= 0) { if (this.len !== 0) { this.out.fill(0); this.len = 0; } return; }
+    const env = Math.sin(Math.PI * (this.len - this.left) / this.len);
     this.left--;
-    const env = Math.sin(Math.PI * u);
-    return this.amp * env * this.g.next();
+    for (let c = 0; c < this.out.length; c++) {
+      if (this.gain[c] === 0) { this.out[c] = 0; continue; }
+      const w = this.g.next();
+      this.lp[c] = this.a * this.lp[c] + (1 - this.a) * w;
+      this.out[c] = this.gain[c] * env * (this.lp[c] * this.norm + MOVEMENT_FAST_SHARE * this.g.next());
+    }
   }
 }
 

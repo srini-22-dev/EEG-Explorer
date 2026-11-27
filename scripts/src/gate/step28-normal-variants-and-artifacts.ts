@@ -10,7 +10,7 @@ import type { ArtifactMark } from '../../../artifacts/eeg-simulator/src/engine/e
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FS, absPeak, bandPower, check, section, step } from './harness';
+import { FS, absPeak, bandPower, check, corr, section, step } from './harness';
 
 step('\n=== Step 28: normal variants and artifacts against SCORE, eegpedia, learningeeg and the IFCN glossary (2026-10-27) ===\n');
 // The owner's list (idea-vault inbox, 2026-10-27): wickets, RMTD, small sharp spikes,
@@ -611,4 +611,92 @@ section('\nSmall sharp spikes: not every one reverses phase on the double banana
   }
   check('small sharp spikes measured', counted, 20, 1e6);
   check('small sharp spikes with a phase reversal at T3/T4 on the double banana, share (owner: "not necessarily ... each time")', reversed / counted, 0.2, 0.8);
+});
+
+// ── Movement (IK-059), 2026-11-27 ──
+// learningeeg (Artifacts): "chaotic looking, high amplitude activity that doesn't mimic any
+// actual cerebral patterns"; it "varies widely depending on the type and location of
+// movement"; head movement "is usually more prominent posteriorly if the patient is resting
+// their head on a pillow". It was one burst through the eye sources: a smooth frontal field,
+// the same waveform on every row in proportion (median |r| 1.0 between rows).
+
+section('\nMovement: chaotic, on many rows, each its own waveform, often at the back of the head (learningeeg):', () => {
+  const BACK = /O1|O2|P3|P4|T5|T6|Pz/;
+  const rowsPast: number[] = [], medR: number[] = [], largest: number[] = [];
+  let back = 0, n = 0;
+  for (const seed of [20, 3, 7]) {
+    const run = (patterns: string[]) => {
+      const montage = MONTAGES['bipolar-ap'];
+      const settings: SimSettings = {
+        speed: 30, sensitivity: 7, patientState: 'awake', activePatterns: new Set(patterns),
+        ictalParams: defaultIctalParamsMap(), artifactParams: { ...defaultArtifactParams(), movementRatePerMin: 6 },
+      };
+      const src = new SimulationSource(seed, FS);
+      src.useAppMode();
+      const len = 120 * FS;
+      const data: Record<string, Float64Array> = {};
+      const chans = montage.channels.filter((c) => c.group !== 'ecg');
+      chans.forEach((c) => { data[c.label] = new Float64Array(len); });
+      const marks: { i: number; m: ArtifactMark }[] = [];
+      for (let i = 0; i < len; i++) {
+        const v = src.next(settings);
+        const avg = commonAverage(v);
+        for (const c of chans) data[c.label][i] = computeChannelVoltage(c, src.t, v, avg);
+        for (const m of src.groundTruth.marks) marks.push({ i, m: { ...m } });
+      }
+      return { data, marks };
+    };
+    const on = run(['movement']), off = run([]);
+    for (const { i, m } of on.marks) {
+      if (m.id !== 'movement') continue;
+      const z = Math.min(i + Math.round(m.dur * FS), on.data['Fp1-F3'].length);
+      const seg = (r: string) => on.data[r].slice(i, z).map((v, k) => v - off.data[r][i + k]);
+      const peaks = Object.keys(on.data).map((r) => [r, absPeak(seg(r))] as const).sort((a, b) => b[1] - a[1]);
+      const past = peaks.filter(([, p]) => p >= 14).map(([r]) => r);   // 2 mm at 7 uV/mm
+      n++;
+      rowsPast.push(past.length);
+      largest.push(peaks[0][1]);
+      if (BACK.test(peaks[0][0])) back++;
+      const rs: number[] = [];
+      for (let a = 0; a < past.length; a++) for (let b = a + 1; b < past.length; b++) rs.push(Math.abs(corr(seg(past[a]), seg(past[b]))));
+      if (rs.length) medR.push(median(rs));
+    }
+  }
+  check('movement: movements measured (3 subjects, 6 a minute for 2 minutes)', n, 15, 1e6);
+  check('movement: rows past 2 mm per movement, median (learningeeg: high amplitude, on many channels)', median(rowsPast), 4, Infinity);
+  check('movement: largest row per movement, median (high amplitude; a design floor of 7 mm at 7 uV/mm)', median(largest), 50, Infinity, ' uV');
+  check('movement: |r| between the rows it is on, median over movements (chaotic, no generator; one source gave 1.0)', median(medR), 0, 0.5);
+  check('movement: share of movements largest at the back of the head (learningeeg: posteriorly on a pillow)', back / n, 0.45, 0.95);
+});
+
+// ── Electrode pop (IK-056), 2026-11-27 ──
+// learningeeg (Artifacts): "a single electrode showing a very sudden, steep upslope with a
+// slower downslope and absolutely no field". On the double banana only the rows sharing
+// the electrode can change.
+
+section('\nElectrode pop: a steep rise, a slower fall, and no field (learningeeg):', () => {
+  const r = isoApp('bipolar-ap', 'awake', ['electrode-pop'], 300, 20);
+  let n = 0, steeper = 0, worstOther = 0;
+  for (const { i } of r.marks.filter(({ m }) => m.id === 'electrode-pop')) {
+    const z = Math.min(i + Math.round(1.5 * FS), r.d['Fp1-F3'].length);
+    const peaks = Object.entries(r.d).filter(([l]) => l !== 'ECG')
+      .map(([l, x]) => [l, absPeak(x.slice(i, z))] as const).sort((a, b) => b[1] - a[1]);
+    const [top, topAmp] = peaks[0];
+    if (topAmp < 14) continue;   // under 2 mm at 7 uV/mm: nothing to read
+    n++;
+    // Rows that do not share the popped electrode: the electrode is the one the two
+    // largest rows have in common.
+    const [a1, a2] = top.split('-'), [b1, b2] = peaks[1][0].split('-');
+    const el = [a1, a2].find((e) => e === b1 || e === b2) ?? a1;
+    const others = peaks.filter(([l]) => !l.split('-').includes(el));
+    worstOther = Math.max(worstOther, ...others.map(([, p]) => p / topAmp));
+    // Rise: from the start to the peak; fall: from the peak to a third of it.
+    const x = r.d[top].slice(i, z);
+    let k = 0; for (let j = 0; j < x.length; j++) if (Math.abs(x[j]) > Math.abs(x[k])) k = j;
+    let f = k; while (f < x.length - 1 && Math.abs(x[f]) > Math.abs(x[k]) / 3) f++;
+    if (k < f - k) steeper++;
+  }
+  check('electrode pop: pops measured', n, 3, 1e6);
+  check('electrode pop: share rising faster than they fall (learningeeg: "steep upslope with a slower downslope")', steeper / n, 1, 1);
+  check('electrode pop: largest row not sharing the electrode / the pop, worst (learningeeg: "absolutely no field")', worstOther, 0, 0.01);
 });

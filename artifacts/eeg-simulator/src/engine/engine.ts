@@ -25,7 +25,7 @@ import {
   buildLeadfield, sourceUnder, synchronousPatches, backgroundPatches, CORTICAL_SHELL,
   type SourceSpec, type Leadfield,
 } from './forward';
-import { ARTIFACT_SOURCES, EcgGenerator } from './artifacts';
+import { ARTIFACT_SOURCES, EcgGenerator, heartOf } from './artifacts';
 import { RespirationGenerator } from './breathing';
 import { ArtifactLayer, type ArtifactGates, type LiveArtifacts } from './artifactLayer';
 import { MarkBook, NO_FIELDS, type ArtifactMark, type MarkFields } from './marks';
@@ -331,7 +331,10 @@ export class EegEngine {
       ...SLEEP_SITES.map(site => sourceUnder(`delta-${site}`, [site], SLEEP_PATCH)),
     ];
 
-    const artifactSpecs: SourceSpec[] = artifacts ? Object.values(ARTIFACT_SOURCES) : [];
+    // The heart is this subject's own: its build and neck position (heartOf, IK-053).
+    const artifactSpecs: SourceSpec[] = artifacts
+      ? Object.entries(ARTIFACT_SOURCES).map(([k, spec]) => (k === 'heart' ? heartOf(seed).spec : spec))
+      : [];
 
     // Pattern sources sit at the tail of the source list so their leadfield
     // columns form a known contiguous block after the artifact columns.

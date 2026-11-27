@@ -29,7 +29,7 @@ const EMG_REGIONS: { id: EmgRegion; label: string; hint: string }[] = [
 
 const LABEL_CLASS = 'text-[10px] text-slate-500 uppercase tracking-wider';
 
-function Slider({
+export function Slider({
   label, value, min, max, step, unit, onChange, disabled = false, offAtMin = false, live,
 }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -194,6 +194,21 @@ export function ArtifactControls({
               ? isDetached ? `${target} is detached` : `Pop ${target}`
               : 'Pop random electrode'}
           </button>
+          {/* A random pop: offer to disconnect the electrode that popped (owner's inbox,
+              2026-11-27). Its rows then show no signal until it is reattached. */}
+          {!targeted && live?.lastPop && (
+            <button
+              disabled={detached.includes(live.lastPop)}
+              onClick={() => setDetached([...detached, live.lastPop!])}
+              className={`w-full py-1 rounded text-[11px] font-mono border transition-colors ${
+                detached.includes(live.lastPop)
+                  ? 'border-slate-800 text-slate-700 cursor-not-allowed'
+                  : 'bg-orange-800/40 border-orange-600 text-orange-300 hover:bg-orange-800/60'
+              }`}
+            >
+              {detached.includes(live.lastPop) ? `${live.lastPop} (last popped) is detached` : `Disconnect ${live.lastPop} (last popped)`}
+            </button>
+          )}
           {/* Disconnection: contact breaks (one pop) and the channel goes flat until
               reattached — a different finding from a pop, hence its own button. */}
           <button
@@ -234,9 +249,8 @@ export function ArtifactControls({
                 that catches readers out.
               */}
               <p className="text-[10px] text-slate-600 leading-snug">
-                A detached electrode is isoelectric. In a referential montage its channel is
-                flat; in a bipolar chain the two derivations containing it show only the
-                neighbour&rsquo;s activity.
+                A detached electrode records nothing: after its pop, every row that uses
+                it shows no signal until it is reattached.
               </p>
             </div>
           )}
