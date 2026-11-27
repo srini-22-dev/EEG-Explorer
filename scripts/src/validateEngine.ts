@@ -43,6 +43,7 @@ import './gate/step26-toggle-rules-no-contradictory';
 import './gate/step27-annotation-arrows-every-artifact';
 import './gate/step28-normal-variants-and-artifacts';
 import './gate/step29-recording-conditions';
+import './gate/step30-lessons-in-display-space';
 
 const onlyAt = process.argv.indexOf('--only');
 const only = onlyAt >= 0 ? new RegExp(process.argv[onlyAt + 1] ?? '', 'i') : null;

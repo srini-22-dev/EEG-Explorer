@@ -3,7 +3,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Info, ChevronDown, Download, MonitorPlay, Brain } from 'lucide-react';
+import { Info, ChevronDown, Download, MonitorPlay, Brain, GraduationCap } from 'lucide-react';
 import { MONTAGES } from '../utils/montages';
 import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions } from '../utils/simTypes';
 import { POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } from '../utils/simTypes';
@@ -51,6 +51,7 @@ type Props = {
   setShowRightSpectrum: (b: boolean) => void;
   setQuizMode: (b: boolean) => void;
   setTutorialMode: (b: boolean) => void;
+  setLessonsMode: (b: boolean) => void;
   dataBuffer: React.MutableRefObject<number[][]>;
   timeBuffer: React.MutableRefObject<number[]>;
   /** The toggle whose information panel is open, and how to open (or close) one. */
@@ -101,7 +102,7 @@ export function ControlPanel({
   graphHover, setGraphHover,
   showSpectrum, setShowSpectrum,
   showRightSpectrum, setShowRightSpectrum,
-  setQuizMode, setTutorialMode,
+  setQuizMode, setTutorialMode, setLessonsMode,
   dataBuffer, timeBuffer,
   infoId, onShowInfo,
 }: Props) {
@@ -184,6 +185,9 @@ export function ControlPanel({
             </Button>
             <Button variant="outline" size="sm" className="h-9 text-xs border-slate-700 bg-purple-900/30 text-purple-300 hover:bg-purple-800/40" onClick={() => setQuizMode(true)}>
               <Brain className="w-3.5 h-3.5 mr-1" /> Quiz
+            </Button>
+            <Button variant="outline" size="sm" className="col-span-2 h-9 text-xs border-slate-700 bg-sky-900/30 text-sky-300 hover:bg-sky-800/40" onClick={() => setLessonsMode(true)}>
+              <GraduationCap className="w-3.5 h-3.5 mr-1" /> Lessons: how to read EEG
             </Button>
           </div>
         </div>
