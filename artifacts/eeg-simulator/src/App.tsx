@@ -18,6 +18,8 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { EEGTheme } from './utils/themes';
 import { QuizMode } from './components/QuizMode';
 import { TutorialMode } from './components/TutorialMode';
+import { LessonsMode } from './components/LessonsMode';
+import type { LessonView } from './utils/lessons';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 
 // Both panels are optional and both drag in a large dependency that the trace
@@ -94,6 +96,24 @@ export default function App() {
   const updatePatternOptions = (patch: Partial<PatternOptions>) =>
     setPatternOptions(prev => ({ ...prev, ...patch }));
 
+  // A lesson view puts its page on screen: only its own toggles, in their stage
+  // (quizPage, which is what gate Step 30 checks the lesson's claims against), and
+  // the standard 7 µV/mm and 30 mm/s unless the view is about changing them. The
+  // filters, artifact settings and recording level go back to the app's defaults,
+  // as Step 30 runs them: a detached electrode or a noisy level left on from before
+  // would put something on the page the lesson does not describe.
+  const showLessonView = (view: LessonView) => {
+    setConditionsLevel('none');
+    setAppliedLevel({ level: 'none', on: [], params: {} });
+    setArtifactParams(prev => ({ ...defaultArtifactParams(), manualPopNonce: prev.manualPopNonce, suctionNonce: prev.suctionNonce }));
+    setFilters(DEFAULT_FILTERS);
+    setToggles(() => quizPage(view.patterns));
+    setMontageId(view.montage);
+    if (view.focalPlacement) updatePatternOptions({ focalPlacement: view.focalPlacement });
+    setSensitivity(view.sensitivity ?? 7);
+    setSpeed(view.speed ?? 30);
+  };
+
   const [theme, setTheme] = useState<EEGTheme>('green-paper');
   const [showAnnotations, setShowAnnotations] = useState(true);
   // The artifact list at the canvas's top right, on its own switch (owner, 2026-11-25:
@@ -105,6 +125,7 @@ export default function App() {
   const [freezeYAxis, setFreezeYAxis] = useState(false);
   const [quizMode, setQuizMode] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
+  const [lessonsMode, setLessonsMode] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
 
   const dataBuffer = useRef<number[][]>([]);
@@ -128,7 +149,7 @@ export default function App() {
         {/* Hidden, not removed, during the quiz: its switches name the answer. The quiz
             panel docks in its place, so the trace keeps its full width and nothing
             covers it. */}
-        <div className={quizMode ? 'relative h-full flex-shrink-0 invisible' : 'contents'}>
+        <div className={quizMode || lessonsMode ? 'relative h-full flex-shrink-0 invisible' : 'contents'}>
         <ControlPanel
           montageId={montageId}
           activePatterns={effectivePatterns} togglePattern={togglePattern}
@@ -144,13 +165,16 @@ export default function App() {
           graphHover={graphHover} setGraphHover={setGraphHover}
           showSpectrum={showSpectrum} setShowSpectrum={setShowSpectrum}
           showRightSpectrum={showRightSpectrum} setShowRightSpectrum={setShowRightSpectrum}
-          setQuizMode={setQuizMode} setTutorialMode={setTutorialMode}
+          setQuizMode={setQuizMode} setTutorialMode={setTutorialMode} setLessonsMode={setLessonsMode}
           dataBuffer={dataBuffer} timeBuffer={timeBuffer}
           show3DPanel={show3DPanel} setShow3DPanel={setShow3DPanel}
           headOpacity={headOpacity} setHeadOpacity={setHeadOpacity}
           brainOpacity={brainOpacity} setBrainOpacity={setBrainOpacity}
           infoId={infoId} onShowInfo={setInfoId}
         />
+        {lessonsMode && (
+          <LessonsMode onClose={() => setLessonsMode(false)} showView={showLessonView} montage={montage} />
+        )}
         {quizMode && (
           <QuizMode
             onClose={() => setQuizMode(false)}

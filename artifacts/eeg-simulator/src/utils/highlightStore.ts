@@ -42,6 +42,12 @@ export function setHoverChannels(channels: Set<number>) {
   notify();
 }
 
+/** Replace the clicked rows wholesale: a lesson highlights the rows it talks about. */
+export function setClickedChannels(channels: Set<number>) {
+  state = { ...state, clickedChannels: channels };
+  notify();
+}
+
 export function toggleClickChannel(channelIndex: number) {
   const newSet = new Set(state.clickedChannels);
   if (newSet.has(channelIndex)) {
