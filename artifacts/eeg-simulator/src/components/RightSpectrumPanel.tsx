@@ -93,7 +93,7 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
   );
 
   return (
-    <div className="h-full bg-[#1e2a1e] border-l border-[#2e4a2e] relative overflow-hidden text-slate-200">
+    <div className="h-full bg-ui-root border-l border-ui-sep relative overflow-hidden text-ui-text">
       {/* Full-height strip column — absolutely positioned so no header steals row
           height and the strips align row-for-row with the traces. */}
       <div className="absolute inset-0 flex flex-col min-h-0">
@@ -108,11 +108,11 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
             <div
               key={`ch-${row.index}`}
               style={{ flexGrow: row.frac }}
-              className={`flex items-center gap-1 px-1 min-h-0 ${isHi ? 'bg-emerald-500/10' : ''}`}
+              className={`flex items-center gap-1 px-1 min-h-0 ${isHi ? 'bg-ui-accent/12' : ''}`}
             >
               <span
                 className={`w-12 shrink-0 text-[9px] leading-none text-right truncate ${
-                  isHi ? 'text-emerald-300' : 'text-slate-500'
+                  isHi ? 'text-ui-accent font-semibold' : 'text-ui-text-2'
                 }`}
                 title={row.label}
               >
@@ -138,16 +138,16 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
 
       {/* Floating controls — overlaid, collapsible, so they never displace strips. */}
       {showHeader ? (
-        <div className="absolute top-1 right-1 z-10 bg-[#16211680] backdrop-blur-sm border border-[#2e4a2e] rounded shadow-lg px-2 py-1.5 max-w-[85%]">
+        <div className="ui-material absolute top-1.5 right-1.5 z-10 border border-ui-sep rounded-[12px] shadow-[var(--ui-shadow)] px-2.5 py-2 max-w-[90%]">
           <div className="flex items-center justify-between gap-2 mb-1">
-            <h3 className="text-xs font-bold text-emerald-400 whitespace-nowrap">Per-channel bands</h3>
+            <h3 className="text-[12px] font-semibold text-ui-text whitespace-nowrap">Per-channel bands</h3>
             <div className="flex items-center gap-1">
-              <div className="flex rounded overflow-hidden border border-slate-700 text-[10px]">
+              <div className="flex rounded-[8px] bg-ui-fill p-[2px] gap-[2px] text-[11px]">
                 <button
                   onClick={() => setMode('within')}
                   title="Scale each channel to its own strongest band (compare spectral shape)"
-                  className={`px-1.5 py-0.5 transition-colors ${
-                    mode === 'within' ? 'bg-emerald-800/50 text-emerald-200' : 'text-slate-400 hover:bg-slate-800'
+                  className={`px-2 h-6 pointer-coarse:h-8 rounded-[6px] font-medium transition-colors ${
+                    mode === 'within' ? 'bg-ui-thumb text-ui-text shadow-sm' : 'text-ui-text-2 hover:text-ui-text'
                   }`}
                 >
                   Per signal
@@ -155,8 +155,8 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
                 <button
                   onClick={() => setMode('across')}
                   title="Scale every channel to one global maximum, excluding ECG (compare power between channels)"
-                  className={`px-1.5 py-0.5 transition-colors border-l border-slate-700 ${
-                    mode === 'across' ? 'bg-emerald-800/50 text-emerald-200' : 'text-slate-400 hover:bg-slate-800'
+                  className={`px-2 h-6 pointer-coarse:h-8 rounded-[6px] font-medium transition-colors ${
+                    mode === 'across' ? 'bg-ui-thumb text-ui-text shadow-sm' : 'text-ui-text-2 hover:text-ui-text'
                   }`}
                 >
                   All signals
@@ -165,7 +165,8 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
               <button
                 onClick={() => setShowHeader(false)}
                 title="Hide this overlay"
-                className="text-slate-400 hover:text-slate-200 text-xs leading-none px-1"
+                aria-label="Hide this overlay"
+                className="grid place-items-center w-6 h-6 pointer-coarse:w-9 pointer-coarse:h-9 rounded-full text-ui-text-2 hover:bg-ui-fill text-xs leading-none"
               >
                 ✕
               </button>
@@ -173,7 +174,7 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-0.5">
             {FFT_BANDS.map(b => (
-              <span key={b.key} className="flex items-center gap-1 text-[9px] text-slate-400">
+              <span key={b.key} className="flex items-center gap-1 text-[10px] text-ui-text-2">
                 <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: b.color }} />
                 {b.name.split(' ')[0]}
               </span>
@@ -181,7 +182,7 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
           </div>
           {/* The strips have no axis, so say what a bar's length is: a ratio of band
               powers (µV², utils/fftBands.ts) — unitless, 0 to 1 across the strip. */}
-          <div className="text-[9px] text-slate-500 mt-0.5">
+          <div className="text-[10px] text-ui-text-2 mt-1">
             {mode === 'within'
               ? "bar = band power ÷ this channel's strongest band"
               : 'bar = band power ÷ strongest band on any channel (ECG excluded)'}
@@ -191,7 +192,7 @@ export function RightSpectrumPanel({ dataBuffer, montage }: RightSpectrumPanelPr
         <button
           onClick={() => setShowHeader(true)}
           title="Show bands legend and scaling"
-          className="absolute top-1 right-1 z-10 bg-[#16211680] backdrop-blur-sm border border-[#2e4a2e] rounded text-emerald-400 text-[10px] px-1.5 py-0.5 hover:bg-slate-800"
+          className="ui-material absolute top-1.5 right-1.5 z-10 border border-ui-sep rounded-full text-ui-accent text-[11px] font-medium px-2.5 h-7 pointer-coarse:h-9"
         >
           bands ▾
         </button>

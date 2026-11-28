@@ -10,7 +10,8 @@
  */
 
 import React from 'react';
-import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import { Caption, Chip, Range, SelectMenu } from '@/components/ui/ios';
 import type { ArtifactParams, EmgRegion } from '../utils/simTypes';
 import type { LiveArtifacts } from '../engine/engine';
 import { POP_TARGET_ANY } from '../utils/simTypes';
@@ -27,8 +28,6 @@ const EMG_REGIONS: { id: EmgRegion; label: string; hint: string }[] = [
   { id: 'nuchal',      label: 'Nuchal',       hint: 'Posterior neck muscles — buries the posterior rhythm at O1/O2, T5/T6.' },
 ];
 
-const LABEL_CLASS = 'text-[10px] text-slate-500 uppercase tracking-wider';
-
 export function Slider({
   label, value, min, max, step, unit, onChange, disabled = false, offAtMin = false, live,
 }: {
@@ -40,45 +39,15 @@ export function Slider({
   const fmt = (v: number) => `${step < 1 ? v.toFixed(step < 0.1 ? 2 : 1) : Math.round(v)}${unit}`;
   const shown = live != null ? Math.min(max, Math.max(min, live)) : value;
   return (
-    <div className={`space-y-1 ${disabled ? 'opacity-40' : ''}`}>
-      <div className="flex justify-between items-center">
-        <Label className={LABEL_CLASS}>{label}</Label>
-        <span className="text-[10px] font-mono text-orange-400">
-          {offAtMin && value <= min ? 'off'
-            : live != null ? <>{fmt(live)} <span className="text-slate-500">now · set {fmt(value)}</span></> : fmt(value)}
+    <div className={disabled ? 'opacity-40' : ''}>
+      <Caption trailing={
+        <span className="text-[12px] pointer-coarse:text-[14px] font-medium tabular-nums text-ui-text">
+          {offAtMin && value <= min ? 'Off'
+            : live != null ? <>{fmt(live)} <span className="text-ui-text-2 font-normal">now · set {fmt(value)}</span></> : fmt(value)}
         </span>
-      </div>
-      <input
-        type="range" min={min} max={max} step={step} value={shown} disabled={disabled}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-full accent-orange-500 disabled:cursor-not-allowed"
-      />
+      }>{label}</Caption>
+      <Range value={shown} min={min} max={max} step={step} disabled={disabled} ariaLabel={label} onChange={onChange} />
     </div>
-  );
-}
-
-/** A small pressed/unpressed button, used for the multi-select and enum controls. */
-function Chip({
-  on, label, title, onClick, resting = false,
-}: {
-  on: boolean; label: string; title?: string; onClick: () => void;
-  /** Selected, but not active this moment (a recording level's muscle episode uses others, or none). */
-  resting?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`flex-1 py-1 px-1 rounded text-[10px] font-mono border transition-colors duration-300 ${
-        on && resting
-          ? 'border-orange-800 border-dashed text-orange-300/50'
-          : on
-            ? 'bg-orange-800/40 border-orange-600 text-orange-300'
-            : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -93,7 +62,7 @@ export function ArtifactControls({
 }) {
   const lv = live?.level ? live : null;
   const wrap = (children: React.ReactNode) => (
-    <div className="pt-2 pb-1 pl-1 space-y-2">{children}</div>
+    <div className="pt-0.5 pb-3 space-y-3">{children}</div>
   );
 
   switch (id) {
@@ -124,14 +93,14 @@ export function ArtifactControls({
       return wrap(
         <>
           <div className="space-y-1">
-            <Label className={LABEL_CLASS}>Muscle group</Label>
-            <div className="grid grid-cols-2 gap-1">
+            <Caption>Muscle group</Caption>
+            <div className="grid grid-cols-2 gap-1.5 pt-1">
               {EMG_REGIONS.map(r => (
                 <Chip
-                  key={r.id} on={regions.includes(r.id)} label={r.label} title={r.hint}
+                  key={r.id} on={regions.includes(r.id)} title={r.hint}
                   resting={!!lv && !(lv.emgOn && !!lv.emgRegions?.includes(r.id))}
                   onClick={() => toggleRegion(r.id)}
-                />
+                >{r.label}</Chip>
               ))}
             </div>
           </div>
@@ -141,7 +110,7 @@ export function ArtifactControls({
             onChange={v => update({ emgSeverity: v })}
           />
           {regions.length === 0 && (
-            <p className="text-[10px] text-slate-600 leading-snug">
+            <p className="text-[11px] pointer-coarse:text-[13px] text-ui-text-2 leading-snug">
               No muscle selected — the toggle is on but nothing is contracting.
             </p>
           )}
@@ -158,17 +127,13 @@ export function ArtifactControls({
       return wrap(
         <>
           <div className="space-y-1">
-            <Label className={LABEL_CLASS}>Electrode</Label>
-            <select
-              value={target}
-              onChange={e => update({ popTarget: e.target.value })}
-              className="w-full bg-[#192219] border border-[#2e4a2e] rounded px-2 py-1 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-orange-700"
-            >
-              <option value={POP_TARGET_ANY}>Any electrode (random)</option>
-              {ELECTRODES.map(n => (
-                <option key={n} value={n}>{n}{detached.includes(n) ? ' — detached' : ''}</option>
-              ))}
-            </select>
+            <Caption>Electrode</Caption>
+            <SelectMenu
+              className="w-full mt-1" ariaLabel="Electrode"
+              value={target} options={[POP_TARGET_ANY, ...ELECTRODES]}
+              format={n => n === POP_TARGET_ANY ? 'Any electrode (random)' : `${n}${detached.includes(n) ? ' — detached' : ''}`}
+              onChange={v => update({ popTarget: v })}
+            />
           </div>
           {/* Automatic popping: an unstable-but-attached electrode firing repeated
               transients. 0 = off (manual pops still work). Meaningless once the
@@ -181,63 +146,46 @@ export function ArtifactControls({
           />
           {/* Manual pop: one discrete transient on the selected electrode (random
               if "any"), the electrode staying attached. */}
-          <button
+          <Button variant="tinted" size="sm" className="w-full"
             disabled={targeted && isDetached}
             onClick={() => update({ manualPopNonce: params.manualPopNonce + 1 })}
-            className={`w-full py-1 rounded text-[11px] font-mono border transition-colors ${
-              targeted && isDetached
-                ? 'border-slate-800 text-slate-700 cursor-not-allowed'
-                : 'bg-amber-800/40 border-amber-600 text-amber-300 hover:bg-amber-800/60'
-            }`}
           >
             {targeted
               ? isDetached ? `${target} is detached` : `Pop ${target}`
               : 'Pop random electrode'}
-          </button>
+          </Button>
           {/* A random pop: offer to disconnect the electrode that popped (owner's inbox,
               2026-11-27). Its rows then show no signal until it is reattached. */}
           {!targeted && live?.lastPop && (
-            <button
+            <Button variant="destructive" size="sm" className="w-full"
               disabled={detached.includes(live.lastPop)}
               onClick={() => setDetached([...detached, live.lastPop!])}
-              className={`w-full py-1 rounded text-[11px] font-mono border transition-colors ${
-                detached.includes(live.lastPop)
-                  ? 'border-slate-800 text-slate-700 cursor-not-allowed'
-                  : 'bg-orange-800/40 border-orange-600 text-orange-300 hover:bg-orange-800/60'
-              }`}
             >
               {detached.includes(live.lastPop) ? `${live.lastPop} (last popped) is detached` : `Disconnect ${live.lastPop} (last popped)`}
-            </button>
+            </Button>
           )}
           {/* Disconnection: contact breaks (one pop) and the channel goes flat until
               reattached — a different finding from a pop, hence its own button. */}
-          <button
+          <Button variant={!targeted ? 'outline' : isDetached ? 'tinted' : 'destructive'} size="sm" className="w-full"
             disabled={!targeted}
             onClick={() =>
               setDetached(isDetached ? detached.filter(n => n !== target) : [...detached, target])
             }
-            className={`w-full py-1 rounded text-[11px] font-mono border transition-colors ${
-              !targeted
-                ? 'border-slate-800 text-slate-700 cursor-not-allowed'
-                : isDetached
-                  ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300 hover:bg-emerald-800/60'
-                  : 'bg-orange-800/40 border-orange-600 text-orange-300 hover:bg-orange-800/60'
-            }`}
           >
             {!targeted ? 'Pick an electrode to disconnect'
               : isDetached ? `Reattach ${target}`
               : `Disconnect ${target} (pop, then flat)`}
-          </button>
+          </Button>
           {detached.length > 0 && (
             <div className="space-y-1">
-              <Label className={LABEL_CLASS}>Detached</Label>
-              <div className="flex flex-wrap gap-1">
+              <Caption>Detached</Caption>
+              <div className="flex flex-wrap gap-1.5">
                 {detached.map(n => (
                   <button
                     key={n}
                     onClick={() => setDetached(detached.filter(x => x !== n))}
                     title={`Reattach ${n}`}
-                    className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-orange-700 bg-orange-900/40 text-orange-300 hover:bg-orange-900/70"
+                    className="rounded-full px-2.5 h-7 pointer-coarse:h-8 text-[12px] pointer-coarse:text-[14px] font-medium bg-ui-red/15 text-ui-red hover:bg-ui-red/25"
                   >
                     {n} &times;
                   </button>
@@ -248,7 +196,7 @@ export function ArtifactControls({
                 changes what "flat" looks like and the bipolar case is the one
                 that catches readers out.
               */}
-              <p className="text-[10px] text-slate-600 leading-snug">
+              <p className="text-[11px] pointer-coarse:text-[13px] text-ui-text-2 leading-snug">
                 A detached electrode records nothing: after its pop, every row that uses
                 it shows no signal until it is reattached.
               </p>
@@ -256,12 +204,11 @@ export function ArtifactControls({
           )}
           {/* Reset the whole control: reattach every electrode and restore the
               default rate and target. */}
-          <button
+          <Button variant="outline" size="sm" className="w-full"
             onClick={() => update({ detachedElectrodes: [], popRatePerMin: 1, popTarget: POP_TARGET_ANY })}
-            className="w-full py-1 rounded text-[11px] font-mono border border-slate-700 text-slate-400 hover:bg-slate-800 transition-colors"
           >
             Reset
-          </button>
+          </Button>
         </>,
       );
     }
@@ -303,28 +250,25 @@ export function ArtifactControls({
       return wrap(
         <>
           <div className="space-y-1">
-            <Label className={LABEL_CLASS}>Form</Label>
-            <div className="flex gap-1">
+            <Caption>Form</Caption>
+            <div className="flex gap-1.5 pt-1">
               {(['electrode', 'lying'] as const).map(f => (
-                <Chip
-                  key={f} on={params.respirationForm === f} label={f === 'electrode' ? 'One electrode' : 'Lying on'}
+                <Chip role="radio"
+                  key={f} on={params.respirationForm === f}
                   title={f === 'electrode'
                     ? 'A smooth wave per breath on one electrode whose contact the breathing moves'
                     : 'A sharp wave at each inspiration on the electrodes the head rests on (O1/O2, supine)'}
                   onClick={() => update({ respirationForm: f })}
-                />
+                >{f === 'electrode' ? 'One electrode' : 'Lying on'}</Chip>
               ))}
             </div>
           </div>
           {params.respirationForm === 'electrode' && (
             <div className="space-y-1">
-              <Label className={LABEL_CLASS}>Electrode</Label>
-              <select
-                value={params.respirationElectrode}
-                onChange={e => update({ respirationElectrode: e.target.value })}
-                className="w-full py-1 px-1.5 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-slate-200">
-                {ALL_ELECTRODES.map(e => <option key={e} value={e}>{e}</option>)}
-              </select>
+              <Caption>Electrode</Caption>
+              <SelectMenu className="w-full mt-1" ariaLabel="Electrode"
+                value={params.respirationElectrode} options={ALL_ELECTRODES} format={e => e}
+                onChange={v => update({ respirationElectrode: v })} />
             </div>
           )}
         </>,
@@ -333,14 +277,11 @@ export function ArtifactControls({
     case 'pulse':
       return wrap(
         <div className="space-y-1">
-          <Label className={LABEL_CLASS}>Electrode over the artery</Label>
-          <select
-            value={params.pulseElectrode}
-            onChange={e => update({ pulseElectrode: e.target.value })}
+          <Caption>Electrode over the artery</Caption>
+          <SelectMenu className="w-full mt-1" ariaLabel="Electrode over the artery"
             title="Moving the electrode off the artery is what removes a pulse artifact"
-            className="w-full py-1 px-1.5 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-slate-200">
-            {ALL_ELECTRODES.map(e => <option key={e} value={e}>{e}</option>)}
-          </select>
+            value={params.pulseElectrode} options={ALL_ELECTRODES} format={e => e}
+            onChange={v => update({ pulseElectrode: v })} />
         </div>,
       );
 
@@ -360,21 +301,20 @@ export function ArtifactControls({
             onChange={v => update({ ventRatePerMin: v })}
           />
           <div className="space-y-1">
-            <Label className={LABEL_CLASS}>Ventilator side</Label>
-            <div className="flex gap-1">
+            <Caption>Ventilator side</Caption>
+            <div className="flex gap-1.5 pt-1">
               {(['left', 'right'] as const).map(sd => (
-                <Chip key={sd} on={params.ventSide === sd} label={sd === 'left' ? 'Left' : 'Right'}
+                <Chip role="radio" key={sd} on={params.ventSide === sd}
                   title={`Ventilator and tubing on the patient's ${sd}: the bursts are larger on that side`}
-                  onClick={() => update({ ventSide: sd })} />
+                  onClick={() => update({ ventSide: sd })}>{sd === 'left' ? 'Left' : 'Right'}</Chip>
               ))}
             </div>
           </div>
-          <button
+          <Button variant="tinted" size="sm" className="w-full"
             onClick={() => update({ suctionNonce: params.suctionNonce + 1 })}
-            title="Suction the water out of the tubing: the bursts stop until it builds up again"
-            className="w-full py-1 rounded text-[11px] font-semibold border border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700">
+            title="Suction the water out of the tubing: the bursts stop until it builds up again">
             Suction the tubing
-          </button>
+          </Button>
         </>,
       );
 
@@ -382,28 +322,28 @@ export function ArtifactControls({
       return wrap(
         <>
           <div className="space-y-1">
-            <Label className={LABEL_CLASS}>Mains frequency</Label>
-            <div className="flex gap-1">
+            <Caption>Mains frequency</Caption>
+            <div className="flex gap-1.5 pt-1">
               {([50, 60] as const).map(f => (
-                <Chip
-                  key={f} on={params.lineFreq === f} label={`${f} Hz`}
+                <Chip role="radio"
+                  key={f} on={params.lineFreq === f}
                   title={f === 50 ? 'Europe, Asia, Africa, most of South America' : 'North America, parts of South America, Japan (east)'}
                   onClick={() => update({ lineFreq: f })}
-                />
+                >{f} Hz</Chip>
               ))}
             </div>
           </div>
           <div className="space-y-1">
-            <Label className={LABEL_CLASS}>Poor contacts</Label>
-            <div className="flex gap-1">
+            <Caption>Poor contacts</Caption>
+            <div className="flex gap-1.5 pt-1">
               {(['one', 'many'] as const).map(m => (
-                <Chip
-                  key={m} on={params.mainsContacts === m} label={m === 'one' ? 'One' : 'Many'}
+                <Chip role="radio"
+                  key={m} on={params.mainsContacts === m}
                   title={m === 'one'
                     ? 'One poorly connected electrode: a band on the two rows that share it'
                     : 'Many poor contacts, worst over the back of the head, as on a hastily applied or dry-electrode cap'}
                   onClick={() => update({ mainsContacts: m })}
-                />
+                >{m === 'one' ? 'One' : 'Many'}</Chip>
               ))}
             </div>
           </div>

@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Info, ChevronDown, Download, MonitorPlay, Brain, GraduationCap } from 'lucide-react';
+import { Group, Row, IconTile, Caption, Segmented, Chip, Range, InfoButton } from '@/components/ui/ios';
+import { ChevronRight, Download, MonitorPlay, Brain, GraduationCap, Search, XCircle } from 'lucide-react';
 import { MONTAGES } from '../utils/montages';
 import type { PatientState, IctalParams, IctalParamsMap, ArtifactParams, PatternOptions } from '../utils/simTypes';
 import { POSTS_SMALLER_DEFAULT, POSTS_ONE_SIDE_DEFAULT } from '../utils/simTypes';
@@ -12,11 +11,14 @@ import { PATTERN_CATEGORIES } from '../utils/patterns';
 import { ArtifactControls, Slider } from './ArtifactControls';
 import { isLiveOn } from '../utils/liveArtifacts';
 import type { LiveArtifacts } from '../engine/engine';
-import { INFO_TRIGGER_ATTR } from './InfoPanel';
 import { EEGTheme } from '../utils/themes';
+import { APPEARANCES, type Appearance } from '../utils/uiTheme';
 import { exportCSV, exportScreenshot } from '../utils/exportUtils';
+import { cn } from '@/lib/utils';
 
 type Props = {
+  /** A sidebar beside the trace (desktop), or the content of the phone's Patterns sheet. */
+  variant: 'sidebar' | 'sheet';
   /** For the CSV export; the montage itself is chosen in the top bar. */
   montageId: string;
   activePatterns: Set<string>;
@@ -38,6 +40,8 @@ type Props = {
   setBrainOpacity?: (v: number) => void;
   theme: EEGTheme;
   setTheme: (t: EEGTheme) => void;
+  appearance: Appearance;
+  setAppearance: (a: Appearance) => void;
   showAnnotations: boolean;
   showArtifactList: boolean; setShowArtifactList: (v: boolean) => void;
   /** What the artifacts are doing now (a recording level moves the controls with it), or null. */
@@ -83,10 +87,17 @@ const GROUP_ORDER = ['Normal Background & Variants', 'Abnormal / Epileptiform', 
 const ORDERED_CATEGORIES = [...PATTERN_CATEGORIES].sort(
   (a, b) => GROUP_ORDER.indexOf(a.group ?? '') - GROUP_ORDER.indexOf(b.group ?? ''));
 
-// One heading style for every sidebar section.
-const SECTION_HEADING = 'text-[10px] font-semibold text-slate-400 uppercase tracking-widest';
+const PAPERS: { value: EEGTheme; label: string }[] = [
+  { value: 'green-paper', label: 'Green' },
+  { value: 'white-paper', label: 'White' },
+  { value: 'dark-mode', label: 'Dark' },
+];
+
+/** The options a switched-on pattern reveals under its row. */
+const optionBox = 'pl-[34px] pointer-coarse:pl-[38px] pr-3 pb-3 pt-0.5 space-y-3';
 
 export function ControlPanel({
+  variant,
   montageId,
   activePatterns, togglePattern,
   ictalParams, updateIctalParams,
@@ -97,7 +108,7 @@ export function ControlPanel({
   show3DPanel = false, setShow3DPanel,
   headOpacity = 0.3, setHeadOpacity,
   brainOpacity = 0.8, setBrainOpacity,
-  theme, setTheme,
+  theme, setTheme, appearance, setAppearance,
   showAnnotations, setShowAnnotations, showArtifactList, setShowArtifactList, live,
   graphHover, setGraphHover,
   showSpectrum, setShowSpectrum,
@@ -135,16 +146,31 @@ export function ControlPanel({
         }))
         .filter(cat => cat.patterns.length > 0)
     : ORDERED_CATEGORIES;
+  // The library's groups in order, each with its categories (a group is one card).
+  const groups = GROUP_ORDER
+    .map(g => ({ name: g, cats: visibleCats.filter(c => c.group === g) }))
+    .filter(g => g.cats.length > 0);
+
+  const stateNow = PATIENT_STATES.find(ps => ps.matches ? ps.matches.includes(patientState) : patientState === ps.value);
+
+  const sidebar = variant === 'sidebar';
 
   return (
     // One scroll container: the middle section. Header (with the polarity key)
     // and footer stay pinned.
-    <div className="w-72 h-full flex flex-col bg-[#1e2a1e] border-r border-[#2e4a2e] text-slate-200 overflow-hidden flex-shrink-0 text-sm">
+    <div className={cn(
+      'h-full flex flex-col bg-ui-root text-ui-text overflow-hidden',
+      sidebar && 'w-[300px] flex-shrink-0 border-r border-ui-sep',
+    )}>
 
       {/* ── Header ── */}
-      <div className="px-4 pt-4 pb-3 border-b border-[#2e4a2e]">
-        <h1 className="text-base font-bold text-emerald-400 tracking-tight">EEG Simulator</h1>
-        <p className="text-[11px] text-slate-500 mt-0.5">Clinical Teaching Workstation</p>
+      <div className={cn('px-4 pb-2 border-b border-ui-sep', sidebar ? 'pt-4' : 'pt-1')}>
+        {sidebar && (
+          <div className="px-1 pb-3">
+            <h1 className="text-[22px] font-bold tracking-tight text-ui-text leading-none">EEG Simulator</h1>
+            <p className="text-[12px] text-ui-text-2 mt-1">Clinical teaching workstation</p>
+          </div>
+        )}
 
         {/*
           The display convention, stated on screen — pinned in the header so it
@@ -157,73 +183,46 @@ export function ControlPanel({
           whole app (EEGCanvas draws y = centreY + v) and every pattern's
           polarity is asserted against it, so this is a legend, not a control.
         */}
-        <div className="mt-3 flex items-center gap-2 rounded border border-emerald-800/70 bg-[#192219] px-2 py-1.5">
-          <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" className="shrink-0">
-            <line x1="3" y1="13" x2="23" y2="13" stroke="#475569" strokeWidth="1" strokeDasharray="2 2" />
-            <path d="M13 13 L13 4 M13 4 L10 7.5 M13 4 L16 7.5" fill="none" stroke="#4ade80" strokeWidth="1.4" strokeLinecap="round" />
-            <path d="M13 13 L13 22 M13 22 L10 18.5 M13 22 L16 18.5" fill="none" stroke="#64748b" strokeWidth="1.4" strokeLinecap="round" />
+        <div className="flex items-center gap-3 rounded-[10px] bg-ui-card px-3 py-2"
+          title="Clinical convention: a channel whose input 1 is more positive than input 2 deflects downward.">
+          <svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true" className="shrink-0">
+            <line x1="3" y1="13" x2="23" y2="13" stroke="var(--ui-text-3)" strokeWidth="1" strokeDasharray="2 2" />
+            <path d="M13 13 L13 4 M13 4 L10 7.5 M13 4 L16 7.5" fill="none" stroke="var(--ui-accent)" strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M13 13 L13 22 M13 22 L10 18.5 M13 22 L16 18.5" fill="none" stroke="var(--ui-text-2)" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
-          <div className="text-[11px] leading-tight min-w-0">
-            <div className="text-[9px] text-slate-500 uppercase tracking-widest">Polarity</div>
-            <div className="text-emerald-300 font-mono font-semibold">up = negative (−)</div>
-            <div className="text-slate-400 font-mono">down = positive (+)</div>
+          <div className="min-w-0 leading-tight">
+            <div className="text-[13px] pointer-coarse:text-[15px] font-semibold"><span className="text-ui-accent">Up</span> is negative (−)</div>
+            <div className="text-[13px] pointer-coarse:text-[15px] text-ui-text-2">Down is positive (+)</div>
           </div>
         </div>
-        <p className="mt-1 text-[10px] text-slate-500 leading-tight">
+        <p className="px-3 pt-1.5 text-[11px] pointer-coarse:text-[12px] text-ui-text-2 leading-snug">
           Clinical convention: a channel whose input 1 is more positive than input 2 deflects downward.
         </p>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto ui-scroll pb-4">
 
         {/* ── Learn ── */}
-        <div className="px-4 pt-4 pb-3 border-b border-[#2e4a2e]">
-          <h2 className={`${SECTION_HEADING} mb-2`}>Learn</h2>
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" className="h-9 text-xs border-slate-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/40" onClick={() => setTutorialMode(true)}>
-              <MonitorPlay className="w-3.5 h-3.5 mr-1" /> Tutorial
-            </Button>
-            <Button variant="outline" size="sm" className="h-9 text-xs border-slate-700 bg-purple-900/30 text-purple-300 hover:bg-purple-800/40" onClick={() => setQuizMode(true)}>
-              <Brain className="w-3.5 h-3.5 mr-1" /> Quiz
-            </Button>
-            <Button variant="outline" size="sm" className="col-span-2 h-9 text-xs border-slate-700 bg-sky-900/30 text-sky-300 hover:bg-sky-800/40" onClick={() => setLessonsMode(true)}>
-              <GraduationCap className="w-3.5 h-3.5 mr-1" /> Lessons: how to read EEG
-            </Button>
-          </div>
-        </div>
+        <Group title="Learn">
+          <Row icon={<IconTile color="var(--ui-green)"><MonitorPlay /></IconTile>} label="Tutorial" onClick={() => setTutorialMode(true)}>
+            <ChevronRight className="w-4 h-4 text-ui-text-3" />
+          </Row>
+          <Row icon={<IconTile color="var(--ui-purple)"><Brain /></IconTile>} label="Quiz" onClick={() => setQuizMode(true)}>
+            <ChevronRight className="w-4 h-4 text-ui-text-3" />
+          </Row>
+          <Row icon={<IconTile color="var(--ui-blue)"><GraduationCap /></IconTile>} label="Lessons: how to read EEG" onClick={() => setLessonsMode(true)}>
+            <ChevronRight className="w-4 h-4 text-ui-text-3" />
+          </Row>
+        </Group>
 
         {/* ── Patient State ── */}
-        <div className="px-4 pt-4 pb-3 border-b border-[#2e4a2e]">
-          <h2 className={`${SECTION_HEADING} mb-2`}>
-            Background State
-          </h2>
-          <div className="flex flex-col gap-1">
-            {PATIENT_STATES.map(ps => {
-              const selected = ps.matches
-                ? ps.matches.includes(patientState)
-                : patientState === ps.value;
-              return (
-              <Tooltip key={ps.value}>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => setPatientState(ps.value)}
-                    className={`w-full text-left px-2.5 py-1.5 rounded text-xs font-medium transition-colors border flex items-center justify-between ${
-                      selected
-                        ? 'bg-emerald-800/50 border-emerald-600 text-emerald-200'
-                        : 'border-[#2e4a2e] text-slate-400 hover:bg-[#243424] hover:text-slate-200'
-                    }`}
-                  >
-                    {ps.label}
-                    <Info className="w-3 h-3 opacity-30 flex-shrink-0" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right" className="bg-slate-800 text-slate-200 border-slate-700 max-w-[230px]">
-                  <p className="text-xs">{ps.desc}</p>
-                </TooltipContent>
-              </Tooltip>
-              );
-            })}
-          </div>
+        <Group title="Background state" footer={stateNow?.desc} plain>
+          <Segmented
+            ariaLabel="Background state"
+            value={stateNow?.value ?? 'awake'}
+            options={PATIENT_STATES.map(ps => ({ value: ps.value, label: ps.label }))}
+            onChange={v => setPatientState(v)}
+          />
           {/* The patient's heart rate, here as well as under ECG Artifact (owner's inbox,
               2026-11-27: "too important to only be there"). One setting, so the two
               sliders move together; it sets the ECG row and the pulse artifact too. */}
@@ -234,452 +233,315 @@ export function ControlPanel({
               onChange={v => updateArtifactParams({ ecgBpm: v })}
             />
           </div>
-        </div>
+        </Group>
 
         {/* ── Pattern Library ── */}
-        <div className="border-b border-[#2e4a2e]">
-          <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-            <h2 className={SECTION_HEADING}>
-              Pattern Library
-            </h2>
+        <div className="px-4 pt-5">
+          <div className="flex items-center justify-between px-3 pb-1.5">
+            <h2 className="text-[12px] pointer-coarse:text-[13px] font-semibold text-ui-text-2">Pattern library</h2>
             {activeCount > 0 && (
-              <span className="text-[10px] bg-emerald-800/60 text-emerald-300 px-1.5 py-0.5 rounded-full">
+              <span className="text-[11px] pointer-coarse:text-[12px] font-semibold text-ui-accent bg-ui-accent/12 px-2 py-0.5 rounded-full tabular-nums">
                 {activeCount} on
               </span>
             )}
           </div>
-
-          <div className="px-4 pb-2 relative">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ui-text-2 pointer-events-none" />
             <input
-              type="text"
+              type="search"
               value={patternQuery}
               onChange={e => setPatternQuery(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') setPatternQuery(''); }}
-              placeholder="Search patterns…"
-              className="w-full bg-[#192219] border border-[#2e4a2e] rounded px-2 py-1 pr-6 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-700"
+              placeholder="Search patterns"
+              aria-label="Search patterns"
+              className="w-full rounded-[10px] bg-ui-fill pl-8 pr-8 h-8 pointer-coarse:h-10 text-[13px] pointer-coarse:text-[16px] text-ui-text placeholder:text-ui-text-2 focus:outline-none focus:ring-2 focus:ring-ui-accent/40 [&::-webkit-search-cancel-button]:hidden"
             />
             {q && (
               <button
                 onClick={() => setPatternQuery('')}
                 aria-label="Clear pattern search"
-                className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs leading-none"
+                className="absolute right-1 top-1/2 -translate-y-1/2 grid place-items-center w-7 h-7 pointer-coarse:w-9 pointer-coarse:h-9 text-ui-text-3 hover:text-ui-text-2"
               >
-                ✕
+                <XCircle className="w-4 h-4 fill-current stroke-ui-root" />
               </button>
             )}
           </div>
-
           {q && visibleCats.length === 0 && (
-            <p className="px-4 pb-3 text-[11px] text-slate-600">No patterns match “{patternQuery.trim()}”.</p>
+            <p className="px-3 pt-3 text-[12px] text-ui-text-2">No patterns match “{patternQuery.trim()}”.</p>
           )}
+        </div>
 
-          {visibleCats.map((cat, ci) => {
-            // While searching, every surviving category is expanded — a hit
-            // hidden behind a collapsed heading is the problem the search exists
-            // to solve.
-            const isOpen     = q !== '' || openCats.has(cat.id);
-            // Counted against the whole category, not the filtered view, so the
-            // badge keeps meaning "this many are on" while a search is active.
-            const catActive  = PATTERN_CATEGORIES.find(c => c.id === cat.id)!
-              .patterns.filter(p => activePatterns.has(p.id)).length;
-            // A group heading is drawn once, above the first category that
-            // carries a given `group` — so the three abnormality families read
-            // as one clinical block, and activation procedures and artifacts
-            // each sit under a heading of their own instead of under whichever
-            // group happened to come before them.
-            const showGroupHeader = !!cat.group && visibleCats[ci - 1]?.group !== cat.group;
-            return (
-              <React.Fragment key={cat.id}>
-                {showGroupHeader && (
-                  <div className="px-4 pt-3 pb-1 mt-1 border-t border-[#2e4a2e]">
-                    <h3 className="text-[10px] font-semibold text-emerald-500/80 uppercase tracking-widest">
-                      {cat.group}
-                    </h3>
-                  </div>
-                )}
-                {/* Category header */}
-                <button
-                  onClick={() => toggleCat(cat.id)}
-                  className="w-full px-4 py-2 flex items-center justify-between hover:bg-[#243424] transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
-                    <span className="text-xs font-medium text-slate-300">{cat.name}</span>
+        {groups.map(g => (
+          <Group key={g.name} title={g.name} className="pt-4">
+            {g.cats.map(cat => {
+              // While searching, every surviving category is expanded — a hit
+              // hidden behind a collapsed heading is the problem the search exists
+              // to solve.
+              const isOpen = q !== '' || openCats.has(cat.id);
+              // Counted against the whole category, not the filtered view, so the
+              // badge keeps meaning "this many are on" while a search is active.
+              const catActive = PATTERN_CATEGORIES.find(c => c.id === cat.id)!
+                .patterns.filter(p => activePatterns.has(p.id)).length;
+              return (
+                <React.Fragment key={cat.id}>
+                  {/* Category header */}
+                  <Row
+                    onClick={() => toggleCat(cat.id)}
+                    icon={<span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />}
+                    label={<span className="font-medium">{cat.name}</span>}
+                  >
                     {catActive > 0 && (
-                      <span className="text-[10px] text-slate-400">({catActive})</span>
+                      <span className="text-[12px] pointer-coarse:text-[14px] text-ui-text-2 tabular-nums">{catActive} on</span>
                     )}
-                  </span>
-                  <ChevronDown
-                    className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`}
-                  />
-                </button>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className={`w-4 h-4 text-ui-text-3 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}
+                    />
+                  </Row>
 
-                {/* Patterns */}
-                {isOpen && (
-                  <div className="px-4 pb-2 space-y-1.5 bg-[#192219]">
-                    {cat.patterns.map(p => {
-                      const on = activePatterns.has(p.id);
-                      const isIctal = ICTAL_ID_SET.has(p.id);
-                      const params = ictalParams[p.id];
-                      return (
-                        <div key={p.id}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Switch
-                                id={`pat-${p.id}`}
-                                checked={on && isLiveOn(p.id, live)}
-                                onCheckedChange={() => togglePattern(p.id)}
-                                title={on && !isLiveOn(p.id, live) ? 'On, resting now: the recording level brings it back' : undefined}
-                                className={`data-[state=checked]:bg-emerald-600 flex-shrink-0 scale-90 transition-colors duration-300 ${
-                                  on && !isLiveOn(p.id, live) ? 'ring-1 ring-emerald-600' : ''}`}
-                              />
-                              <Label
-                                htmlFor={`pat-${p.id}`}
-                                className={`text-xs cursor-pointer leading-snug truncate ${on ? 'text-slate-200' : 'text-slate-500'}`}
-                              >
-                                {p.name}
-                              </Label>
+                  {/* Patterns */}
+                  {isOpen && cat.patterns.map(p => {
+                    const on = activePatterns.has(p.id);
+                    const isIctal = ICTAL_ID_SET.has(p.id);
+                    const params = ictalParams[p.id];
+                    const resting = on && !isLiveOn(p.id, live);
+                    return (
+                      <div key={p.id} className="group/row bg-ui-card-2/60">
+                        <div className="flex items-center gap-1 pl-[34px] pointer-coarse:pl-[38px] pr-3 min-h-9 pointer-coarse:min-h-11 py-1 border-t border-ui-sep">
+                          <label
+                            htmlFor={`pat-${p.id}`}
+                            className={`flex-1 min-w-0 text-[13px] pointer-coarse:text-[16px] leading-snug cursor-pointer ${on ? 'text-ui-text' : 'text-ui-text-2'}`}
+                          >
+                            {p.name}
+                          </label>
+                          <InfoButton about={p.name} active={infoId === p.id} onClick={() => onShowInfo(infoId === p.id ? null : p.id)} />
+                          <Switch
+                            id={`pat-${p.id}`}
+                            checked={on && isLiveOn(p.id, live)}
+                            onCheckedChange={() => togglePattern(p.id)}
+                            title={resting ? 'On, resting now: the recording level brings it back' : undefined}
+                            className={resting ? 'ring-2 ring-ui-switch/70' : ''}
+                          />
+                        </div>
+                        {(p.id.startsWith('focal-spikes-') || FOCAL_ICTAL_IDS.has(p.id)) && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Focus</Caption>
+                              <Segmented ariaLabel="Focus" value={patternOptions.focalPlacement ?? 'under'}
+                                options={[{ value: 'under', label: 'Under electrode' }, { value: 'between', label: 'Between two' }] as const}
+                                onChange={f => updatePatternOptions({ focalPlacement: f })} />
                             </div>
-                            <button
-                              {...{ [INFO_TRIGGER_ATTR]: '' }}
-                              onClick={() => onShowInfo(infoId === p.id ? null : p.id)}
-                              aria-label={`About ${p.name}`}
-                              title={`About ${p.name}`}
-                              className={`flex-shrink-0 ml-1 rounded p-0.5 transition-colors ${
-                                infoId === p.id ? 'text-emerald-300 bg-emerald-800/50' : 'text-slate-600 hover:text-slate-300'
-                              }`}
-                            >
-                              <Info className="w-3 h-3" />
-                            </button>
                           </div>
-                          {(p.id.startsWith('focal-spikes-') || FOCAL_ICTAL_IDS.has(p.id)) && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Focus</Label>
-                              <div className="flex gap-1">
-                                {([['under', 'Under electrode'], ['between', 'Between two']] as const).map(([f, label]) => (
-                                  <button key={f} onClick={() => updatePatternOptions({ focalPlacement: f })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                      patternOptions.focalPlacement === f
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
+                        )}
+                        {p.id === 'k-complex' && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Spindle after</Caption>
+                              <Segmented ariaLabel="Spindle after" value={patternOptions.kcSpindle ?? 'sometimes'}
+                                options={[{ value: 'none', label: 'None' }, { value: 'sometimes', label: 'Sometimes' }, { value: 'always', label: 'Always' }] as const}
+                                onChange={k => updatePatternOptions({ kcSpindle: k })} />
                             </div>
-                          )}
-                          {p.id === 'k-complex' && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Spindle after</Label>
-                              <div className="flex gap-1">
-                                {([['none', 'None'], ['sometimes', 'Sometimes'], ['always', 'Always']] as const).map(([k, label]) => (
-                                  <button key={k} onClick={() => updatePatternOptions({ kcSpindle: k })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                      (patternOptions.kcSpindle ?? 'sometimes') === k
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
+                          </div>
+                        )}
+                        {p.id === '6hz-sw' && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Form</Caption>
+                              <Segmented ariaLabel="Form" value={patternOptions.sixHzForm ?? 'fold'}
+                                options={[{ value: 'fold', label: 'FOLD' }, { value: 'wham', label: 'WHAM' }] as const}
+                                onChange={f => updatePatternOptions({ sixHzForm: f })} />
                             </div>
-                          )}
-                          {p.id === '6hz-sw' && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Form</Label>
-                              <div className="flex gap-1">
-                                {([['fold', 'FOLD'], ['wham', 'WHAM']] as const).map(([f, label]) => (
-                                  <button key={f} onClick={() => updatePatternOptions({ sixHzForm: f })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                      (patternOptions.sixHzForm ?? 'fold') === f
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
+                          </div>
+                        )}
+                        {p.id === '14-6-pos' && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Sides</Caption>
+                              <Segmented ariaLabel="Sides" value={patternOptions.pos146Sides ?? 'shifting'}
+                                options={[{ value: 'shifting', label: 'Shifting · 0.5-1 s' }, { value: 'bilateral', label: 'Bilateral · 1-2 s' }] as const}
+                                onChange={f => updatePatternOptions({ pos146Sides: f })} />
                             </div>
-                          )}
-                          {p.id === '14-6-pos' && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Sides</Label>
-                              <div className="flex gap-1">
-                                {([['shifting', 'Shifting · 0.5-1 s'], ['bilateral', 'Bilateral · 1-2 s']] as const).map(([f, label]) => (
-                                  <button key={f} onClick={() => updatePatternOptions({ pos146Sides: f })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                      (patternOptions.pos146Sides ?? 'shifting') === f
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {p.id === 'breach' && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Defects over (one or more)</Label>
-                              <div className="flex gap-1">
+                          </div>
+                        )}
+                        {p.id === 'breach' && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Defects over (one or more)</Caption>
+                              <div className="flex gap-1.5 pt-1">
                                 {(['C4', 'C3', 'F8', 'F7'] as const).map(e => {
                                   const sites = patternOptions.breachSites ?? [patternOptions.breachSite ?? 'C4'];
-                                  const on = sites.includes(e);
+                                  const siteOn = sites.includes(e);
                                   return (
-                                    <button key={e}
+                                    <Chip key={e} on={siteOn}
                                       // Several can be chosen; the last one stays, since a breach rhythm needs a defect.
                                       onClick={() => {
-                                        const next = on ? sites.filter(x => x !== e) : [...sites, e];
+                                        const next = siteOn ? sites.filter(x => x !== e) : [...sites, e];
                                         if (next.length) updatePatternOptions({ breachSites: next });
-                                      }}
-                                      role="checkbox" aria-checked={on}
-                                      className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                        on
-                                          ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                          : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                      }`}>
-                                      {on ? '☑' : '☐'} {e}
-                                    </button>
+                                      }}>
+                                      {e}
+                                    </Chip>
                                   );
                                 })}
                               </div>
                             </div>
-                          )}
-                          {p.id === 'gtc-ictal' && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Muscle artifact</Label>
-                              <div className="flex gap-1">
-                                {([[true, 'On'], [false, 'Off']] as const).map(([m, label]) => (
-                                  <button key={label} onClick={() => updatePatternOptions({ seizureMuscle: m })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors ${
-                                      (patternOptions.seizureMuscle ?? false) === m
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
+                          </div>
+                        )}
+                        {p.id === 'gtc-ictal' && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Muscle artifact</Caption>
+                              <Segmented ariaLabel="Muscle artifact" value={patternOptions.seizureMuscle ?? false}
+                                options={[{ value: true, label: 'On' }, { value: false, label: 'Off' }] as const}
+                                onChange={m => updatePatternOptions({ seizureMuscle: m })} />
                             </div>
-                          )}
-                          {p.id === 'posts' && on && (
-                            <div className="pt-2 pb-1 pl-1 space-y-1">
-                              <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Form</Label>
-                              <div className="flex gap-1">
-                                {(['singles', 'trains'] as const).map(f => (
-                                  <button key={f} onClick={() => updatePatternOptions({ postsForm: f })}
-                                    className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors capitalize ${
-                                      patternOptions.postsForm === f
-                                        ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                                        : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                    }`}>
-                                    {f}
-                                  </button>
-                                ))}
-                              </div>
-                              {/* Sides (owner, 2026-11-16): random per POSTS, a teaching
-                                  idealisation (sleep.ts). Smaller: how far a bilateral one's
-                                  smaller side is down on the page; One side only: the share
-                                  drawn on one side alone. */}
-                              {([
-                                ['postsSmallerPct', 'Smaller side', 80, 5, POSTS_SMALLER_DEFAULT],
-                                ['postsOneSidePct', 'One side only', 50, 1, POSTS_ONE_SIDE_DEFAULT],
-                              ] as const).map(([key, label, max, step, def]) => (
-                                <div key={key} className="space-y-1 pt-1">
-                                  <div className="flex justify-between items-center">
-                                    <Label className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</Label>
-                                    <span className="text-[10px] font-mono text-emerald-400">{patternOptions[key] ?? def}%</span>
-                                  </div>
-                                  <input
-                                    type="range" min="0" max={max} step={step}
-                                    value={patternOptions[key] ?? def}
-                                    onChange={e => updatePatternOptions({ [key]: parseFloat(e.target.value) })}
-                                    className="w-full accent-emerald-500"
-                                  />
-                                </div>
-                              ))}
-                              <button
-                                onClick={() => updatePatternOptions({ postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT })}
-                                className="w-full py-1 rounded text-[11px] font-mono border border-slate-700 text-slate-500 hover:bg-slate-800 transition-colors">
-                                Reset to default
-                              </button>
+                          </div>
+                        )}
+                        {p.id === 'posts' && on && (
+                          <div className={optionBox}>
+                            <div className="space-y-1">
+                              <Caption>Form</Caption>
+                              <Segmented ariaLabel="Form" value={patternOptions.postsForm ?? 'singles'}
+                                options={[{ value: 'singles', label: 'Singles' }, { value: 'trains', label: 'Trains' }] as const}
+                                onChange={f => updatePatternOptions({ postsForm: f })} />
                             </div>
-                          )}
-                          {isIctal && on && params && (
-                            <div className="pt-2 pb-1 pl-1 space-y-2">
-                              {FOCAL_ICTAL_IDS.has(p.id) && (
-                                <div className="space-y-1">
-                                  <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Hemisphere</Label>
-                                  <div className="flex gap-1">
-                                    {(['left', 'right'] as const).map(h => (
-                                      <button key={h} onClick={() => updateIctalParams(p.id, { hemisphere: h })}
-                                        className={`flex-1 py-1 rounded text-[11px] font-mono border transition-colors capitalize ${
-                                          params.hemisphere === h
-                                            ? 'bg-fuchsia-800/40 border-fuchsia-600 text-fuchsia-300'
-                                            : 'border-slate-700 text-slate-500 hover:bg-slate-800'
-                                        }`}>
-                                        {h}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                            {/* Sides (owner, 2026-11-16): random per POSTS, a teaching
+                                idealisation (sleep.ts). Smaller: how far a bilateral one's
+                                smaller side is down on the page; One side only: the share
+                                drawn on one side alone. */}
+                            {([
+                              ['postsSmallerPct', 'Smaller side', 80, 5, POSTS_SMALLER_DEFAULT],
+                              ['postsOneSidePct', 'One side only', 50, 1, POSTS_ONE_SIDE_DEFAULT],
+                            ] as const).map(([key, label, max, step, def]) => (
+                              <div key={key}>
+                                <Caption trailing={<span className="text-[12px] pointer-coarse:text-[14px] font-medium tabular-nums">{patternOptions[key] ?? def}%</span>}>{label}</Caption>
+                                <Range ariaLabel={label} min={0} max={max} step={step}
+                                  value={patternOptions[key] ?? def}
+                                  onChange={v => updatePatternOptions({ [key]: v })} />
+                              </div>
+                            ))}
+                            <Button variant="outline" size="sm" className="w-full"
+                              onClick={() => updatePatternOptions({ postsSmallerPct: POSTS_SMALLER_DEFAULT, postsOneSidePct: POSTS_ONE_SIDE_DEFAULT })}>
+                              Reset to default
+                            </Button>
+                          </div>
+                        )}
+                        {isIctal && on && params && (
+                          <div className={optionBox}>
+                            {FOCAL_ICTAL_IDS.has(p.id) && (
                               <div className="space-y-1">
-                                <div className="flex justify-between items-center">
-                                  <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Intensity</Label>
-                                  <span className="text-[10px] font-mono text-fuchsia-400">{Math.round(params.intensity * 100)}%</span>
-                                </div>
-                                <input
-                                  type="range" min="0" max="3" step="0.05"
-                                  value={params.intensity}
-                                  onChange={e => updateIctalParams(p.id, { intensity: parseFloat(e.target.value) })}
-                                  className="w-full accent-fuchsia-500"
-                                />
+                                <Caption>Hemisphere</Caption>
+                                <Segmented ariaLabel="Hemisphere" value={params.hemisphere}
+                                  options={[{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }] as const}
+                                  onChange={h => updateIctalParams(p.id, { hemisphere: h })} />
                               </div>
-                              {/* Discharge rate. Shown as a multiple of the textbook rate rather
-                                  than in Hz, because every one of these patterns sweeps across a
-                                  range during the event — there is no single frequency to label. */}
-                              <div className="space-y-1">
-                                <div className="flex justify-between items-center">
-                                  <Label className="text-[10px] text-slate-500 uppercase tracking-wider">Frequency</Label>
-                                  <span className="text-[10px] font-mono text-fuchsia-400">{params.frequency.toFixed(2)}&times;</span>
-                                </div>
-                                <input
-                                  type="range" min="0.5" max="2" step="0.05"
-                                  value={params.frequency}
-                                  onChange={e => updateIctalParams(p.id, { frequency: parseFloat(e.target.value) })}
-                                  className="w-full accent-fuchsia-500"
-                                />
-                              </div>
+                            )}
+                            <div>
+                              <Caption trailing={<span className="text-[12px] pointer-coarse:text-[14px] font-medium tabular-nums">{Math.round(params.intensity * 100)}%</span>}>Intensity</Caption>
+                              <Range ariaLabel="Intensity" min={0} max={3} step={0.05} value={params.intensity} color="var(--ui-purple)"
+                                onChange={v => updateIctalParams(p.id, { intensity: v })} />
                             </div>
-                          )}
-                          {on && (
+                            {/* Discharge rate. Shown as a multiple of the textbook rate rather
+                                than in Hz, because every one of these patterns sweeps across a
+                                range during the event — there is no single frequency to label. */}
+                            <div>
+                              <Caption trailing={<span className="text-[12px] pointer-coarse:text-[14px] font-medium tabular-nums">{params.frequency.toFixed(2)}&times;</span>}>Frequency</Caption>
+                              <Range ariaLabel="Frequency" min={0.5} max={2} step={0.05} value={params.frequency} color="var(--ui-purple)"
+                                onChange={v => updateIctalParams(p.id, { frequency: v })} />
+                            </div>
+                          </div>
+                        )}
+                        {on && (
+                          <div className="pl-[34px] pointer-coarse:pl-[38px] pr-3 empty:hidden">
                             <ArtifactControls
                               id={p.id}
                               params={artifactParams}
                               update={updateArtifactParams}
                               live={live}
                             />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
+          </Group>
+        ))}
 
         {/* ── Display ── */}
-        <div className="px-4 pt-4 pb-3 space-y-3 border-b border-[#2e4a2e]">
-          <h2 className={SECTION_HEADING}>Display</h2>
-
+        <Group title="Display">
           {setShow3DPanel && (
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-slate-300">3D Head</Label>
-              <Switch
-                aria-label="3D head"
-                checked={show3DPanel}
-                onCheckedChange={setShow3DPanel}
-                className="data-[state=checked]:bg-emerald-600 scale-90"
-              />
-            </div>
+            <Row label="3D head" htmlFor="opt-3d">
+              <Switch id="opt-3d" checked={show3DPanel} onCheckedChange={setShow3DPanel} />
+            </Row>
           )}
-
           {show3DPanel && setHeadOpacity && setBrainOpacity && (
-            <div className="space-y-3 bg-[#192219] p-2 rounded">
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <Label className="text-[10px] text-slate-400">Skin Opacity</Label>
-                  <span className="text-[10px] text-slate-500">{Math.round(headOpacity * 100)}%</span>
-                </div>
-                <input
-                  type="range" min="0" max="1" step="0.05"
-                  value={headOpacity}
-                  onChange={e => setHeadOpacity(parseFloat(e.target.value))}
-                  className="w-full accent-emerald-500"
-                />
+            <div className="group/row pl-3 pr-3 pb-3 space-y-2">
+              <div>
+                <Caption trailing={<span className="text-[12px] tabular-nums">{Math.round(headOpacity * 100)}%</span>}>Skin opacity</Caption>
+                <Range ariaLabel="Skin opacity" min={0} max={1} step={0.05} value={headOpacity} onChange={setHeadOpacity} />
               </div>
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <Label className="text-[10px] text-slate-400">Brain Opacity</Label>
-                  <span className="text-[10px] text-slate-500">{Math.round(brainOpacity * 100)}%</span>
-                </div>
-                <input
-                  type="range" min="0" max="1" step="0.05"
-                  value={brainOpacity}
-                  onChange={e => setBrainOpacity(parseFloat(e.target.value))}
-                  className="w-full accent-emerald-500"
-                />
+              <div>
+                <Caption trailing={<span className="text-[12px] tabular-nums">{Math.round(brainOpacity * 100)}%</span>}>Brain opacity</Caption>
+                <Range ariaLabel="Brain opacity" min={0} max={1} step={0.05} value={brainOpacity} onChange={setBrainOpacity} />
               </div>
             </div>
           )}
+          <Row label="FFT spectrum" htmlFor="opt-fft">
+            <Switch id="opt-fft" checked={showSpectrum} onCheckedChange={setShowSpectrum} />
+          </Row>
+          <Row label="Per-channel bands" htmlFor="opt-bands">
+            <Switch id="opt-bands" checked={showRightSpectrum} onCheckedChange={setShowRightSpectrum} />
+          </Row>
+          <Row label="Highlight the row under the pointer" htmlFor="opt-hover">
+            <Switch id="opt-hover" checked={graphHover} onCheckedChange={setGraphHover} />
+          </Row>
+        </Group>
 
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">FFT Spectrum</Label>
-            <Switch aria-label="FFT spectrum" checked={showSpectrum} onCheckedChange={setShowSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
+        <Group title="Appearance" plain
+          footer="Paper is what the trace is drawn on. Interface is the look of the controls; Auto follows the device's light or dark setting.">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Caption>Paper</Caption>
+              <Segmented ariaLabel="Paper" value={theme} options={PAPERS} onChange={setTheme} />
+            </div>
+            <div className="space-y-1">
+              <Caption>Interface</Caption>
+              <Segmented ariaLabel="Interface" value={appearance}
+                options={APPEARANCES.map(a => ({ value: a.id, label: a.label }))} onChange={setAppearance} />
+            </div>
           </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Per-channel Bands</Label>
-            <Switch aria-label="Per-channel bands" checked={showRightSpectrum} onCheckedChange={setShowRightSpectrum} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Graph Hover Highlight</Label>
-            <Switch aria-label="Graph hover highlight" checked={graphHover} onCheckedChange={setGraphHover} className="scale-90 data-[state=checked]:bg-emerald-600" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-slate-300">Theme</Label>
-            <select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as EEGTheme)}
-              className="bg-slate-800 text-xs border border-slate-700 rounded p-1 text-slate-200"
-            >
-              <option value="green-paper">Green Paper</option>
-              <option value="white-paper">White Paper</option>
-              <option value="dark-mode">Dark Mode</option>
-            </select>
-          </div>
-        </div>
+        </Group>
 
         {/* ── Export ── */}
-        <div className="px-4 pt-4 pb-3 space-y-2">
-          <h2 className={SECTION_HEADING}>Export</h2>
+        <Group title="Export" plain>
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 hover:bg-slate-800" onClick={() => exportCSV(dataBuffer.current, timeBuffer.current, MONTAGES[montageId])}>
-              <Download className="w-3 h-3 mr-1" /> CSV
+            <Button variant="tinted" size="sm" onClick={() => exportCSV(dataBuffer.current, timeBuffer.current, MONTAGES[montageId])}>
+              <Download /> CSV
             </Button>
-            <Button variant="outline" size="sm" className="h-8 text-[10px] border-slate-700 hover:bg-slate-800" onClick={() => {
+            <Button variant="tinted" size="sm" onClick={() => {
               const canvas = document.querySelector('canvas');
               exportScreenshot(canvas);
             }}>
-              <Download className="w-3 h-3 mr-1" /> Image
+              <Download /> Image
             </Button>
           </div>
-        </div>
+        </Group>
       </div>
 
       {/* ── Footer ── */}
-      <div className="px-4 py-3 border-t border-[#2e4a2e] space-y-2">
+      <div className={cn('ui-material px-4 pt-2 pb-3 border-t border-ui-sep space-y-0.5', !sidebar && 'pb-safe')}>
         {/* Docked with Clear All so the marks can be switched without scrolling. */}
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-slate-300">Annotations on the trace</Label>
-          <Switch aria-label="Annotations on the trace" checked={showAnnotations} onCheckedChange={setShowAnnotations} className="scale-90 data-[state=checked]:bg-emerald-600" />
+        <div className="flex items-center justify-between min-h-8 pointer-coarse:min-h-11 px-1">
+          <label htmlFor="opt-annot" className="text-[13px] pointer-coarse:text-[16px] cursor-pointer">Annotations on the trace</label>
+          <Switch id="opt-annot" aria-label="Annotations on the trace" checked={showAnnotations} onCheckedChange={setShowAnnotations} />
         </div>
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-slate-300">Artifact list (top right)</Label>
-          <Switch aria-label="Artifact list (top right)" checked={showArtifactList} onCheckedChange={setShowArtifactList} className="scale-90 data-[state=checked]:bg-emerald-600" />
+        <div className="flex items-center justify-between min-h-8 pointer-coarse:min-h-11 px-1">
+          <label htmlFor="opt-list" className="text-[13px] pointer-coarse:text-[16px] cursor-pointer">Artifact list (top right)</label>
+          <Switch id="opt-list" aria-label="Artifact list (top right)" checked={showArtifactList} onCheckedChange={setShowArtifactList} />
         </div>
-        <Button
-          variant="outline"
-          className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white text-xs py-1.5 h-auto"
-          onClick={clearAll}
-        >
+        <Button variant="destructive" className="w-full mt-1.5" onClick={clearAll}>
           Clear All Patterns
         </Button>
       </div>

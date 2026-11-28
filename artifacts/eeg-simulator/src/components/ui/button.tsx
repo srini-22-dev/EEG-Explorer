@@ -3,35 +3,29 @@ import { Slot } from '@radix-ui/react-slot';
 import { cn } from '@/lib/utils';
 import { cva, type VariantProps } from 'class-variance-authority';
 
+/**
+ * Buttons in Apple's four styles: filled (the one main action), tinted (a secondary
+ * action in the accent), gray (a neutral action) and plain (text only). `outline`
+ * and `ghost` are kept as the names older call sites use, drawn as gray and plain.
+ */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0' +
-    ' hover-elevate active-elevate-2',
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] font-semibold transition-[background-color,opacity,transform] duration-150 active:scale-[0.98] active:opacity-80 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 select-none',
   {
     variants: {
       variant: {
-        default:
-          // @replit: no hover, and add primary border
-          'bg-primary text-primary-foreground border border-primary-border',
-        destructive:
-          'bg-destructive text-destructive-foreground shadow-sm border-destructive-border',
-        outline:
-          // @replit Shows the background color of whatever card / sidebar / accent background it is inside of.
-          // Inherits the current text color. Uses shadow-xs. no shadow on active
-          // No hover state
-          ' border [border-color:var(--button-outline)] shadow-xs active:shadow-none ',
-        secondary:
-          // @replit border, no hover, no shadow, secondary border.
-          'border bg-secondary text-secondary-foreground border border-secondary-border ',
-        // @replit no hover, transparent border
-        ghost: 'border border-transparent',
-        link: 'text-primary underline-offset-4 hover:underline',
+        default: 'bg-ui-accent text-ui-on-accent hover:brightness-110',
+        tinted: 'bg-ui-accent/15 text-ui-accent hover:bg-ui-accent/20',
+        destructive: 'bg-ui-red/15 text-ui-red hover:bg-ui-red/20',
+        outline: 'bg-ui-fill text-ui-text hover:bg-ui-fill-2',
+        secondary: 'bg-ui-fill text-ui-text hover:bg-ui-fill-2',
+        ghost: 'text-ui-accent hover:bg-ui-fill',
+        link: 'text-ui-accent underline-offset-4 hover:underline',
       },
       size: {
-        // @replit changed sizes
-        default: 'min-h-9 px-4 py-2',
-        sm: 'min-h-8 rounded-md px-3 text-xs',
-        lg: 'min-h-10 rounded-md px-8',
-        icon: 'h-9 w-9',
+        default: 'min-h-9 px-4 text-[13px] pointer-coarse:min-h-11 pointer-coarse:text-[15px]',
+        sm: 'min-h-8 px-3 text-[12px] pointer-coarse:min-h-10 pointer-coarse:text-[14px]',
+        lg: 'min-h-11 px-6 text-[15px] pointer-coarse:min-h-[50px] pointer-coarse:text-[17px]',
+        icon: 'h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11',
       },
     },
     defaultVariants: {

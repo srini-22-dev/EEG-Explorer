@@ -491,11 +491,11 @@ export function HeadModel3D({ montage, headOpacity = 0.3, brainOpacity = 0.8 }: 
   const hasOverrides = Object.keys(overrides).length > 0;
 
   return (
-    <div className="w-full h-full relative bg-slate-900" onContextMenu={(e) => e.preventDefault()}>
+    <div className="w-full h-full relative bg-ui-root" onContextMenu={(e) => e.preventDefault()}>
       {hasOverrides && (
         <button
           onClick={() => setOverrides({})}
-          className="absolute top-2 right-2 z-10 px-2 py-1 rounded text-[11px] font-semibold bg-black/60 text-white hover:bg-black/80"
+          className="ui-material absolute top-2 right-2 z-10 px-3 h-8 pointer-coarse:h-10 rounded-full border border-ui-sep text-[12px] font-semibold text-ui-accent"
           title="Return every marker to its calibrated 10-20 position"
         >
           Reset positions

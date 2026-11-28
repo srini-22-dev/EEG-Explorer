@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Brain, Check, X } from 'lucide-react';
+import { IconTile, CloseButton } from '@/components/ui/ios';
+import { Brain, CheckCircle2, XCircle } from 'lucide-react';
 import { PATTERN_BY_ID, PATTERN_CATEGORIES } from '../utils/patterns';
 import { quizPage, effective } from '../utils/toggleRules';
+import { cn } from '@/lib/utils';
 
 /**
  * Not asked: what cannot be seen on the one page a question records (it was 4 s until
@@ -109,103 +111,107 @@ export function QuizMode({ onClose, setActivePatterns, setFreeze, newPage, pageF
   const chosen = PATTERN_BY_ID[selectedOption];
 
   return (
-    // `visible` overrides the hidden sidebar this panel sits over.
-    <div className="visible absolute inset-0 z-20 flex flex-col bg-[#1e2a1e] border-r border-[#2e4a2e] text-slate-200 text-sm">
+    <div className="h-full flex flex-col bg-ui-root text-ui-text">
       {/* Progress and score */}
-      <div className="px-4 py-3 border-b border-[#2e4a2e]">
-        <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-          <Brain className="w-4 h-4" /> Pattern quiz
+      <div className="flex items-center gap-3 px-4 pt-3 pb-2">
+        <IconTile color="var(--ui-purple)"><Brain /></IconTile>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-[17px] font-semibold leading-tight">Pattern quiz</h2>
+          <div className="text-[12px] pointer-coarse:text-[13px] text-ui-text-2 tabular-nums">
+            Question {questionNo} · Score {score} / {total}{total > 0 && ` (${Math.round((100 * score) / total)}%)`}
+          </div>
         </div>
-        <div className="mt-1 flex justify-between text-xs text-slate-400">
-          <span>Question {questionNo}</span>
-          <span>Score {score} / {total}{total > 0 && ` (${Math.round((100 * score) / total)}%)`}</span>
-        </div>
+        <CloseButton onClick={onClose} label="Exit quiz" />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto ui-scroll px-4 pb-4 space-y-4">
         {questionPhase === 'recording' && (
-          <div className="space-y-3">
-            <p className="text-slate-300">Recording… watch the trace.</p>
-            <div className="h-1.5 rounded bg-[#2e4a2e] overflow-hidden">
+          <div className="rounded-[12px] bg-ui-card p-4 space-y-3">
+            <p className="text-[15px] font-medium">Recording… watch the trace.</p>
+            <div className="h-1.5 rounded-full bg-ui-fill overflow-hidden">
               <div
                 key={questionNo}
-                className="h-full bg-emerald-500"
+                data-progress
+                className="h-full rounded-full bg-ui-accent"
                 style={{ animation: `quiz-record ${Math.round(pageSec * 1000)}ms linear forwards` }}
               />
             </div>
             <style>{'@keyframes quiz-record { from { width: 0 } to { width: 100% } }'}</style>
-            <p className="text-xs text-slate-500">
+            <p className="text-[12px] pointer-coarse:text-[13px] text-ui-text-2 leading-snug">
               A fresh page: it freezes when full (about {Math.round(pageSec)} s) and what it asks
-              about is clear of its edges. You can then measure on it (click two points or drag a
-              box) before answering.
+              about is clear of its edges. You can then measure on it (tap or click two points, or
+              drag a box) before answering.
             </p>
           </div>
         )}
 
         {questionPhase !== 'recording' && (
-          <div className="space-y-2">
-            <p className="text-slate-300">Which pattern is on this page?</p>
-            {options.map(opt => {
-              const isTarget = opt === currentPatternId;
-              const isChosen = opt === selectedOption;
-              const resultStyle = questionPhase !== 'result'
-                ? 'border-slate-700 text-slate-200 hover:bg-[#2a3a2a]'
-                : isTarget
-                  ? 'border-emerald-600 bg-emerald-900/40 text-emerald-200'
-                  : isChosen
-                    ? 'border-red-600 bg-red-900/30 text-red-200'
-                    : 'border-slate-800 text-slate-500';
-              return (
-                <Button
-                  key={opt}
-                  variant="outline"
-                  disabled={questionPhase === 'result'}
-                  className={`w-full justify-start bg-transparent h-auto py-2 whitespace-normal text-left disabled:opacity-100 ${resultStyle}`}
-                  onClick={() => handleGuess(opt)}
-                >
-                  {questionPhase === 'result' && isTarget && <Check className="w-4 h-4 mr-2 shrink-0" />}
-                  {questionPhase === 'result' && isChosen && !isTarget && <X className="w-4 h-4 mr-2 shrink-0" />}
-                  {PATTERN_BY_ID[opt].name}
-                </Button>
-              );
-            })}
+          <div>
+            <p className="px-1 pb-2 text-[15px] font-semibold">Which pattern is on this page?</p>
+            <div className="rounded-[12px] bg-ui-card overflow-hidden">
+              {options.map((opt, i) => {
+                const isTarget = opt === currentPatternId;
+                const isChosen = opt === selectedOption;
+                const result = questionPhase === 'result';
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    disabled={result}
+                    onClick={() => handleGuess(opt)}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-4 min-h-11 pointer-coarse:min-h-12 py-2 text-left text-[14px] pointer-coarse:text-[16px] transition-colors',
+                      i > 0 && 'border-t border-ui-sep',
+                      !result && 'hover:bg-ui-fill active:bg-ui-fill-2',
+                      result && isTarget && 'bg-ui-green/12 text-ui-green font-semibold',
+                      result && isChosen && !isTarget && 'bg-ui-red/12 text-ui-red',
+                      result && !isTarget && !isChosen && 'text-ui-text-3',
+                    )}
+                  >
+                    <span className="flex-1">{PATTERN_BY_ID[opt].name}</span>
+                    {result && isTarget && <CheckCircle2 className="w-5 h-5 shrink-0" />}
+                    {result && isChosen && !isTarget && <XCircle className="w-5 h-5 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
         {questionPhase === 'result' && target && (
           <div className="space-y-3">
-            <div className={`font-bold ${correct ? 'text-emerald-400' : 'text-red-400'}`}>
+            <div className={`text-[20px] font-bold ${correct ? 'text-ui-green' : 'text-ui-red'}`}>
               {correct ? 'Correct' : 'Incorrect'}
             </div>
-            <div className="rounded border border-emerald-800 bg-emerald-950/30 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-emerald-500">
+            <div className="rounded-[12px] bg-ui-card p-3.5 border-l-4 border-ui-green">
+              <div className="text-[11px] font-semibold text-ui-green">
                 The page shows · {CATEGORY_OF[target.id]}
               </div>
-              <div className="font-semibold text-white">{target.name}</div>
-              <p className="mt-1 text-xs text-slate-300">{target.desc}</p>
+              <div className="text-[15px] font-semibold mt-0.5">{target.name}</div>
+              <p className="mt-1 text-[12px] pointer-coarse:text-[14px] text-ui-text-2 leading-snug">{target.desc}</p>
             </div>
             {!correct && chosen && (
-              <div className="rounded border border-red-900 bg-red-950/20 p-3">
-                <div className="text-[10px] uppercase tracking-wide text-red-400">
+              <div className="rounded-[12px] bg-ui-card p-3.5 border-l-4 border-ui-red">
+                <div className="text-[11px] font-semibold text-ui-red">
                   You chose · {CATEGORY_OF[chosen.id]}
                 </div>
-                <div className="font-semibold text-white">{chosen.name}</div>
-                <p className="mt-1 text-xs text-slate-300">{chosen.desc}</p>
+                <div className="text-[15px] font-semibold mt-0.5">{chosen.name}</div>
+                <p className="mt-1 text-[12px] pointer-coarse:text-[14px] text-ui-text-2 leading-snug">{chosen.desc}</p>
               </div>
             )}
-            <p className="text-xs text-slate-500">The page stays frozen, now with its annotations: compare it with the descriptions.</p>
+            <p className="text-[12px] text-ui-text-2">The page stays frozen, now with its annotations: compare it with the descriptions.</p>
           </div>
         )}
       </div>
 
-      <div className="px-4 py-3 border-t border-[#2e4a2e] space-y-2">
+      <div className="ui-material px-4 pt-2.5 pb-3 border-t border-ui-sep space-y-1 pb-safe">
         {questionPhase === 'result' && (
-          <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={generateQuestion}>
+          <Button size="lg" className="w-full" onClick={generateQuestion}>
             Next question
           </Button>
         )}
-        <Button variant="ghost" className="w-full text-slate-400 hover:text-white hover:bg-[#2a3a2a]" onClick={onClose}>
-          Exit quiz <span className="ml-2 text-[10px] text-slate-500">Esc</span>
+        <Button variant="ghost" className="w-full" onClick={onClose}>
+          Exit quiz <span className="ml-1 text-[11px] font-normal text-ui-text-3 pointer-coarse:hidden">Esc</span>
         </Button>
       </div>
     </div>

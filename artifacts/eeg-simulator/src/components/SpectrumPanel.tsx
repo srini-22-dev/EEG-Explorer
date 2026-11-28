@@ -89,17 +89,17 @@ export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis
     : null;
 
   return (
-    <div className="h-48 bg-[#1e2a1e] border-t border-[#2e4a2e] p-4 flex flex-col text-slate-200">
-      <div className="flex justify-between items-center mb-2">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold text-emerald-400">FFT Spectrum Analysis</h3>
-          <span className="text-[10px] text-slate-400 cursor-help border-b border-dotted border-slate-600" title={POWER_NOTE}>
+    <div className="h-48 pointer-coarse:h-64 bg-ui-root border-t border-ui-sep px-4 py-3 flex flex-col text-ui-text">
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h3 className="text-[13px] font-semibold text-ui-text">FFT spectrum</h3>
+          <span className="text-[11px] text-ui-text-2 cursor-help border-b border-dotted border-ui-text-3" title={POWER_NOTE}>
             band power, {POWER_UNIT}
           </span>
           {/* Legend — same colours the right-side panel and its bars use. */}
           <div className="flex flex-wrap gap-x-2 gap-y-0.5">
             {FFT_BANDS.map(b => (
-              <span key={b.key} className="flex items-center gap-1 text-[10px] text-slate-400">
+              <span key={b.key} className="flex items-center gap-1 text-[11px] text-ui-text-2">
                 <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: b.color }} />
                 {b.name.split(' ')[0]}
               </span>
@@ -108,22 +108,22 @@ export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis
         </div>
         <div className="flex items-center gap-2">
           {followingLabel && (
-            <span className="text-[10px] px-2 py-1 rounded bg-emerald-900/40 border border-emerald-700 text-emerald-300">
+            <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-ui-accent/12 text-ui-accent">
               following {followingLabel}
             </span>
           )}
           <button
             onClick={() => setFreezeYAxis(!freezeYAxis)}
-            className={`text-xs px-2 py-1 rounded border transition-colors ${
+            className={`text-[12px] font-medium px-3 h-7 pointer-coarse:h-9 rounded-full transition-colors ${
               freezeYAxis
-                ? 'bg-emerald-800/40 border-emerald-600 text-emerald-300'
-                : 'border-slate-700 text-slate-400 hover:bg-slate-800'
+                ? 'bg-ui-accent text-ui-on-accent'
+                : 'bg-ui-fill text-ui-text hover:bg-ui-fill-2'
             }`}
           >
             {freezeYAxis ? 'Unfreeze Y' : 'Freeze Y'}
           </button>
           <select
-            className="bg-slate-800 text-xs border border-slate-700 rounded p-1 text-slate-200 disabled:opacity-50"
+            className="appearance-none rounded-[8px] bg-ui-fill hover:bg-ui-fill-2 px-2.5 h-7 pointer-coarse:h-9 text-[12px] font-medium text-ui-text disabled:opacity-50"
             value={selectedChannel}
             disabled={highlightedChannel != null}
             title={highlightedChannel != null ? 'Following the highlighted trace — click it off to use this' : undefined}
@@ -138,16 +138,18 @@ export function SpectrumPanel({ dataBuffer, montage, freezeYAxis, setFreezeYAxis
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={powerData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-            <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
+            <XAxis dataKey="name" stroke="var(--ui-text-2)" fontSize={10} tickLine={false} />
             <YAxis
-              stroke="#94a3b8"
+              stroke="var(--ui-text-2)"
               fontSize={10}
+              tickLine={false}
               domain={frozenMax != null ? [0, frozenMax] : undefined}
               tickFormatter={(v: number) => String(sig2(v))}
-              label={{ value: `Power (${POWER_UNIT})`, angle: -90, position: 'insideLeft', offset: 0, fill: '#94a3b8', fontSize: 10, style: { textAnchor: 'middle' } }}
+              label={{ value: `Power (${POWER_UNIT})`, angle: -90, position: 'insideLeft', offset: 0, fill: 'var(--ui-text-2)', fontSize: 10, style: { textAnchor: 'middle' } }}
             />
             <Tooltip
-              contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '4px' }}
+              contentStyle={{ backgroundColor: 'var(--ui-card)', color: 'var(--ui-text)', border: '0.5px solid var(--ui-sep)', borderRadius: '10px', boxShadow: 'var(--ui-shadow)' }}
+              cursor={{ fill: 'var(--ui-fill)' }}
               formatter={(v: number) => [`${sig2(v)} ${POWER_UNIT}`, 'Band power']}
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]}>

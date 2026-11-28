@@ -72,10 +72,16 @@ export function useCanvasPointer({
     const rect = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
-  const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Pointer events, so a finger measures as a mouse does: a tap places a caliper point
+  // (the click that follows it), a drag draws a box. Capturing the pointer keeps the
+  // drag going when it leaves the canvas.
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // A touch drag is not always followed by a click to swallow; a new press starts clean.
+    swallowClickRef.current = false;
     if (!frozenRef.current || e.button !== 0 || !canvasRef.current) return;
+    canvasRef.current.setPointerCapture?.(e.pointerId);
     const { x, y } = canvasXY(e);
-    const { scale, isEcg } = rowScaleAt(y, canvasRef.current.height);
+    const { scale, isEcg } = rowScaleAt(y, canvasRef.current.clientHeight);
     tools.drag = { x0: x, y0: y, x1: x, y1: y, scale, isEcg };
   };
   const onMouseUp = (e?: React.MouseEvent<HTMLCanvasElement>) => {
@@ -98,7 +104,7 @@ export function useCanvasPointer({
       // Not frozen: clicks toggle a persistent channel highlight instead of measuring.
       const rect = canvas.getBoundingClientRect();
       const y = e.clientY - rect.top;
-      const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
+      const idx = getChannelAtY(buildLayout(montage), y, canvas.clientHeight);
       if (idx !== null) toggleClickChannel(idx);
       return;
     }
@@ -110,8 +116,8 @@ export function useCanvasPointer({
     const currentSettings = settingsRef.current;
     const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
     const currentT = elapsedRef.current;
-    const w = canvas.width;
-    const h = canvas.height;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
 
     const clickT = currentT - (w - x) / pxPerSec;
 
@@ -146,7 +152,7 @@ export function useCanvasPointer({
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    const idx = getChannelAtY(buildLayout(montage), y, canvas.height);
+    const idx = getChannelAtY(buildLayout(montage), y, canvas.clientHeight);
     setHoverChannels(idx !== null ? new Set([idx]) : new Set());
   };
 
@@ -194,7 +200,10 @@ export function useCanvasPointer({
     return () => window.removeEventListener('keydown', onKey);
   }, [setIsFrozen]);
 
-  return { tools, handlers: { onClick, onMouseDown, onMouseUp, onMouseMove, onMouseLeave } };
+  return {
+    tools,
+    handlers: { onClick, onPointerDown, onPointerUp: onMouseUp, onPointerMove: onMouseMove, onPointerLeave: onMouseLeave, onPointerCancel: onMouseLeave },
+  };
 }
 
 /** Draw the measurements: the drag box (the one being drawn, else the last one kept) and the caliper. */

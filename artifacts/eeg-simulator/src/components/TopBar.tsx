@@ -1,21 +1,22 @@
 import React, { useEffect, useRef } from 'react';
-import { Info } from 'lucide-react';
 import { MONTAGES } from '../utils/montages';
 import {
   SPEED_VALUES, SENSITIVITY_VALUES, LOW_CUT_VALUES, HIGH_CUT_VALUES, NOTCH_HZ,
   type Speed, type Sensitivity, type FilterSettings, type ConditionLevel,
 } from '../utils/simTypes';
 import { CONDITION_LEVELS, RECIPES } from '../utils/recordingConditions';
-import { INFO_TRIGGER_ATTR } from './InfoPanel';
+import { Switch } from '@/components/ui/switch';
+import { Group, Row, SelectMenu, InfoButton } from '@/components/ui/ios';
 
 /**
  * The reading controls, as on an EEG review station's toolbar: what the page is
  * drawn with (montage, sensitivity, paper speed) and what it is filtered with (low
  * cut, high cut, notch). They sit above the trace because a reader changes them
  * while looking at it (owner, 2026-11-16); the left panel keeps what is on the page.
+ * On a phone the same controls are a grouped list in the Recording sheet.
  */
 
-/** A labelled native dropdown. Mouse-wheel over it steps through the options; the
+/** A labelled pop-up menu. Mouse-wheel over it steps through the options; the
  *  listener is native and non-passive so it can stop the page scrolling. */
 function WheelSelect<T extends string | number>({
   label, value, options, format, onChange, wide,
@@ -38,14 +39,9 @@ function WheelSelect<T extends string | number>({
   }, [value, options, onChange]);
   return (
     <label className="flex flex-col gap-0.5 shrink-0">
-      <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-widest">{label}</span>
-      <select
-        ref={ref}
-        value={String(value)}
-        onChange={(e) => onChange(options.find(o => String(o) === e.target.value)!)}
-        className={`${wide ? 'w-52' : 'w-24'} py-1 px-1.5 rounded text-[11px] font-mono border border-slate-700 bg-slate-900 text-emerald-300 hover:bg-slate-800 focus:outline-none focus:border-emerald-600 cursor-pointer`}>
-        {options.map(o => <option key={String(o)} value={String(o)}>{format(o)}</option>)}
-      </select>
+      <span className="pl-1 text-[10px] font-medium text-ui-text-2">{label}</span>
+      <SelectMenu selectRef={ref} ariaLabel={label} value={value} options={options} format={format}
+        onChange={onChange} className={wide ? 'w-52' : 'w-[92px]'} />
     </label>
   );
 }
@@ -53,21 +49,17 @@ function WheelSelect<T extends string | number>({
 const MONTAGE_IDS = Object.keys(MONTAGES);
 const hz = (v: number) => `${v} Hz`;
 
-/** The "i" beside a control: opens the information panel on `id`, or closes it. */
-function InfoButton({ id, about, infoId, onShowInfo }: {
-  id: string; about: string; infoId: string | null; onShowInfo: (id: string | null) => void;
+/** A small labelled switch for the toolbar. */
+function ToolbarSwitch({ label, checked, onChange, title }: {
+  label: string; checked: boolean; onChange: (v: boolean) => void; title?: string;
 }) {
   return (
-    <button
-      {...{ [INFO_TRIGGER_ATTR]: '' }}
-      onClick={() => onShowInfo(infoId === id ? null : id)}
-      aria-label={`About ${about}`}
-      title={`About ${about}`}
-      className={`shrink-0 self-end mb-1.5 rounded p-0.5 transition-colors ${
-        infoId === id ? 'text-emerald-300 bg-emerald-800/50' : 'text-slate-500 hover:text-slate-300'
-      }`}>
-      <Info className="w-3 h-3" />
-    </button>
+    <label className="flex flex-col gap-0.5 shrink-0 cursor-pointer select-none" title={title}>
+      <span className="pl-1 text-[10px] font-medium text-ui-text-2">{label}</span>
+      <span className="h-7 flex items-center px-1">
+        <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
+      </span>
+    </label>
   );
 }
 
@@ -83,22 +75,25 @@ type Props = {
   showResp: boolean; setShowResp: (v: boolean) => void;
 };
 
+const RESP_TITLE = 'A respiration row under the ECG, to check breathing and ventilator artifact against';
+const conditionName = (l: ConditionLevel, current: ConditionLevel, edited: boolean) =>
+  RECIPES[l].name + (l === current && edited ? ' (edited)' : '');
+
 export function TopBar({
   montageId, setMontageId, sensitivity, setSensitivity, speed, setSpeed, filters, setFilters,
   conditions, setConditions, conditionsEdited, infoId, onShowInfo, showResp, setShowResp,
 }: Props) {
-  const divider = <div className="w-px self-stretch bg-[#2e4a2e]" />;
+  const divider = <div className="w-px self-stretch my-1 bg-ui-sep" />;
+  const info = (id: string, about: string) => (
+    <InfoButton about={about} active={infoId === id} onClick={() => onShowInfo(infoId === id ? null : id)} className="self-end" />
+  );
   return (
     // Wraps rather than scrolls: scrolling hid Recording conditions off the right edge
     // at 1440 px and below.
-    <div className="flex flex-wrap items-end gap-x-3 gap-y-1 px-3 py-1.5 bg-[#1e2a1e] border-b border-[#2e4a2e] text-slate-200 flex-shrink-0">
+    <div className="ui-material relative z-20 flex flex-wrap items-end gap-x-3 gap-y-1.5 px-3 pt-1.5 pb-2 border-b border-ui-sep text-ui-text flex-shrink-0">
       <WheelSelect label="Montage" value={montageId} options={MONTAGE_IDS} wide
         format={id => MONTAGES[id].name} onChange={setMontageId} />
-      <label className="flex items-center gap-1.5 pb-1 cursor-pointer select-none shrink-0" title="A respiration row under the ECG, to check breathing and ventilator artifact against">
-        <input type="checkbox" checked={showResp} onChange={e => setShowResp(e.target.checked)}
-          className="accent-emerald-600 w-3.5 h-3.5 cursor-pointer" />
-        <span className="text-[11px] font-mono text-emerald-300 whitespace-nowrap">Resp row</span>
-      </label>
+      <ToolbarSwitch label="Resp row" checked={showResp} onChange={setShowResp} title={RESP_TITLE} />
       {divider}
       <WheelSelect label="Sensitivity" value={sensitivity} options={SENSITIVITY_VALUES}
         format={v => `${v} µV/mm`} onChange={setSensitivity} />
@@ -109,21 +104,64 @@ export function TopBar({
         format={hz} onChange={v => setFilters({ ...filters, lowCutHz: v })} />
       <WheelSelect label="High cut" value={filters.highCutHz} options={HIGH_CUT_VALUES}
         format={hz} onChange={v => setFilters({ ...filters, highCutHz: v })} />
-      <label className="flex items-center gap-1.5 pb-1 cursor-pointer select-none shrink-0">
-        <input
-          type="checkbox"
-          checked={filters.notchHz != null}
-          onChange={e => setFilters({ ...filters, notchHz: e.target.checked ? NOTCH_HZ : null })}
-          className="accent-emerald-600 w-3.5 h-3.5 cursor-pointer"
-        />
-        <span className="text-[11px] font-mono text-emerald-300 whitespace-nowrap">Notch {NOTCH_HZ} Hz</span>
-      </label>
-      <InfoButton id="notch" about="the notch filter" infoId={infoId} onShowInfo={onShowInfo} />
+      <ToolbarSwitch label={`Notch ${NOTCH_HZ} Hz`} checked={filters.notchHz != null}
+        onChange={on => setFilters({ ...filters, notchHz: on ? NOTCH_HZ : null })} />
+      {info('notch', 'the notch filter')}
       {divider}
       <WheelSelect label="Recording conditions" value={conditions} options={CONDITION_LEVELS} wide
-        format={l => RECIPES[l].name + (l === conditions && conditionsEdited ? ' (edited)' : '')}
-        onChange={setConditions} />
-      <InfoButton id="conditions" about="recording conditions" infoId={infoId} onShowInfo={onShowInfo} />
+        format={l => conditionName(l, conditions, conditionsEdited)} onChange={setConditions} />
+      {info('conditions', 'recording conditions')}
     </div>
+  );
+}
+
+/** The same controls as a grouped list, for the phone's Recording sheet. */
+export function RecordingList({
+  montageId, setMontageId, sensitivity, setSensitivity, speed, setSpeed, filters, setFilters,
+  conditions, setConditions, conditionsEdited, infoId, onShowInfo, showResp, setShowResp,
+}: Props) {
+  const menu = 'max-w-[58%]';
+  return (
+    <>
+      <Group title="Page">
+        <Row label="Montage">
+          <SelectMenu className={menu} ariaLabel="Montage" value={montageId} options={MONTAGE_IDS}
+            format={id => MONTAGES[id].name} onChange={setMontageId} />
+        </Row>
+        <Row label="Respiration row" sub="Under the ECG, to check breathing artifact against" htmlFor="resp-row">
+          <Switch id="resp-row" checked={showResp} onCheckedChange={setShowResp} />
+        </Row>
+        <Row label="Sensitivity">
+          <SelectMenu ariaLabel="Sensitivity" value={sensitivity} options={SENSITIVITY_VALUES}
+            format={v => `${v} µV/mm`} onChange={setSensitivity} />
+        </Row>
+        <Row label="Paper speed">
+          <SelectMenu ariaLabel="Paper speed" value={speed} options={SPEED_VALUES}
+            format={v => `${v} mm/s`} onChange={setSpeed} />
+        </Row>
+      </Group>
+      <Group title="Filters">
+        <Row label="Low cut">
+          <SelectMenu ariaLabel="Low cut" value={filters.lowCutHz} options={LOW_CUT_VALUES}
+            format={hz} onChange={v => setFilters({ ...filters, lowCutHz: v })} />
+        </Row>
+        <Row label="High cut">
+          <SelectMenu ariaLabel="High cut" value={filters.highCutHz} options={HIGH_CUT_VALUES}
+            format={hz} onChange={v => setFilters({ ...filters, highCutHz: v })} />
+        </Row>
+        <Row label={`Notch ${NOTCH_HZ} Hz`}>
+          <InfoButton about="the notch filter" active={infoId === 'notch'} onClick={() => onShowInfo(infoId === 'notch' ? null : 'notch')} />
+          <Switch aria-label={`Notch ${NOTCH_HZ} Hz`} checked={filters.notchHz != null}
+            onCheckedChange={on => setFilters({ ...filters, notchHz: on ? NOTCH_HZ : null })} />
+        </Row>
+      </Group>
+      <Group title="Recording conditions" footer="The setting the record was made in: it brings the artifacts that setting has, coming and going over time.">
+        <Row label="Setting">
+          <InfoButton about="recording conditions" active={infoId === 'conditions'} onClick={() => onShowInfo(infoId === 'conditions' ? null : 'conditions')} />
+          <SelectMenu className={menu} ariaLabel="Recording conditions" value={conditions} options={CONDITION_LEVELS}
+            format={l => conditionName(l, conditions, conditionsEdited)} onChange={setConditions} />
+        </Row>
+      </Group>
+    </>
   );
 }

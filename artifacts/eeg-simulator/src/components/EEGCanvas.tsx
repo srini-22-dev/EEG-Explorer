@@ -10,7 +10,7 @@ import { liveArtifacts, isLiveOn } from '../utils/liveArtifacts';
 import type { LiveArtifacts } from '../engine/engine';
 import { THEMES, EEGTheme } from '../utils/themes';
 import { PATTERN_COLOR } from '../utils/annotations';
-import { Pause, Play } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 import { buildLayout, GAP_UNITS } from './canvasLayout';
 import { useCanvasPointer, drawMeasureTools } from './canvasPointer';
 import {
@@ -140,6 +140,8 @@ export function EEGCanvas({
   dataBuffer, timeBuffer, graphHover = true, freshPageKey, onFreshPage, onPageFull, pageInterest,
 }: EEGCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
+  // The canvas's size in CSS pixels, and the backing store's scale to it (see resize).
+  const cssSizeRef = useRef({ w: 1, h: 1, sx: 1, sy: 1 });
   const containerRef = useRef<HTMLDivElement>(null);
   const lastTimeRef  = useRef<number>(performance.now());
   const elapsedRef   = useRef<number>(0);
@@ -190,7 +192,7 @@ export function EEGCanvas({
     pageStartRef.current = elapsedRef.current;
     pageFullSentRef.current = false;
     const canvas = canvasRef.current;
-    onFreshPage?.(canvas ? canvas.width / (settingsRef.current.speed * PX_PER_MM_X) : 10);
+    onFreshPage?.(canvas ? cssSizeRef.current.w / (settingsRef.current.speed * PX_PER_MM_X) : 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [freshPageKey]);
 
@@ -203,7 +205,7 @@ export function EEGCanvas({
   const historyGeometry = () => {
     const tb = timeBuffer.current;
     const canvas = canvasRef.current;
-    const page = canvas ? canvas.width / (settingsRef.current.speed * PX_PER_MM_X) : 10;
+    const page = canvas ? cssSizeRef.current.w / (settingsRef.current.speed * PX_PER_MM_X) : 10;
     // No history on a fresh page (the quiz): only its own page is there to read (owner's
     // inbox, 2026-11-27: "no history in the quiz"). The regular app keeps its five minutes.
     if (pageStartRef.current > -Infinity) return { page, max: 0 };
@@ -322,12 +324,20 @@ export function EEGCanvas({
     // The equality guard matters: assigning canvas.width clears the canvas even
     // when the value is unchanged, and a ResizeObserver fires on layout passes
     // that did not actually change the size.
+    //
+    // The backing store is the CSS size times the screen's pixel ratio (capped at 2),
+    // and every frame draws through a matching transform, so the trace is sharp on a
+    // phone or a Retina screen. All geometry stays in CSS pixels (cssSizeRef): the
+    // 4 px per mm of paper and the row heights are unchanged.
     const resize = () => {
       const cw = Math.max(1, Math.round(container.clientWidth));
       const chh = Math.max(1, Math.round(container.clientHeight));
-      if (canvas.width === cw && canvas.height === chh) return;
-      canvas.width  = cw;
-      canvas.height = chh;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const bw = Math.round(cw * dpr), bh = Math.round(chh * dpr);
+      cssSizeRef.current = { w: cw, h: chh, sx: bw / cw, sy: bh / chh };
+      if (canvas.width === bw && canvas.height === bh) return;
+      canvas.width  = bw;
+      canvas.height = bh;
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -354,7 +364,7 @@ export function EEGCanvas({
       const currentT = elapsedRef.current;
 
       const pxPerSec  = currentSettings.speed * PX_PER_MM_X;
-      const winSec    = canvas.width / pxPerSec;
+      const winSec    = cssSizeRef.current.w / pxPerSec;
       // Nothing before a fresh page's start is drawn (freshPageKey).
       const tMin = pageStartRef.current;
       if (!pageFullSentRef.current && currentT - tMin >= winSec) {
@@ -432,8 +442,8 @@ export function EEGCanvas({
       // ── RENDER ──────────────────────────────────────────────────────────────
       // The page's right edge: the newest sample, or earlier while paging back.
       const tRight = currentT - backRef.current;
-      const w = canvas.width;
-      const h = canvas.height;
+      const { w, h, sx, sy } = cssSizeRef.current;
+      ctx.setTransform(sx, 0, 0, sy, 0, 0);
 
       // Width of the fixed channel-label strip on the left. Declared here rather
       // than at its first draw (section 6) because the annotation overlay in
@@ -913,41 +923,48 @@ export function EEGCanvas({
     return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, [montage]);
 
+  const page = freshPageKey == null ? historyGeometry().page : 0;
+  const backPct = backMax > 0 ? ((backMax - back) / backMax) * 100 : 100;
   return (
     <div className="flex-1 h-full relative" ref={containerRef}>
       <canvas
         ref={canvasRef}
         className={`block w-full h-full ${isFrozen ? 'cursor-crosshair' : ''}`}
+        // The page never scrolls or zooms under a finger: a touch is a tap or a measuring drag.
+        style={{ touchAction: 'none' }}
         {...pointer.handlers}
       />
-      <div className="absolute top-2 left-[70px] z-10 flex gap-2">
-        <button 
+      <div className="absolute top-2 left-[70px] right-2 z-10 flex items-start gap-2 pointer-events-none">
+        <button
           onClick={() => setIsFrozen(!isFrozen)}
-          className={`flex items-center justify-center w-8 h-8 rounded shadow-sm border transition-colors ${
-            isFrozen 
-              ? 'bg-amber-500/90 border-amber-600 text-white hover:bg-amber-600' 
-              : 'bg-white/80 border-slate-300 text-slate-700 hover:bg-white'
+          aria-label={isFrozen ? 'Resume' : 'Pause to measure'}
+          className={`pointer-events-auto grid place-items-center shrink-0 w-9 h-9 pointer-coarse:w-11 pointer-coarse:h-11 rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.18)] border border-ui-sep transition-colors active:scale-95 ${
+            isFrozen
+              ? 'bg-ui-orange text-white border-transparent'
+              : 'ui-material text-ui-text'
           }`}
           title={isFrozen ? 'Resume EEG (Space)' : 'Freeze EEG for measurement (Space)'}
         >
-          {isFrozen ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+          {isFrozen ? <Play className="w-4 h-4 fill-current ml-0.5" /> : <Pause className="w-4 h-4 fill-current" />}
         </button>
         {/* The measuring workflow is not guessable from a pause button, so it is
             spelled out while frozen — that is the only time it applies. */}
         {isFrozen && (
-          <div className="flex items-center h-8 px-2 rounded bg-black/70 text-[11px] text-amber-200 whitespace-nowrap pointer-events-none">
-            Click two points or drag a box to measure · ← → page back and forward · Esc clears · Space resumes
+          <div className="ui-material flex items-center min-h-9 pointer-coarse:min-h-11 px-3 py-1 rounded-full border border-ui-sep text-[11px] pointer-coarse:text-[12px] leading-snug text-ui-text shadow-[0_2px_10px_rgba(0,0,0,0.12)]">
+            <span className="pointer-coarse:hidden">Click two points or drag a box to measure · ← → page back and forward · Esc clears · Space resumes</span>
+            <span className="hidden pointer-coarse:inline">Tap two points or drag a box to measure · ‹ › page through the record</span>
           </div>
         )}
       </div>
       {/* Scroll-back: the retained history, oldest at the left, the newest at the right.
           Always shown in normal use, not only once paused (owner, 2026-11-27: "make the
           history for normal use also"): dragging it while recording pauses the page there,
-          and Space resumes at the newest sample. Never in the quiz, which has no history. */}
+          and Space resumes at the newest sample. Never in the quiz, which has no history.
+          The ‹ › buttons page a screen at a time, for a finger as the arrow keys do. */}
       {freshPageKey == null && (
-        <div className={`absolute bottom-6 left-[74px] right-24 z-10 flex items-center gap-2 px-2 py-1 rounded bg-black/70 text-[11px] text-amber-200 transition-opacity ${
-          isFrozen ? '' : 'opacity-50 hover:opacity-100'}`}>
-          <span className="whitespace-nowrap font-mono">
+        <div className={`ui-material absolute bottom-4 [@media(max-height:520px)]:bottom-1 left-[74px] right-20 z-10 flex items-center gap-1.5 pl-3 pr-1.5 py-0.5 rounded-full border border-ui-sep shadow-[0_2px_10px_rgba(0,0,0,0.12)] text-[11px] pointer-coarse:text-[12px] text-ui-text transition-opacity ${
+          isFrozen ? '' : 'opacity-60 [@media(max-height:520px)]:opacity-40 hover:opacity-100'}`}>
+          <span className="whitespace-nowrap font-mono tabular-nums min-w-[3.2em]">
             {!isFrozen ? 'live' : back > 0 ? `−${fmtBack(back)}` : 'newest'}
           </span>
           <input
@@ -959,11 +976,22 @@ export function EEGCanvas({
             }}
             aria-label="Scroll back in time"
             title={isFrozen ? 'Page back through the record' : 'Drag to pause and page back through the record'}
-            className="flex-1 accent-amber-500 cursor-pointer disabled:cursor-default"
+            className="ui-range flex-1 min-w-0 disabled:!opacity-100 disabled:cursor-default"
+            style={{ '--pct': `${backPct}%`, '--fill': isFrozen ? 'var(--ui-orange)' : 'var(--ui-accent)' } as React.CSSProperties}
           />
-          <span className="whitespace-nowrap font-mono text-amber-200/60">
+          <span className="hidden sm:inline whitespace-nowrap font-mono tabular-nums text-ui-text-2">
             {backMax > 0 ? `oldest −${fmtBack(backMax)}` : 'no history yet'}
           </span>
+          {[
+            { label: 'Page back', icon: <ChevronLeft className="w-4 h-4" />, to: back + page, off: backMax <= 0 || back >= backMax },
+            { label: 'Page forward', icon: <ChevronRight className="w-4 h-4" />, to: back - page, off: !isFrozen || back <= 0 },
+          ].map(b => (
+            <button key={b.label} type="button" aria-label={b.label} title={b.label} disabled={b.off}
+              onClick={() => { if (!isFrozen) setIsFrozen(true); scrollBack(b.to); }}
+              className="grid place-items-center shrink-0 w-7 h-7 pointer-coarse:w-10 pointer-coarse:h-10 [@media(max-height:520px)]:w-8 [@media(max-height:520px)]:h-8 rounded-full text-ui-accent hover:bg-ui-fill disabled:text-ui-text-3 disabled:hover:bg-transparent transition-colors">
+              {b.icon}
+            </button>
+          ))}
         </div>
       )}
     </div>

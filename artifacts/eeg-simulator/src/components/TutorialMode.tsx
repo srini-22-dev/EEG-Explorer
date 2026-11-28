@@ -74,38 +74,41 @@ export function TutorialMode({ onClose, setPatientState, setActivePatterns, setM
   const step = STEPS[stepIndex];
   
   return (
-    <div className="absolute inset-0 z-40 pointer-events-none flex items-end justify-center pb-24">
-      <div className="bg-slate-900/95 border border-slate-700 p-6 rounded-lg shadow-2xl w-[500px] text-slate-200 pointer-events-auto backdrop-blur">
-        <h2 className="text-xl font-bold mb-2 text-emerald-400">{step.title}</h2>
-        <p className="text-sm text-slate-300 mb-6">{step.desc}</p>
-        
-        <div className="flex justify-between items-center">
-          <div className="text-xs text-slate-500">
-            Step {stepIndex + 1} of {STEPS.length}
+    <div className="fixed inset-x-0 bottom-0 z-40 pointer-events-none flex justify-center px-3 pb-[max(12px,env(safe-area-inset-bottom))] [@media(min-width:768px)_and_(min-height:521px)]:pb-24">
+      <div role="dialog" aria-label={step.title}
+        className="ui-material pointer-events-auto w-full max-w-[520px] rounded-[18px] border border-ui-sep shadow-[var(--ui-shadow)] p-5 text-ui-text animate-in fade-in-0 slide-in-from-bottom-4 duration-300">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[12px] font-semibold text-ui-accent tabular-nums">Step {stepIndex + 1} of {STEPS.length}</div>
+          <div className="flex gap-1" aria-hidden="true">
+            {STEPS.map((_, i) => (
+              <span key={i} className={`h-1.5 rounded-full transition-all ${i === stepIndex ? 'w-4 bg-ui-accent' : 'w-1.5 bg-ui-fill-2'}`} />
+            ))}
           </div>
-          <div className="space-x-2">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => setStepIndex(s => Math.max(0, s - 1))}
-              disabled={stepIndex === 0}
-              className="border-slate-700 text-slate-300"
-            >
-              Previous
+        </div>
+        <h2 className="text-[20px] font-bold leading-tight mt-1.5">{step.title}</h2>
+        <p className="text-[14px] pointer-coarse:text-[15px] leading-relaxed text-ui-text-2 mt-2 mb-4">{step.desc}</p>
+
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Skip
+          </Button>
+          <div className="flex-1" />
+          <Button
+            variant="outline"
+            onClick={() => setStepIndex(s => Math.max(0, s - 1))}
+            disabled={stepIndex === 0}
+          >
+            Previous
+          </Button>
+          {stepIndex < STEPS.length - 1 ? (
+            <Button onClick={() => setStepIndex(s => s + 1)}>
+              Next
             </Button>
-            {stepIndex < STEPS.length - 1 ? (
-              <Button size="sm" onClick={() => setStepIndex(s => s + 1)} className="text-slate-900">
-                Next
-              </Button>
-            ) : (
-              <Button size="sm" onClick={onClose} className="bg-emerald-600 text-white">
-                Finish
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400">
-              Skip
+          ) : (
+            <Button onClick={onClose}>
+              Finish
             </Button>
-          </div>
+          )}
         </div>
       </div>
     </div>
